@@ -3,7 +3,7 @@
  * Sin dependencias: física mínima (gravedad + rotación + arrastre).
  */
 
-export const CONFETTI_COLORS = ['#1a3a6b', '#2a5494', '#d4e0ed', '#94a3b8', '#16a34a', '#091f3e']
+export const CONFETTI_COLORS = ['#1a3a6b', '#2a5494', '#d4e0ed', '#ffffff', '#9db8dc', '#94a3b8']
 
 interface Particle {
   x: number

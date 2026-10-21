@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { CameraOff } from 'lucide-react'
 import Webcam from 'react-webcam'
-import type { RefObject } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import type { PhotoboothStatus } from '../../hooks/usePhotobooth'
 import { CountdownOverlay } from './CountdownOverlay'
 import { FlashOverlay } from './FlashOverlay'
@@ -20,12 +20,15 @@ interface CameraStageProps {
   onCameraReady: () => void
   onCameraError: () => void
   onRetryCamera: () => void
+  /** Dock de controles (BoothControls), flotando sobre el borde inferior. */
+  children: ReactNode
 }
 
 /**
- * Visor de la cabina: feed vivo de la webcam enmarcado con esquinas tipo
- * viewfinder, badge "EN VIVO" y los overlays de cada estado (countdown,
- * flash, reveal del sketch, resultado final).
+ * Visor del robot sobre el escenario: feed vivo enmarcado por esquinas
+ * viewfinder con glow, barrido de luz ambiental y los overlays de cada
+ * estado. El estado se comunica con luz y composición — nunca con badges
+ * (regla AGENTS.MD / docs §17.6).
  */
 export function CameraStage({
   webcamRef,
@@ -39,12 +42,15 @@ export function CameraStage({
   onCameraReady,
   onCameraError,
   onRetryCamera,
+  children,
 }: CameraStageProps) {
-  const liveVisible = status === 'idle' || status === 'countdown'
+  const liveVisible = status === 'camera' || status === 'countdown'
+  const showFrame = !cameraError && (status === 'camera' || status === 'countdown' || status === 'capture')
+  const showVideo = status === 'camera' || status === 'countdown' || status === 'capture'
 
   return (
     <div className={`booth-stage is-${status}`}>
-      {!cameraError && (
+      {showVideo && !cameraError && (
         <Webcam
           key={webcamKey}
           ref={webcamRef}
@@ -78,32 +84,32 @@ export function CameraStage({
         )}
       </AnimatePresence>
 
-      {/* Transformación a sketch con línea de escaneo */}
-      {status === 'processing' && photo && (
+      {status === 'reveal' && photo && (
         <ProcessingOverlay photo={photo} sketch={sketch} progress={progress} />
       )}
 
-      {/* Resultado final */}
       <AnimatePresence>
-        {status === 'review' && sketch && (
-          <motion.img
-            key="sketch"
-            src={sketch}
-            alt="Tu retrato convertido en dibujo a lápiz"
-            className="booth-result-img"
-            initial={{ opacity: 0, scale: 1.015 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
-            draggable={false}
-          />
+        {status === 'confirm' && sketch && (
+          <motion.div
+            key="print"
+            className="booth-print"
+            initial={{ opacity: 0, y: 70, rotate: -9, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, rotate: -1.6, scale: 1 }}
+            exit={{ opacity: 0, y: 30, scale: 0.95 }}
+            transition={{ type: 'spring', stiffness: 190, damping: 21 }}
+          >
+            <div className="booth-print-frame">
+              <img src={sketch} alt="Tu retrato convertido en dibujo a lápiz" draggable={false} />
+              <span className="booth-print-caption">SYSCOM · Robot Dobot</span>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Barrido ambiental mientras la cabina está en reposo */}
-      {liveVisible && !cameraError && <div className="booth-scan" aria-hidden="true" />}
+      {/* Barrido de luz ambiental mientras el robot espera */}
+      {status === 'camera' && !cameraError && <div className="booth-scan" aria-hidden="true" />}
 
-      {!cameraError && status !== 'review' && (
+      {showFrame && (
         <>
           <span className="booth-corner booth-corner--tl" aria-hidden="true" />
           <span className="booth-corner booth-corner--tr" aria-hidden="true" />
@@ -112,19 +118,17 @@ export function CameraStage({
         </>
       )}
 
-      {liveVisible && !cameraError && (
-        <span className="badge booth-live">
-          <span className="booth-live-dot" aria-hidden="true" />
-          EN VIVO
-        </span>
-      )}
-
       <AnimatePresence>
-        {status === 'countdown' && <CountdownOverlay key="countdown" value={countdown} />}
+        {status === 'countdown' && countdown > 0 && (
+          <CountdownOverlay key="countdown" value={countdown} />
+        )}
       </AnimatePresence>
       <AnimatePresence>{status === 'capture' && <FlashOverlay key="flash" />}</AnimatePresence>
 
-      {/* Estado vacío: permisos de cámara denegados (patrón empty-state) */}
+      {/* Dock de controles flotante */}
+      <div className="booth-dock-wrap">{children}</div>
+
+      {/* Estado vacío: permisos de cámara denegados */}
       {cameraError && (
         <div className="booth-empty" role="alert">
           <span className="booth-empty-icon" aria-hidden="true">
@@ -132,10 +136,10 @@ export function CameraStage({
           </span>
           <p className="booth-empty-title">Necesitamos acceso a tu cámara</p>
           <p className="booth-empty-text">
-            Revisa los permisos del navegador para este sitio y vuelve a intentarlo. La cabina no
+            Revisa los permisos del navegador para este sitio y vuelve a intentarlo. No se
             guarda ninguna imagen.
           </p>
-          <button type="button" className="btn btn-secondary" onClick={onRetryCamera}>
+          <button type="button" className="btn booth-cta booth-cta--glass" onClick={onRetryCamera}>
             Reintentar
           </button>
         </div>
