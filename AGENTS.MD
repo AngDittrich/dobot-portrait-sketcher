@@ -1,0 +1,1 @@
+En el directorio windows/ está todo el proyecto funcionando en windows y en android es el código para el apk que funciona en dispositivos android. 
