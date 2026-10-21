@@ -1,0 +1,5 @@
+# Pesos de los modelos (unos 180 MB): se descargan con download_models.py
+models/
+.venv/
+__pycache__/
+*.pyc
