@@ -1,8 +1,8 @@
 # Estándar de Diseño (Design Context) — Portal de Licenciamiento SYSCOM
 
-> **Fuente de verdad**: este documento se deriva del código real del frontend (`frontend/src/styles/global.css`, `frontend/src/styles/presentation.css`, `frontend/index.html` y componentes en `frontend/src/`). Si el CSS cambia, este documento debe actualizarse.
+> **Fuente de verdad**: este documento se deriva del código real del frontend (`frontend/src/styles/global.css`, `frontend/src/styles/presentation.css`, `frontend/index.html` y componentes en `frontend/src/`) **y, desde la §17, también de la Cabina de Retratos (`windows/src/`)**. Si el CSS cambia, este documento debe actualizarse.
 >
-> **Alcance**: identidad visual y de marca **SYSCOM** — colores, tipografía, formas, bordes, sombras, espaciado, iconografía, motion y patrones de componentes de todo el portal (público, wizard, tutoriales, FAQ, presentación y panel admin). **Excluye** el branding de UNITREE (logos/fotos de robots: vivimos en un proyecto distribuidor; la marca visual del portal es SYSCOM).
+> **Alcance**: identidad visual y de marca **SYSCOM** — colores, tipografía, formas, bordes, sombras, espaciado, iconografía, motion y patrones de componentes de todo el portal (público, wizard, tutoriales, FAQ, presentación y panel admin) y de la Cabina de Retratos (§17). **Excluye** el branding de UNITREE (logos/fotos de robots: vivimos en un proyecto distribuidor; la marca visual del portal es SYSCOM).
 
 ---
 
@@ -370,3 +370,51 @@ El sistema evita hero banners; la profundidad viene de **glows radiales sutiles*
 | Login | `.login-*` + `frontend/src/pages/Admin.jsx` |
 | Presentación | `frontend/src/styles/presentation.css` + `frontend/src/components/presentation/*` |
 | Tema por tenant | variables `--tenant-*`, `[data-theme="dark"]` en `global.css` (spec: `docs/superpowers/specs/*`) |
+| Cabina de Retratos (§17) | `windows/src/styles/photobooth.css` + `windows/src/components/photobooth/*` + `windows/src/hooks/usePhotobooth.ts` |
+
+---
+
+## 17. Cabina de Retratos (`windows/`) — Modo escenario inmersivo
+
+La Cabina de Retratos es una **experiencia de una sola pantalla** (kiosco/photobooth): `100dvh`, **sin scroll**, todo el flujo (`idle → countdown → capture → processing → review`) ocurre dentro del visor. Es la segunda superficie de marca tras el portal y extiende el precedente del modo presentación a pantalla completa (§11.13): **el navy profundo es el escenario**.
+
+### 17.1 Escenario oscuro (fondo de la experiencia)
+
+- Base: `linear-gradient(180deg, #070f20, #04091a)` + glows radiales de marca (`#12294f` cenital, `rgba(26,58,107,0.4)` y `rgba(42,84,148,0.22)` laterales).
+- **Aurora**: dos blobs radiales (`--syscom-blue-accent` / `--blue-500`, blur 90px) con deriva lenta (26–32s) — profundidad sin distracción.
+- **Grano de película**: SVG `feTurbulence` inline a `opacity: 0.05` (textura, no ruido visual).
+- Texto base sobre escenario: `#e2e8f0`; secundarios `rgba(203,213,225,0.72)`; títulos `#fff`.
+
+### 17.2 Liquid glass (superficies flotantes)
+
+Reservado para el **dock de controles**, chips sobre el visor, brand bar y toasts — nunca para todo el panel (tendencia 2026: glass estratégico, no decorativo):
+
+- Fondo `rgba(7,15,32,0.55–0.78)` + `backdrop-filter: blur(12–16px)` + borde `1px rgba(255,255,255,0.12)` + highlight interno `inset 0 1px 0 rgba(255,255,255,0.08)`.
+- El dock es pill (`999px`) y flota centrado sobre el borde inferior del visor.
+
+### 17.3 Visor fotográfico
+
+- Card 4:3 con radio `18px`, borde `rgba(255,255,255,0.1)`, sombra profunda `0 30px 80px rgba(2,8,20,0.6)` + glow exterior `0 0 120px rgba(26,58,107,0.28)` y viñeta interna.
+- **Esquinas viewfinder**: `34px`, `2.5px rgba(255,255,255,0.85)`, glow `drop-shadow(0 0 6px rgba(42,84,148,0.8))`; pulsan durante la cuenta regresiva (anticipación).
+- **Barrido ambiental** en reposo: banda de luz azul muy sutil que cruza el visor cada ~5s (la cabina "respira").
+- El ancho del visor se deriva del alto disponible: `width: min(100%, calc((100dvh - var(--booth-chrome)) * 4 / 3))` — garantiza el encaje sin scroll.
+
+### 17.4 Momentos de la experiencia
+
+- **Cuenta regresiva**: dígito `800` con glow azul (`text-shadow` en `#3b82c4`/`--blue-100`) + anillo expansivo con glow; titular dinámico por estado (blur+fade, `0.28s`).
+- **Flash**: destello blanco `0→1→0.35→0` en `0.5s`.
+- **Processing**: reveal del sketch con `clip-path` descendente + **scanline** luminosa (`rgba(191,219,254,0.95)` + halo `#3b82c4`) + rail de progreso de `4px` en el borde inferior (gradiente `--syscom-blue-accent → --blue-500 → #3b82c4`).
+- **Review — impresión instantánea**: el sketch entra con spring como **foto impresa** (marco `#fdfdfc`, `padding 12/12/42`, radio `4px`, rotación `-1.6deg`, caption uppercase `--slate-400`), sombra `0 40px 90px rgba(2,8,20,0.65)`.
+- **CTA principal**: pill blanco (texto `--syscom-blue`) con glow `0 0 40px rgba(42,84,148,0.35)`; hover `translateY(-2px) scale(1.02)` + glow mayor. Secundarios: pill glass `rgba(255,255,255,0.09)`.
+
+### 17.5 Toasts oscuros
+
+Tarjeta glass (§17.2) con icono `Sparkles`/`Info` en `--blue-100`. **Sin badges semánticos estridentes ni acentos verdes** en esta superficie; la celebración la dan el confetti (paleta azules/blanco/slate) y el movimiento.
+
+### 17.6 PROHIBIDO: labels de estado genéricos
+
+**Regla del dueño del producto (también en `AGENTS.MD`):** quedan prohibidos los indicadores genéricos tipo "círculo verde + LIVE / EN VIVO", pills decorativas de estado y cualquier etiqueta que "grite" obviedad (se perciben como UI genérica hecha por IA). El estado se comunica con **luz, composición y movimiento**: el barrido ambiental implica reposo, el pulso de las esquinas implica cuenta regresiva, la scanline implica proceso.
+
+### 17.7 Logo sobre escenario
+
+El logo oficial (`assets/brand/syscomLargeLogo.webp`, servido desde `windows/public/brand/`) es **negro**: sobre el escenario oscuro siempre con `filter: brightness(0) invert(1)` (versión monocromática blanca, §2). Altura `26px` en brand bar, `draggable={false}`.
