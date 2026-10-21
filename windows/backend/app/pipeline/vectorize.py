@@ -123,8 +123,79 @@ def _edge(a: tuple[int, int], b: tuple[int, int]) -> tuple[tuple[int, int], tupl
     return (a, b) if a <= b else (b, a)
 
 
-def _walk(adjacency, used, nodes, start, first):
-    """Camina desde `start` por `first` hasta llegar a otro nodo o al final."""
+def _prune_short_branches(adjacency: dict, max_length: int) -> dict:
+    """Quita las ramas cortas que cuelgan de una bifurcación.
+
+    Al adelgazar una línea de 3 px el resultado tiene muchos "peldaños"
+    espurios: píxeles con 3 vecinos que cuelgan 1-2 px del trazo real.
+    Si no se podan, cada peldaño corta el trazo y el dibujo sale a trozos
+    (trazos de 20 px en vez de un arco de 600 px).
+    """
+    for _ in range(4):
+        branch = {p for p, n in adjacency.items() if len(n) >= 3}
+        if not branch:
+            break
+        removed = False
+        for node in list(branch):
+            for neighbour in list(adjacency.get(node, ())):
+                if len(adjacency.get(node, ())) < 3:
+                    continue
+                # Rama: desde el nodo hasta el siguiente nodo.
+                chain = [node, neighbour]
+                previous, current = node, neighbour
+                while len(adjacency.get(current, ())) == 2:
+                    following = [n for n in adjacency[current] if n != previous]
+                    if not following:
+                        break
+                    previous, current = current, following[0]
+                    chain.append(current)
+                if len(chain) > max_length:
+                    continue
+                for a, b in zip(chain, chain[1:]):
+                    adjacency.get(a, set()).discard(b)
+                    adjacency.get(b, set()).discard(a)
+                removed = True
+        # Píxeles que se quedaron sin vecinos.
+        adjacency = {p: n for p, n in adjacency.items() if n}
+        if not removed:
+            break
+    return adjacency
+
+
+def _pick_continuation(candidates, previous, current, path):
+    """Elige el vecino que mejor sigue la dirección del trazo.
+
+    En una bifurcación real (por ejemplo el marco de las gafas cruzando el
+    óvalo de la cara) lo natural es seguir recto y dejar la rama suelta.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Dirección de entrada: se promedian los últimos pasos para que un
+    # peldaño no dominen la decisión.
+    reference = path[-4] if len(path) >= 4 else previous
+    vx = current[0] - reference[0]
+    vy = current[1] - reference[1]
+    norm = math.hypot(vx, vy) or 1.0
+
+    best, best_score = candidates[0], -2.0
+    for candidate in candidates:
+        wx = candidate[0] - current[0]
+        wy = candidate[1] - current[1]
+        length = math.hypot(wx, wy) or 1.0
+        score = (vx * wx + vy * wy) / (norm * length)
+        if score > best_score:
+            best, best_score = candidate, score
+    return best
+
+
+def _walk(adjacency, used, start, first):
+    """Camina desde `start` por `first` siguiendo la dirección del trazo.
+
+    No se detiene en las bifurcaciones: sigue recto (la rama suelta se
+    recorre después como otro trazo). Así una línea continua aunque el
+    adelgazado haya dejado peldaños.
+    """
     path = [start]
     previous, current = start, first
     while True:
@@ -133,50 +204,52 @@ def _walk(adjacency, used, nodes, start, first):
             break
         used.add(edge)
         path.append(current)
-        if current in nodes:
-            break
         candidates = [n for n in adjacency[current] if _edge(current, n) not in used]
         if not candidates:
             break
-        previous, current = current, candidates[0]
+        nxt = _pick_continuation(candidates, previous, current, path)
+        previous, current = current, nxt
     return path
 
 
 def extract_strokes(
     skeleton: np.ndarray,
     min_length_px: float = 6.0,
-    spur_length_px: float = 14.0,
+    spur_length_px: int = 6,
 ) -> list[np.ndarray]:
-    """Convierte el esqueleto en polilíneas (ramas entre nodos).
+    """Convierte el esqueleto en polilíneas (trazos continuos).
 
-    Los nodos son los extremos (grado 1) y las bifurcaciones (grado >= 3).
-    Las ramas muy cortas que cuelgan de una bifurcación se podan porque
-    son ruido del adelgazado.
+    Primero se podan las ramas cortas (ruido del adelgazado) y después se
+    recorre el grafo siguiendo la dirección, de modo que un arco continuo
+    salga como **un** trazo y no como veinte.
     """
     adjacency = _build_adjacency(skeleton)
     if not adjacency:
         return []
+    adjacency = _prune_short_branches(adjacency, spur_length_px)
 
-    nodes = {pixel for pixel, neighbours in adjacency.items() if len(neighbours) != 2}
     used: set = set()
     paths: list[list[tuple[int, int]]] = []
 
-    # Desde cada nodo hacia cada vecino todavía sin usar.
-    for node in nodes:
-        for neighbour in adjacency[node]:
-            if _edge(node, neighbour) in used:
+    # 1) Desde los extremos (grado 1): son el principio natural de un trazo.
+    for pixel, neighbours in list(adjacency.items()):
+        if len(neighbours) != 1:
+            continue
+        for neighbour in neighbours:
+            if _edge(pixel, neighbour) in used:
                 continue
-            path = _walk(adjacency, used, nodes, node, neighbour)
+            path = _walk(adjacency, used, pixel, neighbour)
             if len(path) > 1:
                 paths.append(path)
 
-    # Bucles cerrados sin nodos (grado 2 en todo el contorno).
-    for pixel in adjacency:
-        if all(_edge(pixel, n) in used for n in adjacency[pixel]):
-            continue
-        path = _walk(adjacency, used, nodes, pixel, next(iter(adjacency[pixel])))
-        if len(path) > 1:
-            paths.append(path)
+    # 2) Resto: bucles cerrados y ramas que quedaron sueltas.
+    for pixel, neighbours in list(adjacency.items()):
+        for neighbour in neighbours:
+            if _edge(pixel, neighbour) in used:
+                continue
+            path = _walk(adjacency, used, pixel, neighbour)
+            if len(path) > 1:
+                paths.append(path)
 
     strokes: list[np.ndarray] = []
     for path in paths:
@@ -415,6 +488,27 @@ def build_trajectory(
 # ---------------------------------------------------------------------------
 # 5. Render para verificación visual
 # ---------------------------------------------------------------------------
+
+
+def render_black_strokes(
+    strokes: list[np.ndarray],
+    width: int,
+    height: int,
+    thickness: int = 2,
+) -> np.ndarray:
+    """Dibuja los trazos en negro sobre blanco (tal como saldrán en el papel).
+
+    La vista previa usa esto en vez de la máscara binaria: así se ve el
+    dibujo de líneas fino que realmente dibuja el robot, y no los manchas
+    gruesas que produce el XDoG antes de adelgazar.
+    """
+    canvas = np.full((height, width, 3), 255, dtype=np.uint8)
+    for points in strokes:
+        if len(points) < 2:
+            continue
+        polyline = np.round(points).astype(np.int32).reshape(-1, 1, 2)
+        cv2.polylines(canvas, [polyline], False, (17, 24, 39), int(thickness), cv2.LINE_AA)
+    return canvas
 
 
 def render_strokes(

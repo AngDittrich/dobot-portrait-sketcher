@@ -64,7 +64,7 @@ class SketchParams(BaseModel):
     target_width_mm: float = Field(140.0, ge=20.0, le=400.0)
     spacing_mm: float = Field(1.5, ge=0.2, le=10.0)
     simplify_px: float = Field(0.9, ge=0.0, le=5.0)
-    min_stroke_px: float = Field(8.0, ge=1.0, le=80.0)
+    min_stroke_px: float = Field(12.0, ge=1.0, le=80.0)
 
 
 class SketchRequest(BaseModel):
@@ -108,8 +108,9 @@ def build_sketch(image, params: SketchParams) -> dict:
         spacing_mm=params.spacing_mm,
     )
 
-    # Vista previa: fondo blanco con las líneas en negro.
-    preview = 255 - mask
+    # Vista previa: exactamente las líneas que dibuja el robot (finas, sobre
+    # blanco). Antes se mostraba la máscara binaria y se veía gruesa y sucia.
+    preview = vectorize_ops.render_black_strokes(ordered, crop_width, crop_height, thickness=2)
     svg = vectorize_ops.strokes_to_svg(ordered, crop_width, crop_height)
 
     return {
