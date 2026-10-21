@@ -1,6 +1,8 @@
+import { PhotoboothApp } from './components/photobooth/PhotoboothApp'
+import './styles/photobooth.css'
+
 function App() {
-  // Placeholder temporal: la experiencia PhotoboothApp se monta en el siguiente cambio.
-  return null
+  return <PhotoboothApp />
 }
 
 export default App
