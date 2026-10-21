@@ -1,8 +1,8 @@
 # Estándar de Diseño (Design Context) — Portal de Licenciamiento SYSCOM
 
-> **Fuente de verdad**: este documento se deriva del código real del frontend (`frontend/src/styles/global.css`, `frontend/src/styles/presentation.css`, `frontend/index.html` y componentes en `frontend/src/`) **y, desde la §17, también de la Cabina de Retratos (`windows/src/`)**. Si el CSS cambia, este documento debe actualizarse.
+> **Fuente de verdad**: este documento se deriva del código real del frontend (`frontend/src/styles/global.css`, `frontend/src/styles/presentation.css`, `frontend/index.html` y componentes en `frontend/src/`) **y, desde la §17, también del robot Dobot (`windows/src/`)**. Si el CSS cambia, este documento debe actualizarse.
 >
-> **Alcance**: identidad visual y de marca **SYSCOM** — colores, tipografía, formas, bordes, sombras, espaciado, iconografía, motion y patrones de componentes de todo el portal (público, wizard, tutoriales, FAQ, presentación y panel admin) y de la Cabina de Retratos (§17). **Excluye** el branding de UNITREE (logos/fotos de robots: vivimos en un proyecto distribuidor; la marca visual del portal es SYSCOM).
+> **Alcance**: identidad visual y de marca **SYSCOM** — colores, tipografía, formas, bordes, sombras, espaciado, iconografía, motion y patrones de componentes de todo el portal (público, wizard, tutoriales, FAQ, presentación y panel admin) y del robot Dobot (§17). **Excluye** el branding de UNITREE (logos/fotos de robots: vivimos en un proyecto distribuidor; la marca visual del portal es SYSCOM).
 
 ---
 
@@ -370,13 +370,13 @@ El sistema evita hero banners; la profundidad viene de **glows radiales sutiles*
 | Login | `.login-*` + `frontend/src/pages/Admin.jsx` |
 | Presentación | `frontend/src/styles/presentation.css` + `frontend/src/components/presentation/*` |
 | Tema por tenant | variables `--tenant-*`, `[data-theme="dark"]` en `global.css` (spec: `docs/superpowers/specs/*`) |
-| Cabina de Retratos (§17) | `windows/src/styles/photobooth.css` + `windows/src/components/photobooth/*` + `windows/src/hooks/usePhotobooth.ts` |
+| Robot Dobot (§17) | `windows/src/styles/photobooth.css` + `windows/src/components/photobooth/*` + `windows/src/hooks/usePhotobooth.ts` |
 
 ---
 
-## 17. Cabina de Retratos (`windows/`) — Modo escenario inmersivo
+## 17. Robot Dobot (`windows/`) — Modo escenario inmersivo
 
-La Cabina de Retratos es una **experiencia de una sola pantalla** (kiosco/photobooth): `100dvh`, **sin scroll**, todo el flujo (`idle → countdown → capture → processing → review`) ocurre dentro del visor. Es la segunda superficie de marca tras el portal y extiende el precedente del modo presentación a pantalla completa (§11.13): **el navy profundo es el escenario**.
+El robot Dobot es una **experiencia de una sola pantalla**: `100dvh`, **sin scroll**, todo el flujo (`idle → countdown → capture → processing → review`) ocurre dentro del visor. Es la segunda superficie de marca tras el portal y extiende el precedente del modo presentación a pantalla completa (§11.13): **el navy profundo es el escenario**. El dibujante es el brazo robótico Dobot.
 
 ### 17.1 Escenario oscuro (fondo de la experiencia)
 
@@ -396,7 +396,7 @@ Reservado para el **dock de controles**, chips sobre el visor, brand bar y toast
 
 - Card 4:3 con radio `18px`, borde `rgba(255,255,255,0.1)`, sombra profunda `0 30px 80px rgba(2,8,20,0.6)` + glow exterior `0 0 120px rgba(26,58,107,0.28)` y viñeta interna.
 - **Esquinas viewfinder**: `34px`, `2.5px rgba(255,255,255,0.85)`, glow `drop-shadow(0 0 6px rgba(42,84,148,0.8))`; pulsan durante la cuenta regresiva (anticipación).
-- **Barrido ambiental** en reposo: banda de luz azul muy sutil que cruza el visor cada ~5s (la cabina "respira").
+- **Barrido ambiental** en reposo: banda de luz azul muy sutil que cruza el visor cada ~5s (el visor "respira" mientras el robot espera).
 - El ancho del visor se deriva del alto disponible: `width: min(100%, calc((100dvh - var(--booth-chrome)) * 4 / 3))` — garantiza el encaje sin scroll.
 
 ### 17.4 Momentos de la experiencia

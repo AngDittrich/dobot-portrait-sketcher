@@ -4,7 +4,7 @@ import type Webcam from 'react-webcam'
 import { generateSketch } from '../lib/sketch'
 
 /**
- * Máquina de estados de la Cabina de Retratos.
+ * Máquina de estados del retrato con el robot Dobot.
  *
  *   idle → countdown → capture → processing → review → (idle)
  *

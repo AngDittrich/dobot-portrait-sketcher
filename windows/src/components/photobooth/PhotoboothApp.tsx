@@ -19,7 +19,7 @@ const HEADINGS: Record<PhotoboothStatus, string> = {
 
 /** Mensajes para tecnologías de asistencia (aria-live). */
 const STATUS_MESSAGES: Record<PhotoboothStatus, string> = {
-  idle: 'Cabina lista. Pulsa "¡Tomar Foto!" para comenzar.',
+  idle: 'Robot listo. Pulsa "¡Tomar Foto!" para comenzar.',
   countdown: 'Cuenta regresiva en curso.',
   capture: 'Foto capturada.',
   processing: 'Dibujando tu retrato.',
@@ -70,7 +70,7 @@ export function PhotoboothApp() {
             draggable={false}
           />
           <span className="booth-brand-divider" aria-hidden="true" />
-          <span className="booth-product">Cabina de Retratos</span>
+          <span className="booth-product">Robot Dobot</span>
           <span className="booth-demo-note">Modo demo · Sin robot conectado</span>
         </div>
       </header>
@@ -84,7 +84,7 @@ export function PhotoboothApp() {
           </AnimatePresence>
           {booth.status === 'idle' && (
             <p className="booth-subtitle">
-              Tómate una foto — la cabina la convierte en arte en segundos.
+              Tómate una foto — el robot Dobot la dibuja en segundos.
             </p>
           )}
         </div>

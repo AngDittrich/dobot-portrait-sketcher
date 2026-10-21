@@ -25,7 +25,7 @@ interface CameraStageProps {
 }
 
 /**
- * Visor de la cabina sobre el escenario: feed vivo enmarcado por esquinas
+ * Visor del robot sobre el escenario: feed vivo enmarcado por esquinas
  * viewfinder con glow, barrido de luz ambiental y los overlays de cada
  * estado. El estado se comunica con luz y composición — nunca con badges
  * (regla AGENTS.MD / docs §17.6).
@@ -101,13 +101,13 @@ export function CameraStage({
           >
             <div className="booth-print-frame">
               <img src={sketch} alt="Tu retrato convertido en dibujo a lápiz" draggable={false} />
-              <span className="booth-print-caption">SYSCOM · Cabina de Retratos</span>
+              <span className="booth-print-caption">SYSCOM · Robot Dobot</span>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Barrido de luz ambiental mientras la cabina está en reposo */}
+      {/* Barrido de luz ambiental mientras el robot espera */}
       {status === 'idle' && !cameraError && <div className="booth-scan" aria-hidden="true" />}
 
       {showFrame && (
@@ -135,7 +135,7 @@ export function CameraStage({
           </span>
           <p className="booth-empty-title">Necesitamos acceso a tu cámara</p>
           <p className="booth-empty-text">
-            Revisa los permisos del navegador para este sitio y vuelve a intentarlo. La cabina no
+            Revisa los permisos del navegador para este sitio y vuelve a intentarlo. No se
             guarda ninguna imagen.
           </p>
           <button type="button" className="btn booth-cta booth-cta--glass" onClick={onRetryCamera}>
