@@ -5,6 +5,7 @@ import type { PhotoboothStatus } from '../../hooks/usePhotobooth'
 import { BoothControls } from './BoothControls'
 import { CameraStage } from './CameraStage'
 import { ConfettiCanvas } from './ConfettiCanvas'
+import { RobotStatus } from './RobotStatus'
 import { Toast } from './Toast'
 
 /** Mensajes para tecnologías de asistencia (aria-live). */
@@ -44,7 +45,7 @@ export function PhotoboothApp() {
           <span className="booth-wordmark">SYSCOM</span>
           <span className="booth-brand-divider" aria-hidden="true" />
           <span className="booth-product">Cabina de Retratos</span>
-          <span className="booth-demo-badge">Demo UI · sin robot conectado</span>
+          <span className="booth-demo-badge">Demo UI · robot simulado</span>
         </div>
       </header>
 
@@ -70,6 +71,8 @@ export function PhotoboothApp() {
           onCameraError={handleCameraError}
           onRetryCamera={retryCamera}
         />
+
+        <RobotStatus job={booth.robotJob} />
 
         <BoothControls
           status={booth.status}
