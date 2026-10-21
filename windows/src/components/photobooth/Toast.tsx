@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { CheckCircle2, Info, X } from 'lucide-react'
+import { Info, Sparkles, X } from 'lucide-react'
 import type { ToastData } from '../../hooks/usePhotobooth'
 
 interface ToastProps {
@@ -8,9 +8,9 @@ interface ToastProps {
 }
 
 /**
- * Aviso flotante inferior (patrón alert de la guía: acento lateral de 4px
- * en el color semántico). Entra con slide-up; el auto-cierre lo orquesta
- * `usePhotobooth` (TOAST_MS).
+ * Aviso flotante inferior: tarjeta oscura "glass" coherente con el
+ * escenario (docs §17.5). Sin colores semánticos estridentes ni badges
+ * genéricos; el auto-cierre lo orquesta `usePhotobooth` (TOAST_MS).
  */
 export function Toast({ toast, onDismiss }: ToastProps) {
   return (
@@ -19,7 +19,7 @@ export function Toast({ toast, onDismiss }: ToastProps) {
         {toast && (
           <motion.div
             key={toast.id}
-            className={`booth-toast booth-toast--${toast.kind}`}
+            className="booth-toast"
             role="status"
             initial={{ opacity: 0, y: 24, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -27,7 +27,7 @@ export function Toast({ toast, onDismiss }: ToastProps) {
             transition={{ type: 'spring', stiffness: 380, damping: 28 }}
           >
             <span className="booth-toast-icon" aria-hidden="true">
-              {toast.kind === 'success' ? <CheckCircle2 size={18} /> : <Info size={18} />}
+              {toast.kind === 'success' ? <Sparkles size={18} /> : <Info size={18} />}
             </span>
             <span className="booth-toast-message">{toast.message}</span>
             <button

@@ -1,30 +1,95 @@
 /* ============================================================
-   Cabina de Retratos — estilos de la experiencia
-   Tokens y patrones base en ./global.css (docs/design-standards.md)
-   Z-index: brandbar 300 · confetti 350 · toast 400 (escala §10)
+   Cabina de Retratos — Modo escenario inmersivo (docs §17)
+   - Una sola pantalla: 100dvh, sin scroll
+   - Escenario navy oscuro con aurora, grano y glows
+   - Dock "liquid glass", impresión tipo polaroid, toast oscuro
+   - Sin badges de estado genéricos (regla AGENTS.MD / docs §17.6)
    ============================================================ */
 
-/* ---------- Shell ---------- */
+/* ---------- Shell: escenario oscuro a viewport completo ---------- */
 .booth-shell {
-  min-height: 100dvh;
+  --booth-chrome: 13.5rem; /* header + heading + paddings (para encajar el visor) */
+  position: relative;
+  height: 100dvh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
+  color: #e2e8f0;
+  background:
+    radial-gradient(1100px 640px at 50% -18%, #12294f 0%, transparent 62%),
+    radial-gradient(900px 620px at 112% 112%, rgba(26, 58, 107, 0.4), transparent 58%),
+    radial-gradient(700px 500px at -12% 108%, rgba(42, 84, 148, 0.22), transparent 55%),
+    linear-gradient(180deg, #070f20 0%, #04091a 100%);
 }
 
-/* ---------- Brand bar (§11.1) ---------- */
+/* ---------- Ambient: aurora lenta + grano de película ---------- */
+.booth-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.booth-aurora {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+}
+
+.booth-aurora--a {
+  width: 44vw;
+  height: 44vw;
+  left: -12vw;
+  top: -14vw;
+  background: radial-gradient(circle, rgba(26, 58, 107, 0.55), transparent 65%);
+  animation: boothDriftA 26s ease-in-out infinite alternate;
+}
+
+.booth-aurora--b {
+  width: 38vw;
+  height: 38vw;
+  right: -10vw;
+  bottom: -16vw;
+  background: radial-gradient(circle, rgba(42, 84, 148, 0.4), transparent 65%);
+  animation: boothDriftB 32s ease-in-out infinite alternate;
+}
+
+@keyframes boothDriftA {
+  to {
+    transform: translate(6vw, 5vh) scale(1.12);
+  }
+}
+
+@keyframes boothDriftB {
+  to {
+    transform: translate(-5vw, -6vh) scale(1.08);
+  }
+}
+
+.booth-noise {
+  position: absolute;
+  inset: 0;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+}
+
+/* ---------- Brand bar: glass navy ---------- */
 .booth-brandbar {
-  position: sticky;
-  top: 0;
-  z-index: 300;
+  position: relative;
+  z-index: 1;
   height: 64px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  background: var(--syscom-blue);
+  background: rgba(7, 15, 32, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .booth-brandbar-inner {
-  width: min(1080px, 100%);
+  width: min(1180px, 100%);
   margin: 0 auto;
   padding: 0 1.25rem;
   display: flex;
@@ -32,11 +97,11 @@
   gap: 0.9rem;
 }
 
-.booth-wordmark {
-  color: #fff;
-  font-weight: 800;
-  font-size: 1.05rem;
-  letter-spacing: 0.08em;
+/* Logo oficial: el asset es negro → se invierte a blanco sobre oscuro (docs §2) */
+.booth-logo {
+  height: 26px;
+  width: auto;
+  filter: brightness(0) invert(1);
 }
 
 .booth-brand-divider {
@@ -51,67 +116,85 @@
   font-weight: 500;
 }
 
-.booth-demo-badge {
+.booth-demo-note {
   margin-left: auto;
   font-size: 0.72rem;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: var(--radius-pill);
-  padding: 0.25rem 0.7rem;
-  white-space: nowrap;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(226, 232, 240, 0.45);
 }
 
-/* ---------- Main / encabezado ---------- */
+/* ---------- Main + encabezado dinámico ---------- */
 .booth-main {
+  position: relative;
+  z-index: 1;
   flex: 1;
-  width: min(1080px, 100%);
+  min-height: 0;
+  width: min(1180px, 100%);
   margin: 0 auto;
-  padding: 2.25rem 1.25rem 2.5rem;
+  padding: 1rem 1.25rem 1.25rem;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
+/* Altura reservada fija: el visor nunca salta cuando cambia el texto */
 .booth-heading {
-  text-align: center;
+  min-height: 4.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  justify-content: center;
+  gap: 0.3rem;
+  text-align: center;
 }
 
 .booth-title {
-  font-size: clamp(1.55rem, 3vw, 2rem);
+  font-size: clamp(1.3rem, 2vw + 0.6rem, 1.8rem);
   font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.02em;
   line-height: 1.15;
 }
 
 .booth-subtitle {
-  color: var(--slate-500);
-  font-size: 0.95rem;
+  color: rgba(203, 213, 225, 0.72);
+  font-size: 0.92rem;
 }
 
 /* ---------- Visor (stage) ---------- */
-.booth-stage {
-  position: relative;
-  width: min(880px, 100%);
-  aspect-ratio: 4 / 3;
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  background: var(--slate-900);
-  border: 1px solid var(--slate-200);
-  box-shadow: var(--shadow-lg);
+.booth-stage-wrap {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
 }
 
-/* Viñeta interna sutil: profundidad de "visor fotográfico" */
+.booth-stage {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  /* El ancho se deriva del alto disponible: siempre cabe sin scroll */
+  width: min(100%, calc((100dvh - var(--booth-chrome)) * 4 / 3));
+  max-height: 100%;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #050b18;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 30px 80px rgba(2, 8, 20, 0.6),
+    0 0 120px rgba(26, 58, 107, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Viñeta interna sutil: profundidad de visor fotográfico */
 .booth-stage::after {
   content: '';
   position: absolute;
   inset: 0;
   z-index: 3;
-  box-shadow: inset 0 0 120px rgba(4, 16, 31, 0.32);
+  box-shadow: inset 0 0 110px rgba(2, 8, 20, 0.45);
   pointer-events: none;
 }
 
@@ -136,53 +219,53 @@
   z-index: 2;
 }
 
-/* ---------- Esquinas viewfinder ---------- */
+/* ---------- Esquinas viewfinder con glow ---------- */
 .booth-corner {
   position: absolute;
   z-index: 11;
-  width: 30px;
-  height: 30px;
-  border: 3px solid rgba(255, 255, 255, 0.92);
-  filter: drop-shadow(0 1px 2px rgba(4, 16, 31, 0.6));
+  width: 34px;
+  height: 34px;
+  border: 2.5px solid rgba(255, 255, 255, 0.85);
+  filter: drop-shadow(0 0 6px rgba(42, 84, 148, 0.8));
   pointer-events: none;
   transition: border-color 0.15s ease;
 }
 
 .booth-corner--tl {
-  top: 14px;
-  left: 14px;
+  top: 18px;
+  left: 18px;
   border-right: 0;
   border-bottom: 0;
-  border-top-left-radius: 6px;
+  border-top-left-radius: 8px;
 }
 
 .booth-corner--tr {
-  top: 14px;
-  right: 14px;
+  top: 18px;
+  right: 18px;
   border-left: 0;
   border-bottom: 0;
-  border-top-right-radius: 6px;
+  border-top-right-radius: 8px;
 }
 
 .booth-corner--bl {
-  bottom: 14px;
-  left: 14px;
+  bottom: 18px;
+  left: 18px;
   border-right: 0;
   border-top: 0;
-  border-bottom-left-radius: 6px;
+  border-bottom-left-radius: 8px;
 }
 
 .booth-corner--br {
-  bottom: 14px;
-  right: 14px;
+  bottom: 18px;
+  right: 18px;
   border-left: 0;
   border-top: 0;
-  border-bottom-right-radius: 6px;
+  border-bottom-right-radius: 8px;
 }
 
 /* Anticipación durante la cuenta regresiva */
 .booth-stage.is-countdown .booth-corner {
-  border-color: var(--blue-100);
+  border-color: #fff;
   animation: boothCornerPulse 1s ease-in-out infinite;
 }
 
@@ -192,73 +275,41 @@
     opacity: 1;
   }
   50% {
-    opacity: 0.35;
+    opacity: 0.3;
   }
 }
 
-/* ---------- Badge EN VIVO ---------- */
-.booth-live {
-  position: absolute;
-  top: 16px;
-  left: 18px;
-  z-index: 12;
-  background: rgba(9, 31, 62, 0.62);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(4px);
-  font-size: 0.7rem;
-  letter-spacing: 0.05em;
-}
-
-.booth-live-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--green-600);
-  animation: boothLivePulse 1.6s ease-in-out infinite;
-}
-
-@keyframes boothLivePulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.55);
-  }
-  50% {
-    box-shadow: 0 0 0 6px rgba(22, 163, 74, 0);
-  }
-}
-
-/* ---------- Barrido ambiental (idle) ---------- */
+/* ---------- Barrido ambiental (idle): luz que "respira" ---------- */
 .booth-scan {
   position: absolute;
   left: 0;
   right: 0;
-  top: -25%;
-  height: 22%;
+  top: -20%;
+  height: 18%;
   z-index: 4;
-  background: linear-gradient(180deg, transparent, rgba(212, 224, 237, 0.14), transparent);
+  background: linear-gradient(180deg, transparent, rgba(157, 184, 220, 0.1), transparent);
   pointer-events: none;
-  animation: boothScan 4.6s ease-in-out infinite;
+  animation: boothScan 5.2s ease-in-out infinite;
 }
 
 @keyframes boothScan {
   0% {
-    top: -25%;
+    top: -20%;
     opacity: 0;
   }
-  12% {
+  14% {
     opacity: 1;
   }
-  88% {
+  86% {
     opacity: 1;
   }
   100% {
-    top: 110%;
+    top: 108%;
     opacity: 0;
   }
 }
 
-/* ---------- Cuenta regresiva ---------- */
+/* ---------- Cuenta regresiva cinematográfica ---------- */
 .booth-countdown {
   position: absolute;
   inset: 0;
@@ -280,8 +331,9 @@
   line-height: 1;
   color: #fff;
   text-shadow:
-    0 6px 40px rgba(4, 16, 31, 0.55),
-    0 2px 8px rgba(4, 16, 31, 0.4);
+    0 0 80px rgba(59, 130, 196, 0.85),
+    0 0 28px rgba(212, 224, 237, 0.55),
+    0 4px 24px rgba(2, 8, 20, 0.6);
 }
 
 .booth-countdown-ring {
@@ -289,23 +341,10 @@
   width: clamp(9rem, 24vw, 14rem);
   height: clamp(9rem, 24vw, 14rem);
   border-radius: 50%;
-  border: 4px solid rgba(255, 255, 255, 0.75);
-}
-
-.booth-countdown-hint {
-  position: absolute;
-  bottom: 1.6rem;
-  left: 50%;
-  transform: translateX(-50%);
-  margin: 0;
-  background: rgba(9, 31, 62, 0.62);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(4px);
-  padding: 0.35rem 0.9rem;
-  border-radius: var(--radius-pill);
-  font-size: 0.8rem;
-  font-weight: 600;
+  border: 3px solid rgba(212, 224, 237, 0.8);
+  box-shadow:
+    0 0 30px rgba(59, 130, 196, 0.5),
+    inset 0 0 30px rgba(59, 130, 196, 0.3);
 }
 
 /* ---------- Flash ---------- */
@@ -317,7 +356,7 @@
   pointer-events: none;
 }
 
-/* ---------- Processing: reveal + scanline ---------- */
+/* ---------- Processing: reveal + scanline + rail de progreso ---------- */
 .booth-processing {
   position: absolute;
   inset: 0;
@@ -328,47 +367,32 @@
   position: absolute;
   left: 0;
   right: 0;
-  height: 3px;
+  height: 2px;
   z-index: 6;
-  background: linear-gradient(90deg, transparent, rgba(157, 184, 220, 0.95), transparent);
-  box-shadow: 0 0 18px 4px rgba(42, 84, 148, 0.5);
+  background: linear-gradient(90deg, transparent, rgba(191, 219, 254, 0.95), transparent);
+  box-shadow: 0 0 24px 6px rgba(59, 130, 196, 0.55);
   transition: top 0.08s linear;
   pointer-events: none;
 }
 
-.booth-processing-chip {
+.booth-progress-rail {
   position: absolute;
-  left: 18px;
-  bottom: 16px;
-  z-index: 7;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: rgba(9, 31, 62, 0.68);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(4px);
-  border-radius: var(--radius-pill);
-  padding: 0.4rem 0.9rem;
-  font-size: 0.8rem;
-  font-weight: 600;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  z-index: 9;
+  background: rgba(255, 255, 255, 0.08);
 }
 
-.booth-processing-icon {
-  animation: boothWiggle 1s ease-in-out infinite;
+.booth-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--syscom-blue-accent), var(--blue-500), #3b82c4);
+  box-shadow: 0 0 16px rgba(59, 130, 196, 0.8);
+  transition: width 0.1s linear;
 }
 
-@keyframes boothWiggle {
-  0%,
-  100% {
-    transform: rotate(-8deg);
-  }
-  50% {
-    transform: rotate(8deg);
-  }
-}
-
-/* Puntos suspensivos animados ("Dibujando tu retrato…") */
+/* Puntos suspensivos animados */
 .booth-dots::after {
   content: '';
   animation: boothDots 1.4s steps(4) infinite;
@@ -389,65 +413,6 @@
   }
 }
 
-/* ---------- Zona de acción ---------- */
-.booth-actions {
-  width: min(880px, 100%);
-  min-height: 132px;
-  display: grid;
-  place-items: center;
-}
-
-.booth-actions-block {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.85rem;
-}
-
-/* CTA principal: pill grande (§5/§11.3) con elevación contenida (§6) */
-.booth-cta {
-  border-radius: var(--radius-pill);
-  padding: 0.95rem 2.4rem;
-  font-size: 1.05rem;
-  font-weight: 700;
-  min-height: 54px;
-  box-shadow: 0 8px 24px rgba(9, 31, 62, 0.24);
-}
-
-.booth-cta:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 28px rgba(9, 31, 62, 0.3);
-}
-
-.booth-cta:active:not(:disabled) {
-  transform: scale(0.98);
-}
-
-.booth-cta--secondary {
-  box-shadow: none;
-}
-
-.booth-hint {
-  color: var(--slate-500);
-  font-size: 0.875rem;
-}
-
-/* Píldoras de estado (countdown / capture / processing) */
-.booth-status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
-  margin: 0;
-  background: #fff;
-  border: 1px solid var(--slate-200);
-  box-shadow: var(--shadow);
-  color: var(--slate-700);
-  font-weight: 600;
-  font-size: 0.925rem;
-  border-radius: var(--radius-pill);
-  padding: 0.6rem 1.2rem;
-}
-
 .booth-spin {
   animation: boothSpin 0.9s linear infinite;
 }
@@ -458,44 +423,150 @@
   }
 }
 
-/* Barra de progreso pill (§5/§11.13) */
-.booth-progress {
-  width: min(420px, 72vw);
-  height: 8px;
-  border-radius: var(--radius-pill);
-  background: var(--slate-200);
-  overflow: hidden;
-}
-
-.booth-progress-fill {
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--syscom-blue), var(--blue-500));
-  transition: width 0.1s linear;
-}
-
-/* ---------- Review ---------- */
-.booth-review {
+/* ---------- Dock de controles: liquid glass ---------- */
+.booth-dock-wrap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 20px;
+  z-index: 16;
   display: flex;
-  flex-direction: column;
+  justify-content: center;
+  padding: 0 1rem;
+  pointer-events: none;
+}
+
+.booth-dock {
+  pointer-events: auto;
+  display: flex;
   align-items: center;
-  gap: 0.9rem;
+  gap: 1rem;
+  background: rgba(7, 15, 32, 0.58);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-pill);
+  padding: 0.55rem 0.6rem 0.55rem 1.4rem;
+  box-shadow:
+    0 16px 48px rgba(2, 8, 20, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-.booth-review-title {
-  font-size: 1.15rem;
+/* Cuando el dock solo contiene el CTA, padding simétrico */
+.booth-dock:has(> .booth-cta:only-child) {
+  padding-left: 0.6rem;
+}
+
+.booth-dock-text {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: #e2e8f0;
+  font-weight: 600;
+  font-size: 0.95rem;
+  padding-right: 0.4rem;
+  white-space: nowrap;
+}
+
+.booth-dock-text strong {
+  color: #fff;
+  font-size: 1.1rem;
+}
+
+/* CTA tipo obturador: blanco sobre el escenario oscuro */
+.booth-cta {
+  border-radius: var(--radius-pill);
+  padding: 0.8rem 1.9rem;
+  min-height: 50px;
+  font-size: 1rem;
   font-weight: 700;
-  color: var(--slate-900);
+  background: #fff;
+  color: var(--syscom-blue);
+  box-shadow:
+    0 10px 30px rgba(2, 8, 20, 0.4),
+    0 0 40px rgba(42, 84, 148, 0.35);
 }
 
+.booth-cta:hover:not(:disabled) {
+  background: var(--blue-50);
+  transform: translateY(-2px) scale(1.02);
+  box-shadow:
+    0 14px 36px rgba(2, 8, 20, 0.45),
+    0 0 56px rgba(42, 84, 148, 0.5);
+}
+
+.booth-cta:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* Variante glass: acciones secundarias sobre el escenario */
+.booth-cta--glass {
+  background: rgba(255, 255, 255, 0.09);
+  color: #e2e8f0;
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: none;
+}
+
+.booth-cta--glass:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  box-shadow: none;
+}
+
+/* Review dentro del dock */
 .booth-review-actions {
   display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  justify-content: center;
+  align-items: center;
+  gap: 0.6rem;
 }
 
-/* ---------- Empty state (permisos de cámara) ---------- */
+/* ---------- Impresión tipo polaroid (review) ---------- */
+.booth-print {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  padding: 5%;
+}
+
+.booth-print-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-width: 86%;
+  max-height: 100%;
+  background: #fdfdfc;
+  padding: 12px 12px 42px;
+  border-radius: 4px;
+  box-shadow:
+    0 40px 90px rgba(2, 8, 20, 0.65),
+    0 0 0 1px rgba(2, 8, 20, 0.2);
+}
+
+.booth-print-frame img {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  max-width: 100%;
+  object-fit: contain;
+  border-radius: 2px;
+}
+
+.booth-print-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  text-align: center;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--slate-400);
+}
+
+/* ---------- Empty state (permisos de cámara) sobre el escenario ---------- */
 .booth-empty {
   position: absolute;
   inset: 0;
@@ -505,8 +576,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.75rem;
-  background: var(--slate-50);
-  color: var(--slate-500);
+  color: rgba(203, 213, 225, 0.75);
   text-align: center;
   padding: 1.5rem;
 }
@@ -515,16 +585,17 @@
   width: 3.5rem;
   height: 3.5rem;
   border-radius: 50%;
-  background: var(--slate-100);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   display: grid;
   place-items: center;
-  color: var(--slate-400);
+  color: rgba(226, 232, 240, 0.7);
 }
 
 .booth-empty-title {
   font-size: 1.05rem;
   font-weight: 700;
-  color: var(--slate-800);
+  color: #fff;
 }
 
 .booth-empty-text {
@@ -537,7 +608,7 @@
   margin-top: 0.35rem;
 }
 
-/* ---------- Toast (patrón alert §11.8) ---------- */
+/* ---------- Toast oscuro glass ---------- */
 .booth-toast-wrap {
   position: fixed;
   left: 0;
@@ -554,38 +625,24 @@
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  background: #fff;
-  border: 1px solid var(--slate-200);
-  border-left-width: 4px;
+  background: rgba(7, 15, 32, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 20px 60px rgba(2, 8, 20, 0.6);
   padding: 0.7rem 0.9rem;
   max-width: min(440px, calc(100vw - 2rem));
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--slate-700);
-}
-
-.booth-toast--success {
-  border-left-color: var(--green-600);
-}
-
-.booth-toast--success .booth-toast-icon {
-  color: var(--green-600);
-}
-
-.booth-toast--info {
-  border-left-color: var(--syscom-blue-accent);
-}
-
-.booth-toast--info .booth-toast-icon {
-  color: var(--syscom-blue-accent);
+  color: #e2e8f0;
 }
 
 .booth-toast-icon {
   display: grid;
   place-items: center;
   flex-shrink: 0;
+  color: var(--blue-100);
 }
 
 .booth-toast-close {
@@ -597,7 +654,7 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--slate-400);
+  color: rgba(226, 232, 240, 0.5);
   cursor: pointer;
   transition:
     background 0.15s ease,
@@ -605,8 +662,8 @@
 }
 
 .booth-toast-close:hover {
-  background: var(--slate-100);
-  color: var(--slate-600);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
 }
 
 /* ---------- Confetti ---------- */
@@ -619,11 +676,10 @@
   z-index: 350;
 }
 
-/* ---------- Footer ---------- */
-.booth-footer {
-  display: flex;
-  justify-content: center;
-  padding: 1rem 1.25rem 1.5rem;
+/* ---------- Focus visible sobre escenario oscuro ---------- */
+.booth-shell button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(157, 184, 220, 0.4);
 }
 
 /* ---------- Utilidades ---------- */
@@ -639,24 +695,47 @@
   border: 0;
 }
 
-/* ---------- Responsive (breakpoints §7) ---------- */
+/* ---------- Responsive y alturas cortas ---------- */
+@media (max-height: 720px) {
+  .booth-shell {
+    --booth-chrome: 10.5rem;
+  }
+
+  .booth-heading {
+    min-height: 3rem;
+  }
+
+  .booth-subtitle {
+    display: none;
+  }
+}
+
 @media (max-width: 768px) {
   .booth-main {
-    padding: 1.5rem 1rem 2rem;
-    gap: 1.15rem;
+    padding: 0.9rem 0.9rem 1rem;
+  }
+
+  .booth-dock {
+    flex-wrap: wrap;
+    justify-content: center;
+    border-radius: 24px;
+    padding: 0.7rem 0.9rem;
+    row-gap: 0.6rem;
+  }
+
+  .booth-dock-text {
+    white-space: normal;
+    justify-content: center;
   }
 
   .booth-cta {
-    width: min(340px, 100%);
+    padding: 0.75rem 1.4rem;
+    min-height: 48px;
   }
 
   .booth-review-actions {
-    flex-direction: column;
-    width: min(340px, 100%);
-  }
-
-  .booth-review-actions .booth-cta {
     width: 100%;
+    justify-content: center;
   }
 }
 
@@ -666,25 +745,26 @@
     display: none;
   }
 
-  .booth-demo-badge {
-    font-size: 0.68rem;
+  .booth-demo-note {
+    font-size: 0.66rem;
   }
 }
 
 @media (max-width: 480px) {
   .booth-title {
-    font-size: 1.4rem;
-  }
-
-  .booth-subtitle {
-    font-size: 0.875rem;
+    font-size: 1.3rem;
   }
 
   .booth-stage {
-    border-radius: var(--radius);
+    border-radius: 14px;
   }
 
-  .booth-actions {
-    min-height: 150px;
+  .booth-corner {
+    width: 26px;
+    height: 26px;
+  }
+
+  .booth-dock-wrap {
+    bottom: 12px;
   }
 }
