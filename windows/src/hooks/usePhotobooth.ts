@@ -4,15 +4,24 @@ import type Webcam from 'react-webcam'
 import { generateSketch } from '../lib/sketch'
 
 /**
- * Máquina de estados del retrato con el robot Dobot.
+ * Wizard de la Cabina de Retratos.
  *
- *   idle → countdown → capture → processing → review → (idle)
+ *   attract → camera → countdown → capture → reveal → confirm
+ *        → drawing → thanks → attract
  *
- * Toda la orquestación de timers (cuenta regresiva, flash, progreso del
- * "dibujo") vive aquí para que los componentes sean puramente visuales.
+ * "TOMAR OTRA" vuelve a `camera`. Si una sección que espera al usuario
+ * no cambia en 3 minutos, todo regresa a `attract`.
  */
 
-export type PhotoboothStatus = 'idle' | 'countdown' | 'capture' | 'processing' | 'review'
+export type PhotoboothStatus =
+  | 'attract'
+  | 'camera'
+  | 'countdown'
+  | 'capture'
+  | 'reveal'
+  | 'confirm'
+  | 'drawing'
+  | 'thanks'
 
 export interface ToastData {
   id: number
@@ -22,39 +31,51 @@ export interface ToastData {
 
 interface PhotoboothState {
   status: PhotoboothStatus
-  /** Valor visible de la cuenta regresiva (3..1). */
   countdown: number
-  /** Frame congelado (dataURL) tal cual salió de la webcam. */
   photo: string | null
-  /** Retrato final en estilo sketch (dataURL). */
   sketch: string | null
-  /** Progreso 0..1 de la "transformación" a sketch. */
+  /** Progreso 0..1 del reveal (iris + transformación a sketch). */
   progress: number
   toast: ToastData | null
-  /** Se incrementa para disparar una ráfaga de confetti. */
   celebrationId: number
 }
 
 type Action =
+  | { type: 'BEGIN' }
   | { type: 'START' }
   | { type: 'TICK' }
   | { type: 'CAPTURED'; photo: string }
-  | { type: 'PROCESSING' }
+  | { type: 'REVEAL' }
   | { type: 'PROGRESS'; value: number }
-  | { type: 'PROCESSED'; sketch: string }
-  | { type: 'RESET'; toast?: ToastData; celebrate?: boolean }
+  | { type: 'REVEALED'; sketch: string }
+  | { type: 'DRAW' }
+  | { type: 'THANKS' }
+  | { type: 'RETAKE' }
+  | { type: 'TIMEOUT' }
+  | { type: 'ATTRACT'; toast?: ToastData }
   | { type: 'DISMISS_TOAST'; id: number }
 
 export const COUNTDOWN_FROM = 3
-/** Duración del flash de cámara antes de pasar a processing. */
 export const FLASH_MS = 550
-/** Duración total (mínima) de la animación de "dibujo". */
-export const PROCESSING_MS = 2800
-/** Tiempo visible de un toast. */
+/** Iris de entrada de la foto, antes de que empiece el grafito. */
+export const IRIS_MS = 900
+/** Transformación foto → sketch. */
+export const SKETCH_MS = 3200
+export const REVEAL_MS = IRIS_MS + SKETCH_MS
+/** Fracción del reveal que corresponde al iris. */
+export const IRIS_SHARE = IRIS_MS / REVEAL_MS
+/** El robot "dibuja" este tiempo antes del cierre. */
+export const DRAWING_MS = 3000
+/** El agradecimiento vuelve solo a la bienvenida. */
+export const THANKS_MS = 8000
+/** Misma sección sin avanzar: reinicio completo. */
+export const SECTION_TIMEOUT_MS = 3 * 60 * 1000
 export const TOAST_MS = 3200
 
+const CAMERA_FLOW: PhotoboothStatus[] = ['camera', 'countdown', 'capture', 'reveal', 'confirm']
+
 const initialState: PhotoboothState = {
-  status: 'idle',
+  status: 'attract',
   countdown: COUNTDOWN_FROM,
   photo: null,
   sketch: null,
@@ -63,30 +84,43 @@ const initialState: PhotoboothState = {
   celebrationId: 0,
 }
 
+function cleared(status: PhotoboothStatus, extra?: Partial<PhotoboothState>): PhotoboothState {
+  return {
+    ...initialState,
+    status,
+    celebrationId: extra?.celebrationId ?? 0,
+    toast: extra?.toast ?? null,
+  }
+}
+
 function reducer(state: PhotoboothState, action: Action): PhotoboothState {
   switch (action.type) {
+    case 'BEGIN':
+      return cleared('camera', { celebrationId: state.celebrationId })
     case 'START':
-      return {
-        ...initialState,
-        status: 'countdown',
-        celebrationId: state.celebrationId,
-      }
+      return { ...state, status: 'countdown', countdown: COUNTDOWN_FROM }
     case 'TICK':
       return { ...state, countdown: state.countdown - 1 }
     case 'CAPTURED':
-      return { ...state, status: 'capture', photo: action.photo }
-    case 'PROCESSING':
-      return { ...state, status: 'processing', progress: 0 }
+      return { ...state, status: 'capture', photo: action.photo, sketch: null, progress: 0 }
+    case 'REVEAL':
+      return { ...state, status: 'reveal', progress: 0 }
     case 'PROGRESS':
       return { ...state, progress: action.value }
-    case 'PROCESSED':
-      return { ...state, status: 'review', sketch: action.sketch, progress: 1 }
-    case 'RESET':
-      return {
-        ...initialState,
-        toast: action.toast ?? null,
-        celebrationId: action.celebrate ? state.celebrationId + 1 : state.celebrationId,
-      }
+    case 'REVEALED':
+      return { ...state, status: 'confirm', sketch: action.sketch, progress: 1 }
+    case 'DRAW':
+      return { ...state, status: 'drawing' }
+    case 'THANKS':
+      return { ...state, status: 'thanks', celebrationId: state.celebrationId + 1 }
+    case 'RETAKE':
+      return cleared('camera', { celebrationId: state.celebrationId })
+    case 'TIMEOUT':
+    case 'ATTRACT':
+      return cleared('attract', {
+        celebrationId: state.celebrationId,
+        toast: action.type === 'ATTRACT' ? action.toast : null,
+      })
     case 'DISMISS_TOAST':
       return state.toast?.id === action.id ? { ...state, toast: null } : state
     default:
@@ -101,7 +135,7 @@ function makeToast(kind: ToastData['kind'], message: string): ToastData {
 export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
   const [state, dispatch] = useReducer(reducer, initialState)
 
-  /* --- countdown: ticks de 1s; al llegar a 0 se congela el frame --- */
+  /* Cuenta regresiva: al llegar a 0 se congela el frame. */
   useEffect(() => {
     if (state.status !== 'countdown') return
 
@@ -111,7 +145,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
         dispatch({ type: 'CAPTURED', photo })
       } else {
         dispatch({
-          type: 'RESET',
+          type: 'ATTRACT',
           toast: makeToast('info', 'No pudimos leer la cámara. Inténtalo de nuevo.'),
         })
       }
@@ -122,16 +156,16 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     return () => clearTimeout(timer)
   }, [state.status, state.countdown, webcamRef])
 
-  /* --- capture: el flash permanece un instante y arranca el "dibujo" --- */
+  /* Flash breve y arranca el reveal. */
   useEffect(() => {
     if (state.status !== 'capture') return
-    const timer = setTimeout(() => dispatch({ type: 'PROCESSING' }), FLASH_MS)
+    const timer = setTimeout(() => dispatch({ type: 'REVEAL' }), FLASH_MS)
     return () => clearTimeout(timer)
   }, [state.status])
 
-  /* --- processing: progreso animado + generación del sketch en paralelo --- */
+  /* Reveal: iris + sketch en paralelo con el progreso visual. */
   useEffect(() => {
-    if (state.status !== 'processing' || !state.photo) return
+    if (state.status !== 'reveal' || !state.photo) return
 
     let cancelled = false
     let sketchResult: string | null = null
@@ -140,12 +174,11 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
 
     const maybeFinish = () => {
       if (!cancelled && sketchReady && progressDone && sketchResult) {
-        dispatch({ type: 'PROCESSED', sketch: sketchResult })
+        dispatch({ type: 'REVEALED', sketch: sketchResult })
       }
     }
 
-    // TODO(BACKEND): aquí se enviará `state.photo` a la API real
-    // (POST /api/sketch) en lugar de la simulación local en canvas.
+    // TODO(BACKEND): sustituir la simulación local por POST /api/sketch.
     generateSketch(state.photo)
       .then((sketch) => {
         sketchResult = sketch
@@ -155,7 +188,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
       .catch(() => {
         if (!cancelled) {
           dispatch({
-            type: 'RESET',
+            type: 'ATTRACT',
             toast: makeToast('info', 'Algo salió mal al dibujar. Probemos otra vez.'),
           })
         }
@@ -165,7 +198,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     let raf = 0
     const step = () => {
       if (cancelled) return
-      const value = Math.min(1, (performance.now() - startedAt) / PROCESSING_MS)
+      const value = Math.min(1, (performance.now() - startedAt) / REVEAL_MS)
       dispatch({ type: 'PROGRESS', value })
       if (value < 1) {
         raf = requestAnimationFrame(step)
@@ -182,7 +215,30 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     }
   }, [state.status, state.photo])
 
-  /* --- toast: auto-dismiss --- */
+  /* El robot dibuja 3 s y pasa al cierre. */
+  useEffect(() => {
+    if (state.status !== 'drawing') return
+    const timer = setTimeout(() => dispatch({ type: 'THANKS' }), DRAWING_MS)
+    return () => clearTimeout(timer)
+  }, [state.status])
+
+  /* El agradecimiento regresa solo a la bienvenida. */
+  useEffect(() => {
+    if (state.status !== 'thanks') return
+    const timer = setTimeout(() => dispatch({ type: 'TIMEOUT' }), THANKS_MS)
+    return () => clearTimeout(timer)
+  }, [state.status])
+
+  /**
+   * Misma sección 3 minutos → bienvenida.
+   * `drawing` y `thanks` tienen su propio delay corto.
+   */
+  useEffect(() => {
+    if (state.status === 'drawing' || state.status === 'thanks') return
+    const timer = setTimeout(() => dispatch({ type: 'TIMEOUT' }), SECTION_TIMEOUT_MS)
+    return () => clearTimeout(timer)
+  }, [state.status])
+
   useEffect(() => {
     if (!state.toast) return
     const id = state.toast.id
@@ -190,27 +246,15 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     return () => clearTimeout(timer)
   }, [state.toast])
 
-  /** idle → countdown (CTA "¡Tomar Foto!"). */
+  const begin = useCallback(() => dispatch({ type: 'BEGIN' }), [])
   const start = useCallback(() => dispatch({ type: 'START' }), [])
 
-  /** review → idle conservando nada; celebración con confetti. */
   const accept = useCallback(() => {
-    // TODO(BACKEND/ROBOT): aquí se enviará al backend la orden de dibujo
-    // (POST /api/jobs con el sketch aprobado) para que el robot Dobot lo trace.
-    dispatch({
-      type: 'RESET',
-      celebrate: true,
-      toast: makeToast('success', '¡Retrato aprobado! Pronto lo dibujaremos por ti.'),
-    })
+    // TODO(BACKEND/ROBOT): POST /api/jobs con el sketch aprobado para que el Dobot lo trace.
+    dispatch({ type: 'DRAW' })
   }, [])
 
-  /** review → idle descartando la foto. */
-  const retake = useCallback(() => {
-    dispatch({
-      type: 'RESET',
-      toast: makeToast('info', 'Sin problema — ¡vamos por una mejor toma!'),
-    })
-  }, [])
+  const retake = useCallback(() => dispatch({ type: 'RETAKE' }), [])
 
   const dismissToast = useCallback(() => {
     dispatch({ type: 'DISMISS_TOAST', id: state.toast?.id ?? -1 })
@@ -218,7 +262,8 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
 
   return {
     ...state,
-    isBusy: state.status !== 'idle' && state.status !== 'review',
+    inCameraFlow: CAMERA_FLOW.includes(state.status),
+    begin,
     start,
     accept,
     retake,
