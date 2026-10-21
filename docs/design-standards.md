@@ -376,7 +376,7 @@ El sistema evita hero banners; la profundidad viene de **glows radiales sutiles*
 
 ## 17. Robot Dobot (`windows/`) — Modo escenario inmersivo
 
-El robot Dobot es una **experiencia de una sola pantalla**: `100dvh`, **sin scroll**, todo el flujo (`idle → countdown → capture → processing → review`) ocurre dentro del visor. Es la segunda superficie de marca tras el portal y extiende el precedente del modo presentación a pantalla completa (§11.13): **el navy profundo es el escenario**. El dibujante es el brazo robótico Dobot.
+El robot Dobot es un **wizard de una sola pantalla**: `100dvh`, **sin scroll**. El flujo es `attract → camera → countdown → capture → reveal → confirm → drawing → thanks → attract`. Es la segunda superficie de marca tras el portal y extiende el precedente del modo presentación a pantalla completa (§11.13): **el navy profundo es el escenario**. El dibujante es el brazo robótico Dobot.
 
 ### 17.1 Escenario oscuro (fondo de la experiencia)
 
@@ -403,8 +403,8 @@ Reservado para el **dock de controles**, chips sobre el visor, brand bar y toast
 
 - **Cuenta regresiva**: dígito `800` con glow azul (`text-shadow` en `#3b82c4`/`--blue-100`) + anillo expansivo con glow; titular dinámico por estado (blur+fade, `0.28s`).
 - **Flash**: destello blanco `0→1→0.35→0` en `0.5s`.
-- **Processing**: reveal del sketch con `clip-path` descendente + **scanline** luminosa (`rgba(191,219,254,0.95)` + halo `#3b82c4`) + rail de progreso de `4px` en el borde inferior (gradiente `--syscom-blue-accent → --blue-500 → #3b82c4`).
-- **Review — impresión instantánea**: el sketch entra con spring como **foto impresa** (marco `#fdfdfc`, `padding 12/12/42`, radio `4px`, rotación `-1.6deg`, caption uppercase `--slate-400`), sombra `0 40px 90px rgba(2,8,20,0.65)`.
+- **Reveal**: la foto entra en iris (`clip-path: circle`) durante ~0.9s y después el sketch la cubre en diagonal (`polygon` + banda `linear-gradient(135deg)`). Rail de progreso de `4px` en el borde inferior.
+- **Confirm — impresión instantánea**: el sketch entra con spring como **foto impresa** (marco `#fdfdfc`, `padding 12/12/42`, radio `4px`, rotación `-1.6deg`, caption uppercase `--slate-400`), sombra `0 40px 90px rgba(2,8,20,0.65)`. Debajo, dos botones grandes anclados: **TOMAR OTRA** (rojo `--red-600` con halo, izquierda, vuelve a `camera`) y **¡SÍ!** (blanco con brillo amplio, derecha, pasa a `drawing`).
 - **CTA principal**: pill blanco (texto `--syscom-blue`) con glow `0 0 40px rgba(42,84,148,0.35)`; hover `translateY(-2px) scale(1.02)` + glow mayor. Secundarios: pill glass `rgba(255,255,255,0.09)`.
 
 ### 17.5 Toasts oscuros
@@ -418,3 +418,12 @@ Tarjeta glass (§17.2) con icono `Sparkles`/`Info` en `--blue-100`. **Sin badges
 ### 17.7 Logo sobre escenario
 
 El logo oficial (`assets/brand/syscomLargeLogo.webp`, servido desde `windows/public/brand/`) es **negro**: sobre el escenario oscuro siempre con `filter: brightness(0) invert(1)` (versión monocromática blanca, §2). Altura `26px` en brand bar, `draggable={false}`.
+
+### 17.8 Wizard, robot y reinicio
+
+- **attract**: foto real `assets/robot/dobotsayinghello.webp` (servida en `windows/public/robot/`) + “Tómate una foto, evalúala, envíala y recibe tu dibujo robótico” + **COMENZAR**.
+- **drawing** (3 s): `assets/robot/dobotidlemarker.webp` y “El robot está dibujando tu imagen ahora”. Ahí vive el `TODO` de la orden al Dobot.
+- **thanks** (~8 s): “LISTO. TOMA TU DIBUJO.” / “SYSCOM agradece tu visita.” y `windows/public/wizard/portrait-ready.jpg`. Vuelve solo a `attract`.
+- Las fotos del robot van sobre negro: se integran con `mix-blend-mode: lighten`. **No** se invierten; el filtro blanco es solo del logo.
+- **Timeout:** si `attract`, `camera`, `countdown`, `capture`, `reveal` o `confirm` no cambian en **3 minutos**, el wizard vuelve a `attract` y borra foto y sketch. `drawing` y `thanks` no usan ese timer.
+- Sin indicadores de paso (“1/4”, dots, pills). El avance es la escena.
