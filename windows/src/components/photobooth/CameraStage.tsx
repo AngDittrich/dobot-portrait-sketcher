@@ -44,12 +44,13 @@ export function CameraStage({
   onRetryCamera,
   children,
 }: CameraStageProps) {
-  const liveVisible = status === 'idle' || status === 'countdown'
-  const showFrame = !cameraError && status !== 'processing' && status !== 'review'
+  const liveVisible = status === 'camera' || status === 'countdown'
+  const showFrame = !cameraError && (status === 'camera' || status === 'countdown' || status === 'capture')
+  const showVideo = status === 'camera' || status === 'countdown' || status === 'capture'
 
   return (
     <div className={`booth-stage is-${status}`}>
-      {!cameraError && (
+      {showVideo && !cameraError && (
         <Webcam
           key={webcamKey}
           ref={webcamRef}
@@ -83,14 +84,12 @@ export function CameraStage({
         )}
       </AnimatePresence>
 
-      {/* Transformación a sketch con línea de escaneo */}
-      {status === 'processing' && photo && (
+      {status === 'reveal' && photo && (
         <ProcessingOverlay photo={photo} sketch={sketch} progress={progress} />
       )}
 
-      {/* Resultado: el retrato se "imprime" como una instantánea */}
       <AnimatePresence>
-        {status === 'review' && sketch && (
+        {status === 'confirm' && sketch && (
           <motion.div
             key="print"
             className="booth-print"
@@ -108,7 +107,7 @@ export function CameraStage({
       </AnimatePresence>
 
       {/* Barrido de luz ambiental mientras el robot espera */}
-      {status === 'idle' && !cameraError && <div className="booth-scan" aria-hidden="true" />}
+      {status === 'camera' && !cameraError && <div className="booth-scan" aria-hidden="true" />}
 
       {showFrame && (
         <>
@@ -120,7 +119,9 @@ export function CameraStage({
       )}
 
       <AnimatePresence>
-        {status === 'countdown' && <CountdownOverlay key="countdown" value={countdown} />}
+        {status === 'countdown' && countdown > 0 && (
+          <CountdownOverlay key="countdown" value={countdown} />
+        )}
       </AnimatePresence>
       <AnimatePresence>{status === 'capture' && <FlashOverlay key="flash" />}</AnimatePresence>
 

@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { Camera, Heart, Loader2, RotateCcw } from 'lucide-react'
+import { Camera, Loader2 } from 'lucide-react'
 import type { PhotoboothStatus } from '../../hooks/usePhotobooth'
 
 interface BoothControlsProps {
@@ -8,8 +8,6 @@ interface BoothControlsProps {
   progress: number
   cameraError: boolean
   onStart: () => void
-  onAccept: () => void
-  onRetake: () => void
 }
 
 const dockAnimation = {
@@ -20,8 +18,8 @@ const dockAnimation = {
 } as const
 
 /**
- * Dock flotante "liquid glass" sobre el visor: un único punto de acción
- * que cambia según el momento del flujo (CTA obturador, estado, decisión).
+ * Dock del visor durante la toma y el reveal.
+ * La decisión (TOMAR OTRA / ¡SÍ!) vive fuera, anclada a las esquinas.
  */
 export function BoothControls({
   status,
@@ -29,16 +27,13 @@ export function BoothControls({
   progress,
   cameraError,
   onStart,
-  onAccept,
-  onRetake,
 }: BoothControlsProps) {
-  // Con el empty-state de permisos visible, el dock no estorba
-  if (cameraError) return null
+  if (cameraError || status === 'confirm') return null
 
   return (
     <AnimatePresence mode="wait">
-      {status === 'idle' && (
-        <motion.div key="idle" className="booth-dock" {...dockAnimation}>
+      {status === 'camera' && (
+        <motion.div key="camera" className="booth-dock" {...dockAnimation}>
           <button type="button" className="btn booth-cta" onClick={onStart}>
             <Camera size={20} aria-hidden="true" />
             ¡Tomar Foto!
@@ -46,7 +41,7 @@ export function BoothControls({
         </motion.div>
       )}
 
-      {status === 'countdown' && (
+      {status === 'countdown' && countdown > 0 && (
         <motion.div key="countdown" className="booth-dock" {...dockAnimation}>
           <span className="booth-dock-text">
             Foto en <strong>{countdown}</strong>
@@ -60,41 +55,21 @@ export function BoothControls({
         </motion.div>
       )}
 
-      {status === 'processing' && (
-        <motion.div key="processing" className="booth-dock" {...dockAnimation}>
+      {status === 'reveal' && (
+        <motion.div key="reveal" className="booth-dock" {...dockAnimation}>
           <span className="booth-dock-text">
             <Loader2 size={16} className="booth-spin" aria-hidden="true" />
             <span
               className="booth-dots"
               role="progressbar"
-              aria-label="Progreso del dibujo"
+              aria-label="Transformación a dibujo"
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round(progress * 100)}
             >
-              Dibujando tu retrato
+              Convirtiendo tu foto
             </span>
           </span>
-        </motion.div>
-      )}
-
-      {status === 'review' && (
-        <motion.div key="review" className="booth-dock" {...dockAnimation}>
-          <span className="booth-dock-text">¿Qué te parece?</span>
-          <div className="booth-review-actions">
-            <button type="button" className="btn booth-cta" onClick={onAccept}>
-              <Heart size={18} aria-hidden="true" />
-              ¡Me encanta!
-            </button>
-            <button
-              type="button"
-              className="btn booth-cta booth-cta--glass"
-              onClick={onRetake}
-            >
-              <RotateCcw size={16} aria-hidden="true" />
-              Repetir
-            </button>
-          </div>
         </motion.div>
       )}
     </AnimatePresence>

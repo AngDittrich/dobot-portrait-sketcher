@@ -6,24 +6,28 @@ import type { PhotoboothStatus } from '../../hooks/usePhotobooth'
 import { BoothControls } from './BoothControls'
 import { CameraStage } from './CameraStage'
 import { ConfettiCanvas } from './ConfettiCanvas'
+import { DrawingScreen } from './DrawingScreen'
+import { ThanksScreen } from './ThanksScreen'
 import { Toast } from './Toast'
+import { WelcomeScreen } from './WelcomeScreen'
 
-/** Titular dinámico según el momento del flujo. */
-const HEADINGS: Record<PhotoboothStatus, string> = {
-  idle: 'Tu retrato, dibujado a lápiz',
+const HEADINGS: Partial<Record<PhotoboothStatus, string>> = {
+  camera: 'Encuadre tu retrato',
   countdown: 'Mantén la pose…',
   capture: '¡Perfecta!',
-  processing: 'Trazando tu retrato',
-  review: 'Tu retrato está listo',
+  reveal: 'De foto a lápiz',
+  confirm: '¿Listo para ser dibujado?',
 }
 
-/** Mensajes para tecnologías de asistencia (aria-live). */
 const STATUS_MESSAGES: Record<PhotoboothStatus, string> = {
-  idle: 'Robot listo. Pulsa "¡Tomar Foto!" para comenzar.',
+  attract: 'Bienvenida. Pulsa COMENZAR para tomar tu foto.',
+  camera: 'Cámara lista. Pulsa Tomar Foto.',
   countdown: 'Cuenta regresiva en curso.',
   capture: 'Foto capturada.',
-  processing: 'Dibujando tu retrato.',
-  review: 'Retrato listo. Elige "¡Me encanta!" o "Repetir foto".',
+  reveal: 'Convirtiendo tu foto en un dibujo.',
+  confirm: 'Retrato listo. Elige TOMAR OTRA o SÍ.',
+  drawing: 'El robot está dibujando tu imagen ahora.',
+  thanks: 'Listo. Toma tu dibujo. SYSCOM agradece tu visita.',
 }
 
 const headingAnimation = {
@@ -34,9 +38,8 @@ const headingAnimation = {
 } as const
 
 /**
- * Orquestador de la experiencia: escenario inmersivo de una sola pantalla
- * (100dvh, sin scroll) con brand bar glass, titular dinámico, visor con
- * dock de controles y capas globales (toast + confetti).
+ * Wizard de una sola pantalla: bienvenida, toma, reveal, confirmación,
+ * dibujo del robot y agradecimiento.
  */
 export function PhotoboothApp() {
   const webcamRef = useRef<Webcam>(null)
@@ -51,9 +54,10 @@ export function PhotoboothApp() {
     setWebcamKey((key) => key + 1)
   }, [])
 
+  const heading = HEADINGS[booth.status]
+
   return (
     <div className="booth-shell">
-      {/* Ambiente: aurora de marca + grano de película */}
       <div className="booth-ambient" aria-hidden="true">
         <span className="booth-aurora booth-aurora--a" />
         <span className="booth-aurora booth-aurora--b" />
@@ -62,7 +66,6 @@ export function PhotoboothApp() {
 
       <header className="booth-brandbar">
         <div className="booth-brandbar-inner">
-          {/* El logo oficial es negro: se invierte a blanco sobre oscuro (docs §2) */}
           <img
             src="/brand/syscomLargeLogo.webp"
             alt="SYSCOM"
@@ -76,52 +79,87 @@ export function PhotoboothApp() {
       </header>
 
       <main className="booth-main">
-        <div className="booth-heading">
-          <AnimatePresence mode="wait">
-            <motion.h1 key={booth.status} className="booth-title" {...headingAnimation}>
-              {HEADINGS[booth.status]}
-            </motion.h1>
-          </AnimatePresence>
-          {booth.status === 'idle' && (
-            <p className="booth-subtitle">
-              Tómate una foto — el robot Dobot la dibuja en segundos.
-            </p>
+        <AnimatePresence mode="wait">
+          {booth.status === 'attract' && (
+            <WelcomeScreen key="attract" onBegin={booth.begin} />
           )}
-        </div>
 
-        <div className="booth-stage-wrap">
-          <CameraStage
-            webcamRef={webcamRef}
-            webcamKey={webcamKey}
-            status={booth.status}
-            countdown={booth.countdown}
-            photo={booth.photo}
-            sketch={booth.sketch}
-            progress={booth.progress}
-            cameraError={cameraError}
-            onCameraReady={handleCameraReady}
-            onCameraError={handleCameraError}
-            onRetryCamera={retryCamera}
-          >
-            <BoothControls
-              status={booth.status}
-              countdown={booth.countdown}
-              progress={booth.progress}
-              cameraError={cameraError}
-              onStart={booth.start}
-              onAccept={booth.accept}
-              onRetake={booth.retake}
-            />
-          </CameraStage>
-        </div>
+          {booth.inCameraFlow && (
+            <motion.div
+              key="camera-flow"
+              className="booth-flow"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
+            >
+              <div className="booth-heading">
+                <AnimatePresence mode="wait">
+                  {heading && (
+                    <motion.h1 key={booth.status} className="booth-title" {...headingAnimation}>
+                      {heading}
+                    </motion.h1>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              <div className="booth-stage-wrap">
+                <CameraStage
+                  webcamRef={webcamRef}
+                  webcamKey={webcamKey}
+                  status={booth.status}
+                  countdown={booth.countdown}
+                  photo={booth.photo}
+                  sketch={booth.sketch}
+                  progress={booth.progress}
+                  cameraError={cameraError}
+                  onCameraReady={handleCameraReady}
+                  onCameraError={handleCameraError}
+                  onRetryCamera={retryCamera}
+                >
+                  <BoothControls
+                    status={booth.status}
+                    countdown={booth.countdown}
+                    progress={booth.progress}
+                    cameraError={cameraError}
+                    onStart={booth.start}
+                  />
+                </CameraStage>
+              </div>
+            </motion.div>
+          )}
+
+          {booth.status === 'drawing' && <DrawingScreen key="drawing" />}
+          {booth.status === 'thanks' && <ThanksScreen key="thanks" />}
+        </AnimatePresence>
       </main>
+
+      <AnimatePresence>
+        {booth.status === 'confirm' && (
+          <motion.div
+            key="choices"
+            className="booth-choices"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            transition={{ type: 'spring', stiffness: 280, damping: 24 }}
+          >
+            <button type="button" className="btn booth-cta booth-cta--glass booth-choice" onClick={booth.retake}>
+              TOMAR OTRA
+            </button>
+            <button type="button" className="btn booth-cta booth-choice" onClick={booth.accept}>
+              ¡SÍ!
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <Toast toast={booth.toast} onDismiss={booth.dismissToast} />
       <ConfettiCanvas trigger={booth.celebrationId} />
 
       <p className="sr-only" aria-live="polite">
         {STATUS_MESSAGES[booth.status]}
-        {booth.status === 'countdown' ? ` ${booth.countdown}` : ''}
+        {booth.status === 'countdown' && booth.countdown > 0 ? ` ${booth.countdown}` : ''}
       </p>
     </div>
   )
