@@ -887,11 +887,72 @@
 
 .booth-choice {
   pointer-events: auto;
-  min-width: min(280px, 42vw);
-  min-height: 76px;
-  padding: 1rem 1.6rem;
-  font-size: clamp(1.05rem, 2vw, 1.35rem);
-  letter-spacing: 0.06em;
+  min-width: min(360px, 46vw);
+  min-height: 108px;
+  padding: 1.25rem 2.4rem;
+  border-radius: var(--radius-pill);
+  font-size: clamp(1.45rem, 2.6vw, 2rem);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.booth-choice--no {
+  background: var(--red-600);
+  color: #fff;
+  border-color: transparent;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 18px 44px rgba(220, 38, 38, 0.5),
+    0 0 56px rgba(220, 38, 38, 0.42);
+}
+
+.booth-choice--no:hover:not(:disabled) {
+  background: #b91c1c;
+  color: #fff;
+  transform: translateY(-4px) scale(1.04);
+  box-shadow:
+    0 24px 56px rgba(220, 38, 38, 0.6),
+    0 0 80px rgba(220, 38, 38, 0.5);
+}
+
+.booth-choice--yes {
+  background: #fff;
+  color: var(--syscom-blue);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.95),
+    0 0 32px 10px rgba(255, 255, 255, 0.7),
+    0 0 90px 28px rgba(212, 224, 237, 0.65),
+    0 0 160px 48px rgba(42, 84, 148, 0.4),
+    0 28px 70px rgba(2, 8, 20, 0.45);
+}
+
+.booth-choice--yes:hover:not(:disabled) {
+  background: #fff;
+  color: var(--syscom-blue);
+  transform: translateY(-4px) scale(1.05);
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 40px 14px rgba(255, 255, 255, 0.85),
+    0 0 110px 36px rgba(212, 224, 237, 0.75),
+    0 0 190px 60px rgba(42, 84, 148, 0.5),
+    0 32px 80px rgba(2, 8, 20, 0.4);
+}
+
+.booth-shell .booth-choice--no:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(254, 202, 202, 0.7),
+    0 18px 44px rgba(220, 38, 38, 0.5),
+    0 0 56px rgba(220, 38, 38, 0.42);
+}
+
+.booth-shell .booth-choice--yes:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(157, 184, 220, 0.85),
+    0 0 32px 10px rgba(255, 255, 255, 0.7),
+    0 0 90px 28px rgba(212, 224, 237, 0.65),
+    0 0 160px 48px rgba(42, 84, 148, 0.4);
 }
 
 @media (max-width: 860px) {
@@ -928,6 +989,7 @@
   }
 
   .booth-choice {
-    min-height: 60px;
+    min-height: 88px;
+    font-size: 1.25rem;
   }
 }

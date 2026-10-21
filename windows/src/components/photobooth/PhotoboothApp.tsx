@@ -144,10 +144,10 @@ export function PhotoboothApp() {
             exit={{ opacity: 0, y: 12 }}
             transition={{ type: 'spring', stiffness: 280, damping: 24 }}
           >
-            <button type="button" className="btn booth-cta booth-cta--glass booth-choice" onClick={booth.retake}>
+            <button type="button" className="btn booth-choice booth-choice--no" onClick={booth.retake}>
               TOMAR OTRA
             </button>
-            <button type="button" className="btn booth-cta booth-choice" onClick={booth.accept}>
+            <button type="button" className="btn booth-choice booth-choice--yes" onClick={booth.accept}>
               ¡SÍ!
             </button>
           </motion.div>
