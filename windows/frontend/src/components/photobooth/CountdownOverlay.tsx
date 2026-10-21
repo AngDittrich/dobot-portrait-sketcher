@@ -2,8 +2,8 @@ import { AnimatePresence, motion } from 'framer-motion'
 
 /**
  * Números 3-2-1 a pantalla completa sobre el visor.
- * Cada dígito entra con un spring (escala grande → natural) y sale
- * comprimiéndose; el anillo expansivo refuerza el ritmo de "cabina".
+ * Cada dígito entra con un spring (escala grande → natural) rodeado de
+ * glow y un anillo expansivo que marca el ritmo de la captura.
  */
 export function CountdownOverlay({ value }: { value: number }) {
   return (
@@ -26,7 +26,6 @@ export function CountdownOverlay({ value }: { value: number }) {
           <span className="booth-countdown-number">{value}</span>
         </motion.div>
       </AnimatePresence>
-      <p className="booth-countdown-hint">Sonríe…</p>
     </div>
   )
 }

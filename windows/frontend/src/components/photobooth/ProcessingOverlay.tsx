@@ -1,41 +1,59 @@
-import { PencilLine } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { IRIS_SHARE } from '../../hooks/usePhotobooth'
 
 interface ProcessingOverlayProps {
-  /** Fotograma original capturado. */
   photo: string
-  /** Retrato ya transformado (puede tardar unos ms más que el progreso). */
   sketch: string | null
-  /** Progreso 0..1 del "dibujo". */
+  /** 0..1 a lo largo de iris + transformación. */
   progress: number
 }
 
 /**
- * Simulación de "dibujo en tiempo real": la foto original permanece de
- * fondo mientras la versión sketch se revela de arriba hacia abajo con
- * clip-path; una línea de escaneo luminosa marca el frente del trazo.
+ * Reveal en dos tiempos, sincronizado con el progreso del hook:
+ * 1. La foto se abre en iris (círculo) con un leve acercamiento.
+ * 2. El sketch la cubre en diagonal, con una banda de grafito en el frente.
+ * Framer Motion anima la entrada; el barrido sigue el reloj del wizard.
  */
 export function ProcessingOverlay({ photo, sketch, progress }: ProcessingOverlayProps) {
-  const reveal = Math.min(100, Math.round(progress * 100))
+  const iris = Math.min(1, progress / IRIS_SHARE)
+  const sketchT = progress <= IRIS_SHARE ? 0 : (progress - IRIS_SHARE) / (1 - IRIS_SHARE)
+  const cover = sketchT * 200
+  const band = Math.round(sketchT * 100)
 
   return (
     <div className="booth-processing" aria-hidden="true">
-      <img className="booth-result-img" src={photo} alt="" draggable={false} />
+      <motion.img
+        className="booth-result-img"
+        src={photo}
+        alt=""
+        draggable={false}
+        initial={{ scale: 1.08, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ duration: 0.9, ease: [0.22, 0.9, 0.28, 1] }}
+        style={{ clipPath: `circle(${8 + iris * 142}% at 50% 46%)` }}
+      />
 
-      {sketch && (
+      {sketch && sketchT > 0 && (
         <img
           className="booth-result-img booth-result-sketch"
           src={sketch}
           alt=""
           draggable={false}
-          style={{ clipPath: `inset(0 0 ${100 - reveal}% 0)` }}
+          style={{ clipPath: `polygon(0 0, ${cover}% 0, 0 ${cover}%)` }}
         />
       )}
 
-      <div className="booth-scanline" style={{ top: `${reveal}%` }} />
+      {sketchT > 0 && sketchT < 1 && (
+        <div
+          className="booth-diagonal-glow"
+          style={{
+            background: `linear-gradient(135deg, transparent ${Math.max(0, band - 2)}%, rgba(191, 219, 254, 0.95) ${band}%, transparent ${Math.min(100, band + 3)}%)`,
+          }}
+        />
+      )}
 
-      <div className="booth-processing-chip">
-        <PencilLine size={16} className="booth-processing-icon" />
-        <span className="booth-dots">Dibujando tu retrato</span>
+      <div className="booth-progress-rail">
+        <div className="booth-progress-fill" style={{ width: `${Math.round(progress * 100)}%` }} />
       </div>
     </div>
   )
