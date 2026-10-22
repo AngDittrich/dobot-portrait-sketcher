@@ -314,16 +314,14 @@ def sketch_cutout(cutout_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, dict]
                 if dark
                 else ("jaw", "brows", "eyes", "lips", "nose")
             )
-            # Punto intermedio (ojos/nariz al minimo de 1 px no podian bajar
-            # mas y todo igualado quedo debil): cejas a 1.5 (= 2 px) como
-            # unico rasgo reforzado, resto a 1.2 (= 1 px). Con maximum no hay
-            # peso fraccional; el unico intermedio real entre 1 y 2 px es
-            # cuales rasgos van en cada grosor. Sin pluma (el blur 0.6
-            # solo ensanchaba). Con lentes oscuros no hay ojos tampoco aqui.
-            _base = [f for f in features if f != "brows"]
+            # Ojos en base (1 px), solo cejas reforzadas (2 px): con maximum
+            # no hay peso fraccional y la nariz ya esta en el minimo de 1 px.
+            # Con lentes oscuros no hay ojos tampoco aqui.
+            _strong = [f for f in ("brows",) if f in features]
+            _base = [f for f in features if f not in _strong]
             lm_base = lm.draw_lines(scaled, (Wc, Hc), thickness=1.2, features=tuple(_base))
-            lm_brows = lm.draw_lines(scaled, (Wc, Hc), thickness=1.5, features=("brows",))
-            lm_all = np.maximum(lm_base, lm_brows)
+            lm_strong = lm.draw_lines(scaled, (Wc, Hc), thickness=1.5, features=tuple(_strong))
+            lm_all = np.maximum(lm_base, lm_strong)
             lines = np.maximum(lines, lm_all)
     except Exception:
         pass
@@ -359,6 +357,35 @@ def sketch_cutout(cutout_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, dict]
             outside = 1.0 - mask
             weak = (lines < 0.5).astype(np.float32)
             lines = lines * (1.0 - outside * weak * 0.8)
+            # EXPERIMENTO reversible (oreja/cuello, con plan de reversion):
+            # la oreja sale gruesa porque el XDoG dispara sobre el escalon
+            # del borde; se atenua x0.6 solo fuera del ovalo y solo entre
+            # la linea de ojos y el menton (ahi viven las orejas; el pelo
+            # de arriba y la mandibula de abajo no se tocan). Las dos
+            # verticales del cuello se aclaran x0.8 fuera de la cara para
+            # que la mandibula tenga mas peso relativo. Si come pelo o
+            # mandibula, se quita este bloque y queda solo la limpieza.
+            try:
+                from pipeline.landmarks import CHIN as _EC
+                from pipeline.landmarks import LEFT_EYE_OUTER as _EL
+                from pipeline.landmarks import RIGHT_EYE_OUTER as _ER
+
+                _eey = 0.5 * (float(pts[_ER][1]) + float(pts[_EL][1])) * Hm
+                _ech = float(pts[_EC][1]) * Hm
+                _hx0 = int(hull[..., 0].min())
+                _hx1 = int(hull[..., 0].max())
+                _mg = int(0.03 * Wm)
+                _ear = np.zeros((Hm, Wm), np.float32)
+                _ear[max(0, int(_eey)):min(Hm, int(_ech)), :] = 1.0
+                _side = np.zeros((Hm, Wm), np.float32)
+                _side[:, :max(0, _hx0 + _mg)] = 1.0
+                _side[:, min(Wm, _hx1 - _mg):] = 1.0
+                lines = lines * (1.0 - 0.4 * _ear * _side)
+                _nb = np.zeros((Hm, Wm), np.float32)
+                _nb[int(_ech):min(Hm, int(_ech + 0.7 * max(1.0, _ech - _eey))), :] = 1.0
+                lines = lines * (1.0 - 0.2 * _nb * outside)
+            except Exception:
+                pass
             binary = binarize_map(lines, 0.28 - 0.16 * mask)
             if lm_all is not None:
                 # Limpieza selectiva en piel: tinta debil y aislada adentro
@@ -379,6 +406,28 @@ def sketch_cutout(cutout_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, dict]
                 binary = np.where(
                     (weak_skin == 255) & (weak_keep == 0), 255, binary
                 ).astype(np.uint8)
+                # Cuello/hombros: banda entre el menton y el arranque del
+                # fundido, fuera de la cara. Misma regla que en piel pero
+                # mas alta (<80 px): ahi no hay rasgos que proteger, solo
+                # pelusa y arrugas sueltas. Lo largo y fuerte (collares,
+                # audifonos, mandibula protegida) sobrevive siempre.
+                from pipeline.landmarks import CHIN as _CHIN
+                from pipeline.landmarks import LEFT_EYE_OUTER as _LEO
+                from pipeline.landmarks import RIGHT_EYE_OUTER as _REO
+                _eye_y = 0.5 * (float(pts[_REO][1]) + float(pts[_LEO][1])) * Hm
+                _chin_y = float(pts[_CHIN][1]) * Hm
+                _face_h = max(1.0, _chin_y - _eye_y)
+                _n0, _n1 = int(_chin_y), int(min(Hm, _chin_y + 0.7 * _face_h))
+                if _n1 > _n0:
+                    _band = np.zeros((Hm, Wm), bool)
+                    _band[_n0:_n1, :] = True
+                    weak_neck = (
+                        (binary == 0) & ~inside & _band & (lines < 0.5) & ~protect
+                    ).astype(np.uint8) * 255
+                    neck_keep = remove_specks(weak_neck, 80)
+                    binary = np.where(
+                        (weak_neck == 255) & (neck_keep == 0), 255, binary
+                    ).astype(np.uint8)
             zoned = True
     except Exception:
         pass
