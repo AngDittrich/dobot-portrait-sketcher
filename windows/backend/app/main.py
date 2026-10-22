@@ -65,6 +65,15 @@ class SketchParams(BaseModel):
     spacing_mm: float = Field(1.5, ge=0.2, le=10.0)
     simplify_px: float = Field(0.9, ge=0.0, le=5.0)
     min_stroke_px: float = Field(12.0, ge=1.0, le=80.0)
+    # Union de trazos: solo si el hueco es pequeño y la linea sigue recta.
+    bridge_gap_px: float = Field(12.0, ge=0.0, le=40.0)
+    bridge_angle_deg: float = Field(40.0, ge=0.0, le=180.0)
+    # Umbrales del modelo de line art (1 = papel, 0 = linea).
+    lineart_strong: float = Field(0.72, ge=0.0, le=1.0)
+    lineart_weak: float = Field(0.86, ge=0.0, le=1.0)
+    # Tope de tiempo de dibujo: si el retrato sale largo se recorta el
+    # detalle fino para que el robot no se eternice en la expo.
+    max_draw_seconds: float = Field(45.0, ge=5.0, le=600.0)
 
 
 class SketchRequest(BaseModel):
@@ -87,6 +96,8 @@ def build_sketch(image, params: SketchParams) -> dict:
         contrast=params.contrast,
         threshold=params.threshold,
         use_landmarks=params.use_landmarks,
+        lineart_strong=params.lineart_strong,
+        lineart_weak=params.lineart_weak,
     )
 
     mask = portrait["mask"]
@@ -98,7 +109,21 @@ def build_sketch(image, params: SketchParams) -> dict:
         skeleton, min_length_px=params.min_stroke_px
     )
     simplified = [vectorize_ops.simplify_stroke(s, params.simplify_px) for s in strokes_px]
-    ordered = [stroke for stroke, _ in vectorize_ops.order_strokes(simplified)]
+    bridged = vectorize_ops.bridge_aligned_strokes(
+        simplified,
+        max_gap_px=params.bridge_gap_px,
+        max_angle_deg=params.bridge_angle_deg,
+    )
+    smoothed = [vectorize_ops.smooth_stroke(s) for s in bridged]
+    ordered = [stroke for stroke, _ in vectorize_ops.order_strokes(smoothed)]
+    # Tope de tiempo: si el retrato sale muy largo se van los trazos mas
+    # cortos (textura) antes de mandar al robot.
+    ordered = vectorize_ops.prune_to_budget(
+        ordered,
+        crop_width,
+        max_seconds=params.max_draw_seconds,
+        target_width_mm=params.target_width_mm,
+    )
 
     trajectory = vectorize_ops.build_trajectory(
         ordered,
