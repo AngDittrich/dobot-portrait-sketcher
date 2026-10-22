@@ -56,17 +56,17 @@ class SketchParams(BaseModel):
     """Ajustes del boceto (los mismos que se tocan en el laboratorio)."""
 
     sigma: float = Field(1.0, ge=0.2, le=4.0)
-    phi: float = Field(40.0, ge=1.0, le=80.0)
+    phi: float = Field(45.0, ge=1.0, le=80.0)
     epsilon: float = Field(0.0, ge=0.0, le=0.5)
     contrast: float = Field(0.6, ge=0.0, le=1.0)
-    threshold: float = Field(0.15, ge=0.02, le=0.9)
+    threshold: float = Field(0.12, ge=0.02, le=0.9)
     use_landmarks: bool = True
     target_width_mm: float = Field(140.0, ge=20.0, le=400.0)
     spacing_mm: float = Field(1.5, ge=0.2, le=10.0)
-    simplify_px: float = Field(0.9, ge=0.0, le=5.0)
+    simplify_px: float = Field(1.2, ge=0.0, le=5.0)
     min_stroke_px: float = Field(12.0, ge=1.0, le=80.0)
     # Union de trazos: solo si el hueco es pequeño y la linea sigue recta.
-    bridge_gap_px: float = Field(12.0, ge=0.0, le=40.0)
+    bridge_gap_px: float = Field(16.0, ge=0.0, le=40.0)
     bridge_angle_deg: float = Field(40.0, ge=0.0, le=180.0)
     # Umbrales del modelo de line art (1 = papel, 0 = linea).
     lineart_strong: float = Field(0.72, ge=0.0, le=1.0)
