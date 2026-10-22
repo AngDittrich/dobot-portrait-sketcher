@@ -71,9 +71,13 @@ class SketchParams(BaseModel):
     # Umbrales del modelo de line art (1 = papel, 0 = linea).
     lineart_strong: float = Field(0.72, ge=0.0, le=1.0)
     lineart_weak: float = Field(0.86, ge=0.0, le=1.0)
+    # Ruta opcional de line art estilo anime (opt-in, por defecto XDoG).
+    use_lineart: bool = False
     # Tope de tiempo de dibujo: si el retrato sale largo se recorta el
     # detalle fino para que el robot no se eternice en la expo.
-    max_draw_seconds: float = Field(45.0, ge=5.0, le=600.0)
+    # 150 s deja margen bajo el límite de 180 s del MG400 sin podar
+    # retratos normales (50-70 s sin podar).
+    max_draw_seconds: float = Field(150.0, ge=5.0, le=600.0)
 
 
 class SketchRequest(BaseModel):
@@ -96,6 +100,7 @@ def build_sketch(image, params: SketchParams) -> dict:
         contrast=params.contrast,
         threshold=params.threshold,
         use_landmarks=params.use_landmarks,
+        use_lineart=params.use_lineart,
         lineart_strong=params.lineart_strong,
         lineart_weak=params.lineart_weak,
     )
