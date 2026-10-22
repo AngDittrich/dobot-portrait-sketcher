@@ -58,7 +58,7 @@ export function CameraStage({
           mirrored
           screenshotFormat="image/jpeg"
           screenshotQuality={0.92}
-          videoConstraints={{ width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }}
+          videoConstraints={{ width: { ideal: 2560 }, height: { ideal: 1440 }, facingMode: 'user' }}
           onUserMedia={onCameraReady}
           onUserMediaError={onCameraError}
           className="booth-video"

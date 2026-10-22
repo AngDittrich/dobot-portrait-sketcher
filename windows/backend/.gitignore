@@ -3,3 +3,5 @@ models/
 .venv/
 __pycache__/
 *.pyc
+# Capturas crudas que deja SAVE_RAW=1 para comparar ajustes del boceto
+captures/

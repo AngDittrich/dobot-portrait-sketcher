@@ -13,8 +13,11 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
+
+import cv2
 
 if str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -32,6 +35,19 @@ from app.store import Job, JobStore, Sketch, SketchStore  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", ROOT / "models"))
+# Con SAVE_RAW=1 cada captura cruda queda en disco (windows/backend/captures).
+# Sirve para volver a correr el boceto sobre la misma foto al ajustar params.
+SAVE_RAW = os.environ.get("SAVE_RAW", "").lower() in {"1", "true", "yes"}
+CAPTURES_DIR = ROOT / "captures"
+
+
+def save_raw_capture(image) -> None:
+    """Guarda la foto tal como llegó del navegador (solo con SAVE_RAW=1)."""
+    if not SAVE_RAW:
+        return
+    CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    cv2.imwrite(str(CAPTURES_DIR / f"capture_{stamp}.jpg"), image)
 
 app = FastAPI(title="Dobot Portrait Sketcher API", version="0.1.0")
 app.add_middleware(
@@ -55,10 +71,10 @@ jobs = JobStore()
 class SketchParams(BaseModel):
     """Ajustes del boceto (los mismos que se tocan en el laboratorio)."""
 
-    sigma: float = Field(1.0, ge=0.2, le=4.0)
-    phi: float = Field(45.0, ge=1.0, le=80.0)
+    sigma: float = Field(0.9, ge=0.2, le=4.0)
+    phi: float = Field(32.0, ge=1.0, le=80.0)
     epsilon: float = Field(0.0, ge=0.0, le=0.5)
-    contrast: float = Field(0.6, ge=0.0, le=1.0)
+    contrast: float = Field(0.7, ge=0.0, le=1.0)
     threshold: float = Field(0.12, ge=0.02, le=0.9)
     use_landmarks: bool = True
     target_width_mm: float = Field(140.0, ge=20.0, le=400.0)
@@ -177,6 +193,7 @@ async def create_sketch(payload: SketchRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    save_raw_capture(image)
     image = fit_max_side(image)
     try:
         result = await run_in_threadpool(build_sketch, image, payload.params)
