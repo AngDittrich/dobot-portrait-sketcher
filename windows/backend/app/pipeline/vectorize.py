@@ -19,6 +19,8 @@ import cv2
 import numpy as np
 
 NEIGHBORS_8 = ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1))
+# El 2-opt es O(n^2) por pasada; con muchos trazos se queda colgado.
+TWO_OPT_MAX_STROKES = 250
 
 
 @dataclass
@@ -60,11 +62,13 @@ class VectorResult:
 
 
 def lines_to_mask(lines: np.ndarray, threshold: float = 0.20) -> np.ndarray:
-    """Intensidad de línea -> máscara binaria con 255 en la línea."""
+    """Intensidad de línea -> máscara binaria con 255 en la línea.
+
+    No se aplica apertura morfológica: con un elemento de 2x2 una línea de
+    1 px desaparece (la erosión la borra entera). El ruido se quita
+    después con `remove_specks`, que usa el área de cada mancha.
+    """
     mask = (np.asarray(lines, dtype=np.float32) >= float(threshold)).astype(np.uint8) * 255
-    # Motas de 1-2 px: se limpian con apertura, pero cuidado de no borrar
-    # rasgos pequeños (ojos). Se usa una apertura laxa de 2x2.
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
     return mask
 
 
@@ -88,15 +92,13 @@ def skeletonize(mask: np.ndarray) -> np.ndarray:
     binary = (mask > 0).astype(np.uint8) * 255
     if hasattr(cv2, "ximgproc") and hasattr(cv2.ximgproc, "thinning"):
         return cv2.ximgproc.thinning(binary, thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
-    skeleton = binary.copy()
+    skeleton = np.zeros_like(binary)
+    eroded = binary.copy()
     kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
-    while True:
-        eroded = cv2.erode(skeleton, kernel)
-        temp = cv2.dilate(eroded, kernel)
-        opened = skeleton - temp
-        skeleton = cv2.subtract(skeleton, opened)
-        if cv2.countNonZero(skeleton) == 0:
-            break
+    while cv2.countNonZero(eroded) > 0:
+        opened = cv2.dilate(cv2.erode(eroded, kernel), kernel)
+        skeleton = cv2.bitwise_or(skeleton, cv2.subtract(eroded, opened))
+        eroded = cv2.erode(eroded, kernel)
     return skeleton
 
 
@@ -105,86 +107,124 @@ def skeletonize(mask: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def _build_adjacency(skeleton: np.ndarray) -> dict[tuple[int, int], set[tuple[int, int]]]:
-    ys, xs = np.nonzero(skeleton)
-    pixels = set(zip(ys.tolist(), xs.tolist()))
-    adjacency: dict[tuple[int, int], set[tuple[int, int]]] = {}
-    for y, x in pixels:
-        neighbours = set()
-        for dy, dx in NEIGHBORS_8:
-            candidate = (y + dy, x + dx)
-            if candidate in pixels:
-                neighbours.add(candidate)
-        adjacency[(y, x)] = neighbours
-    return adjacency
+def _cover_piece(pixels: list[tuple[int, int]]) -> list[list[tuple[int, int]]]:
+    """Recorre todos los píxeles de un tramo con caminos simples.
+
+    Primero se camina desde los extremos (grado 1) y después desde cualquier
+    píxel que quede sin visitar, así no se pierde ninguna rama del tramo.
+    """
+    members = set(pixels)
+    visited: set[tuple[int, int]] = set()
+
+    def neighbours(p: tuple[int, int]) -> list[tuple[int, int]]:
+        y, x = p
+        return [(y + dy, x + dx) for dy, dx in NEIGHBORS_8 if (y + dy, x + dx) in members]
+
+    endpoints = [p for p in pixels if len(neighbours(p)) == 1]
+    paths: list[list[tuple[int, int]]] = []
+    for start in endpoints + pixels:
+        if start in visited:
+            continue
+        path = [start]
+        visited.add(start)
+        current = start
+        while True:
+            following = [q for q in neighbours(current) if q not in visited]
+            if not following:
+                break
+            current = following[0]
+            visited.add(current)
+            path.append(current)
+        paths.append(path)
+    return paths
 
 
-def _edge(a: tuple[int, int], b: tuple[int, int]) -> tuple[tuple[int, int], tuple[int, int]]:
-    return (a, b) if a <= b else (b, a)
+_NEIGHBOUR_KERNEL = np.ones((3, 3), np.float32)
+_NEIGHBOUR_KERNEL[1, 1] = 0
 
 
-def _walk(adjacency, used, nodes, start, first):
-    """Camina desde `start` por `first` hasta llegar a otro nodo o al final."""
-    path = [start]
-    previous, current = start, first
-    while True:
-        edge = _edge(previous, current)
-        if edge in used:
-            break
-        used.add(edge)
-        path.append(current)
-        if current in nodes:
-            break
-        candidates = [n for n in adjacency[current] if _edge(current, n) not in used]
-        if not candidates:
-            break
-        previous, current = current, candidates[0]
-    return path
+def _neighbour_count(binary: np.ndarray) -> np.ndarray:
+    return cv2.filter2D(binary.astype(np.float32), -1, _NEIGHBOUR_KERNEL, borderType=cv2.BORDER_CONSTANT)
+
+
+_RING_8 = ((-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1))
+
+
+def _crossing_number(binary: np.ndarray) -> np.ndarray:
+    """Transiciones 0->1 alrededor de cada píxel (>=3 indica bifurcación real).
+
+    A diferencia de contar vecinos, ignora los escalones y esquinas del
+    esqueleto de 8 conexiones, que de otro modo parecen bifurcaciones.
+    """
+    height, width = binary.shape
+    padded = np.pad(binary, 1)
+    ring = [padded[1 + dy : 1 + dy + height, 1 + dx : 1 + dx + width] for dy, dx in _RING_8]
+    transitions = np.zeros((height, width), np.int32)
+    for index in range(8):
+        transitions += ((ring[index] == 0) & (ring[(index + 1) % 8] == 1)).astype(np.int32)
+    return transitions
+
+
+def _prune_spurs(binary: np.ndarray, spur_length_px: int) -> np.ndarray:
+    """Quita las ramas cortas (peldaños del adelgazado) sin tocar el trazo principal.
+
+    Se erosionan los extremos ``spur_length_px`` veces y luego se regeneran
+    desde los extremos que quedan, limitado al esqueleto original. Las ramas
+    cortas que cuelgan de una bifurcación desaparecen; los arcos largos
+    recuperan su longitud.
+    """
+    if spur_length_px <= 0:
+        return binary
+    pruned = binary.copy()
+    for _ in range(spur_length_px):
+        endpoints = (pruned > 0) & (_neighbour_count(pruned) == 1)
+        pruned[endpoints] = 0
+    for _ in range(spur_length_px):
+        endpoints = ((pruned > 0) & (_neighbour_count(pruned) == 1)).astype(np.uint8)
+        grow = cv2.dilate(endpoints, np.ones((3, 3), np.uint8)) & binary
+        pruned = pruned | grow
+    return pruned
 
 
 def extract_strokes(
     skeleton: np.ndarray,
     min_length_px: float = 6.0,
-    spur_length_px: float = 14.0,
+    spur_length_px: int = 6,
 ) -> list[np.ndarray]:
-    """Convierte el esqueleto en polilíneas (ramas entre nodos).
+    """Convierte el esqueleto en polilíneas (trazos continuos).
 
-    Los nodos son los extremos (grado 1) y las bifurcaciones (grado >= 3).
-    Las ramas muy cortas que cuelgan de una bifurcación se podan porque
-    son ruido del adelgazado.
+    Se podan las ramas cortas, se quitan los píxeles de bifurcación (3 o más
+    vecinos), se etiquetan los tramos con ``connectedComponents`` (en C) y cada
+    tramo se recorre con ``_cover_piece``. Es lineal en el número de píxeles:
+    el grafo anterior en Python tardaba minutos con máscaras densas.
     """
-    adjacency = _build_adjacency(skeleton)
-    if not adjacency:
+    binary = (skeleton > 0).astype(np.uint8)
+    if not binary.any():
         return []
 
-    nodes = {pixel for pixel, neighbours in adjacency.items() if len(neighbours) != 2}
-    used: set = set()
-    paths: list[list[tuple[int, int]]] = []
+    binary = _prune_spurs(binary, spur_length_px)
+    junctions = (binary > 0) & (_crossing_number(binary) >= 3)
+    pieces = ((binary > 0) & ~junctions).astype(np.uint8)
 
-    # Desde cada nodo hacia cada vecino todavía sin usar.
-    for node in nodes:
-        for neighbour in adjacency[node]:
-            if _edge(node, neighbour) in used:
-                continue
-            path = _walk(adjacency, used, nodes, node, neighbour)
-            if len(path) > 1:
-                paths.append(path)
-
-    # Bucles cerrados sin nodos (grado 2 en todo el contorno).
-    for pixel in adjacency:
-        if all(_edge(pixel, n) in used for n in adjacency[pixel]):
-            continue
-        path = _walk(adjacency, used, nodes, pixel, next(iter(adjacency[pixel])))
-        if len(path) > 1:
-            paths.append(path)
+    _, labels = cv2.connectedComponents(pieces, connectivity=8)
+    ys, xs = np.nonzero(pieces)
+    if len(ys) == 0:
+        return []
+    piece_ids = labels[ys, xs]
+    order = np.argsort(piece_ids, kind="stable")
+    ys, xs, piece_ids = ys[order], xs[order], piece_ids[order]
+    bounds = np.flatnonzero(np.diff(piece_ids)) + 1
 
     strokes: list[np.ndarray] = []
-    for path in paths:
-        points = np.array([(x, y) for y, x in path], dtype=np.float32)
-        length = _polyline_length(points)
-        if length < min_length_px:
-            continue
-        strokes.append(points)
+    for chunk_ys, chunk_xs in zip(np.split(ys, bounds), np.split(xs, bounds)):
+        pixels = list(zip(chunk_ys.tolist(), chunk_xs.tolist()))
+        for path in _cover_piece(pixels):
+            if len(path) < 2:
+                continue
+            points = np.array([(x, y) for y, x in path], dtype=np.float32)
+            if _polyline_length(points) < min_length_px:
+                continue
+            strokes.append(points)
     return strokes
 
 
@@ -205,8 +245,157 @@ def simplify_stroke(points: np.ndarray, epsilon_px: float = 0.8) -> np.ndarray:
     if len(points) < 3 or epsilon_px <= 0:
         return points
     contour = points.reshape(-1, 1, 2).astype(np.float32)
-    approx = cv2.approxPolyDP(contour, float(epsilon_px), True)
+    approx = cv2.approxPolyDP(contour, float(epsilon_px), False)
     return approx.reshape(-1, 2).astype(np.float32)
+
+
+def smooth_stroke(points: np.ndarray, iterations: int = 2) -> np.ndarray:
+    """Suaviza la polilínea con Chaikin (corta las esquinas, conserva los extremos)."""
+    smoothed = np.asarray(points, dtype=np.float32)
+    for _ in range(iterations):
+        if len(smoothed) < 3:
+            break
+        first = 0.75 * smoothed[:-1] + 0.25 * smoothed[1:]
+        second = 0.25 * smoothed[:-1] + 0.75 * smoothed[1:]
+        middle = np.empty((len(first) * 2, 2), dtype=np.float32)
+        middle[0::2] = first
+        middle[1::2] = second
+        smoothed = np.vstack((smoothed[:1], middle, smoothed[-1:]))
+    return smoothed
+
+
+def bridge_aligned_strokes(
+    strokes: list[np.ndarray],
+    max_gap_px: float = 12.0,
+    max_angle_deg: float = 40.0,
+) -> list[np.ndarray]:
+    """Une trazos cuyos extremos están cerca **y** en la misma dirección.
+
+    Pegar cualquier par de extremos cercanos (sin mirar la dirección) unía
+    el contorno de la cabeza con el cuello y salían arcos raros cruzando la
+    cara. Aquí solo se une cuando la línea sigue recta: el ángulo entre la
+    dirección de salida del primer trazo y la de entrada del segundo tiene
+    que caber en `max_angle_deg`.
+    """
+    pieces = [np.asarray(s, dtype=np.float32) for s in strokes]
+    if max_gap_px <= 0 or len(pieces) < 2:
+        return pieces
+
+    limit = math.cos(math.radians(max(0.0, min(180.0, max_angle_deg))))
+
+    def endpoints(points: np.ndarray):
+        return ((0, points[0]), (1, points[-1]))
+
+    while len(pieces) > 1:
+        # Rejilla con celdas del tamaño del hueco máximo: solo se miran los
+        # endpoints vecinos, no todos contra todos.
+        grid: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        for index, points in enumerate(pieces):
+            for end, position in endpoints(points):
+                key = (
+                    int(math.floor(float(position[0]) / max_gap_px)),
+                    int(math.floor(float(position[1]) / max_gap_px)),
+                )
+                grid.setdefault(key, []).append((index, end))
+
+        candidates: list[tuple[float, int, int, int, int]] = []
+        for index, points in enumerate(pieces):
+            for end, position in endpoints(points):
+                cell_x = int(math.floor(float(position[0]) / max_gap_px))
+                cell_y = int(math.floor(float(position[1]) / max_gap_px))
+                for offset_x in (-1, 0, 1):
+                    for offset_y in (-1, 0, 1):
+                        for other_index, other_end in grid.get(
+                            (cell_x + offset_x, cell_y + offset_y), ()
+                        ):
+                            if other_index == index:
+                                continue
+                            other = pieces[other_index]
+                            other_position = other[0] if other_end == 0 else other[-1]
+                            distance = float(np.hypot(*(position - other_position)))
+                            if distance <= max_gap_px:
+                                candidates.append(
+                                    (distance, index, end, other_index, other_end)
+                                )
+
+        if not candidates:
+            break
+        candidates.sort(key=lambda item: item[0])
+
+        merged = None
+        for _, index, end, other_index, other_end in candidates:
+            first = pieces[index]
+            second = pieces[other_index]
+            if len(first) < 2 or len(second) < 2:
+                continue
+            # `first` tiene que terminar en `end` y `second` empezar en `other_end`.
+            first_oriented = first if end == 1 else first[::-1]
+            second_oriented = second if other_end == 0 else second[::-1]
+            incoming = first_oriented[-1] - first_oriented[-2]
+            outgoing = second_oriented[1] - second_oriented[0]
+            norm_in = float(np.linalg.norm(incoming))
+            norm_out = float(np.linalg.norm(outgoing))
+            if norm_in < 1e-6 or norm_out < 1e-6:
+                continue
+            cosine = float(np.dot(incoming, outgoing)) / (norm_in * norm_out)
+            if cosine >= limit:
+                merged = (index, first_oriented, other_index, second_oriented)
+                break
+
+        if merged is None:
+            break
+        index, first_oriented, other_index, second_oriented = merged
+        joined = np.vstack((first_oriented, second_oriented))
+        pieces = [p for k, p in enumerate(pieces) if k not in (index, other_index)] + [joined]
+
+    return pieces
+
+
+def estimate_seconds(
+    strokes: list[np.ndarray],
+    width: int,
+    target_width_mm: float = 140.0,
+    speed_mm_s: float = 80.0,
+) -> float:
+    """Segundos que tardará el robot (sin rehacer la trayectoria completa)."""
+    if not strokes:
+        return 0.0
+    mm_per_px = float(target_width_mm) / max(1, width)
+    draw_mm = sum(_polyline_length(s) for s in strokes) * mm_per_px
+    travel_mm = 0.0
+    for previous, current in zip(strokes, strokes[1:]):
+        travel_mm += float(np.hypot(*(current[0] - previous[-1]))) * mm_per_px
+    return draw_mm / max(1.0, speed_mm_s) + travel_mm / max(1.0, speed_mm_s * 1.6)
+
+
+def prune_to_budget(
+    strokes: list[np.ndarray],
+    width: int,
+    max_seconds: float,
+    target_width_mm: float = 140.0,
+    speed_mm_s: float = 80.0,
+    min_strokes: int = 12,
+) -> list[np.ndarray]:
+    """Quita los trazos más cortos hasta que el dibujo quepa en el tiempo.
+
+    Es la red de seguridad de la expo: si una foto concreta sale muy
+    larga, se recorta el detalle fino antes de dejar al robot dibujando
+    dos minutos. Los trazos que se van son los más cortos, que suelen ser
+    textura (pelo, barba), no los contornos principales.
+    """
+    current = list(strokes)
+    if max_seconds <= 0 or not current:
+        return current
+    seconds = estimate_seconds(current, width, target_width_mm, speed_mm_s)
+    while seconds > max_seconds and len(current) > min_strokes:
+        lengths = sorted(_polyline_length(s) for s in current)
+        cutoff = lengths[0]
+        kept = [s for s in current if _polyline_length(s) > cutoff]
+        if not kept or len(kept) == len(current):
+            break
+        current = kept
+        seconds = estimate_seconds(current, width, target_width_mm, speed_mm_s)
+    return current
 
 
 def order_strokes(strokes: list[np.ndarray], start: tuple[float, float] | None = None):
@@ -244,7 +433,8 @@ def order_strokes(strokes: list[np.ndarray], start: tuple[float, float] | None =
         points = strokes[index]
         current = points[-1] if best_reverse else points[0]
 
-    ordered = _two_opt(ordered, strokes)
+    if len(ordered) <= TWO_OPT_MAX_STROKES:
+        ordered = _two_opt(ordered, strokes)
     return [(strokes[index][::-1] if reverse else strokes[index], index) for index, reverse in ordered]
 
 
@@ -415,6 +605,27 @@ def build_trajectory(
 # ---------------------------------------------------------------------------
 # 5. Render para verificación visual
 # ---------------------------------------------------------------------------
+
+
+def render_black_strokes(
+    strokes: list[np.ndarray],
+    width: int,
+    height: int,
+    thickness: int = 2,
+) -> np.ndarray:
+    """Dibuja los trazos en negro sobre blanco (tal como saldrán en el papel).
+
+    La vista previa usa esto en vez de la máscara binaria: así se ve el
+    dibujo de líneas fino que realmente dibuja el robot, y no los manchas
+    gruesas que produce el XDoG antes de adelgazar.
+    """
+    canvas = np.full((height, width, 3), 255, dtype=np.uint8)
+    for points in strokes:
+        if len(points) < 2:
+            continue
+        polyline = np.round(points).astype(np.int32).reshape(-1, 1, 2)
+        cv2.polylines(canvas, [polyline], False, (17, 24, 39), int(thickness), cv2.LINE_AA)
+    return canvas
 
 
 def render_strokes(

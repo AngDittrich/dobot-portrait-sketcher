@@ -4,7 +4,7 @@ Uso:
     .venv\\Scripts\\python.exe download_models.py
 
 Los archivos quedan en `windows/backend/models/` y están excluidos de git
-(son unos 180 MB). Para no descargarlos otra vez se puede apuntar a los
+(son unos 200 MB). Para no descargarlos otra vez se puede apuntar a los
 del laboratorio con la variable de entorno MODELS_DIR.
 """
 
@@ -31,6 +31,12 @@ MODELS = {
         "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/"
         "face_landmarker.task",
         "face_landmarker.task",
+    ),
+    # Modelo de line art (Paint2Sketch, Apache-2.0): convierte la foto en un
+    # boceto a lapiz con pelo, barba y textura (~17 MB)
+    "line_drawings": (
+        "https://huggingface.co/Luoaho/image-to-line-drawing-onnx/resolve/main/line-drawings.onnx",
+        "line-drawings.onnx",
     ),
 }
 
