@@ -5,14 +5,21 @@ líneas y prepara la trayectoria que dibuja el Dobot MG400.
 
 ## Qué hace
 
-1. **Foto -> retrato**: U2Net (persona) ∩ elipse de la cara (YuNet) deja la
-   cabeza sin fondo ni ropa.
-2. **Líneas**: XDoG + landmarks de MediaPipe (mandíbula, cejas, ojos, nariz,
-   labios) → máscara de líneas de 1 px.
-3. **Vector**: thinning (esqueleto) → polilíneas → RDP → orden de dibujo
-   (vecino más cercano + 2-opt).
+1. **Foto -> retrato**: U2Net (persona) + YuNet (cara) recortan la cabeza
+   (pelo + cara + un poco de hombros) y dejan el fondo fuera.
+2. **Líneas**: modelo de line art (Paint2Sketch, `line-drawings.onnx`) dibuja
+   pelo, barba, gafas y textura; el resultado se limpia con umbral de
+   histéresis (tinta fuerte siempre, tinta débil solo si toca a una fuerte) y
+   un cierre morfológico. Encima se superponen los landmarks de MediaPipe
+   (mandíbula, cejas, ojos con iris, nariz, abertura de la boca), que son la
+   geometría correcta de la cara. Sin modelo de line art se cae al XDoG.
+3. **Vector**: thinning (esqueleto) → polilíneas → RDP → puente de trazos
+   alineados (solo une extremos cercanos si las direcciones encajan) → orden
+   de dibujo (vecino más cercano + 2-opt) → poda por presupuesto de tiempo.
 4. **Trayectoria**: puntos en milímetros (el ancho del dibujo es
-   configurable, 140 mm por defecto) y segmentos `draw` / `travel`.
+   configurable, 140 mm por defecto) y segmentos `draw` / `travel`. El tiempo
+   estimado se recorta a `max_draw_seconds` (45 s por defecto) quitando los
+   trazos más cortos.
 
 ## Puesta en marcha
 
