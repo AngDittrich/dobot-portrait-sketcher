@@ -8,7 +8,7 @@ import re
 import cv2
 import numpy as np
 
-MAX_SIDE = 1600
+MAX_SIDE = 2048
 _DATA_URL = re.compile(r"^data:(?P<mime>[\w/+.-]+);base64,(?P<payload>.+)$", re.DOTALL)
 
 

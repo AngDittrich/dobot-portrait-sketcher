@@ -224,10 +224,10 @@ class PortraitRenderer:
     def render(
         self,
         image: np.ndarray,
-        sigma: float = 1.0,
-        phi: float = 45.0,
+        sigma: float = 0.9,
+        phi: float = 32.0,
         epsilon: float = 0.0,
-        contrast: float = 0.6,
+        contrast: float = 0.7,
         threshold: float = 0.12,
         use_landmarks: bool = True,
         use_ellipse: bool = True,
