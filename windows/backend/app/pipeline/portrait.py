@@ -1,11 +1,17 @@
 """Pipeline de retrato "calidad": fondo fuera + rasgos marcados + líneas.
 
-Es la ruta que mejor funciona con fotos de webcam reales:
+Ruta por defecto (XDoG + landmarks + silueta): es la que mejor funciona
+con fotos de webcam reales y la que mejor dibuja el MG400:
 
     YuNet (rostro) + U2Net (persona)  ->  recorte de la cabeza (pelo + cara)
     + MediaPipe landmarks             ->  contorno de mandíbula, cejas, ojos
-    + XDoG                            ->  pelo, barba, lentes, textura
+    + XDoG                            ->  pelo, contorno y rasgos
     = máscara de líneas lista para vectorizar
+
+Ruta opcional (`use_lineart=True`): modelo line-drawings.onnx (estilo
+anime, Apache-2.0). Genera sombreado con tramas ruidosas que fragmentan
+los trazos y empeoran el reconocimiento facial; se mantiene solo como
+opt-in para comparar.
 
 Por qué NO una elipse fija: la elipse recortaba el pelo y dejaba un "huevo"
 calvo con un contorno liso muy artificial. Ahora la caja de la cabeza se
@@ -218,15 +224,15 @@ class PortraitRenderer:
     def render(
         self,
         image: np.ndarray,
-        sigma: float = 1.0,
-        phi: float = 40.0,
+        sigma: float = 0.9,
+        phi: float = 32.0,
         epsilon: float = 0.0,
-        contrast: float = 0.6,
-        threshold: float = 0.15,
+        contrast: float = 0.7,
+        threshold: float = 0.12,
         use_landmarks: bool = True,
         use_ellipse: bool = True,
         target_px: int = TARGET_PX,
-        use_lineart: bool = True,
+        use_lineart: bool = False,
         lineart_strong: float = LINEART_STRONG,
         lineart_weak: float = LINEART_WEAK,
     ) -> dict:
@@ -265,12 +271,13 @@ class PortraitRenderer:
 
         landmark_lines = None
         if use_lineart and self.lineart.available:
-            # Camino bueno: el modelo de line art ya dibuja el pelo, la barba
-            # y las gafas. La mascara sale con histéresis (tinta fuerte
-            # siempre, tinta debil solo si toca a una fuerte) y encima se
-            # superponen los landmarks de MediaPipe, que son la geometria
-            # correcta de la cara: sin ellos el dibujo depende de que el
-            # modelo acierte con los ojos y la boca.
+            # Ruta opcional: el modelo de line art estilo anime genera tramas
+            # ruidosas que fragmentan los trazos del robot y empeoran el
+            # parecido. Se mantiene como opt-in para comparar.
+            # La máscara sale con histéresis (tinta fuerte siempre, tinta
+            # débil solo si toca a una fuerte) y encima se superponen los
+            # landmarks de MediaPipe, que son la geometría correcta de la
+            # cara.
             art = self.lineart.art(prepare_for_lineart(crop))
             mask = self.lineart.hysteresis(
                 art, strong=lineart_strong, weak=lineart_weak
@@ -286,7 +293,8 @@ class PortraitRenderer:
                 )
             lines = mask.astype(np.float32) / 255.0
         else:
-            # Respaldo: sin modelo de line art se usa XDoG (mas tosco).
+            # Ruta por defecto: XDoG + silueta de U2Net + landmarks.
+            # Líneas limpias y continuas, óptimas para vectorizar.
             lines = self._xdog_lines(crop, alpha, box, sigma, epsilon, phi, contrast)
             landmark_lines = self._landmark_lines(landmarks, box, crop, image.shape)
             if landmark_lines is not None:
