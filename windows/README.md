@@ -1,78 +1,44 @@
-# React + TypeScript + Vite
+# Windows · Cabina de Retratos
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
-
-Note: This will impact Vite dev & build performances.
-You can also try [the experimental native React Compiler support in plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md#rust-react-compiler) by using `compiler: true` in the plugin options instead of using the Babel plugin.
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Proyecto de Windows: la cabina web que toma la foto, la convierte en boceto y
+manda al robot Dobot MG400 a dibujarlo en papel.
 
 ```
-
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+windows/
+├── frontend/   React 19 + Vite + TypeScript (la cabina de fotos)
+└── backend/    Python + FastAPI + OpenCV/ONNX (boceto, vector y robot)
 ```
+
+## Arranque rápido (dos terminales)
+
+**1. Backend** (necesita los modelos ONNX, ver `backend/README.md`):
+
+```powershell
+cd windows/backend
+python -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt
+.\.venv\Scripts\python -m uvicorn app.main:app --port 8000 --reload
+```
+
+**2. Frontend**:
+
+```powershell
+cd windows/frontend
+pnpm install
+pnpm dev
+```
+
+La cabina queda en <http://localhost:5173> y el proxy de Vite manda `/api` al
+backend en `http://127.0.0.1:8000`.
+
+Para apuntar el frontend a otro equipo (por ejemplo, el PC con el robot
+conectado) se define `VITE_API_BASE=http://IP_DEL_PC:8000`.
+
+## Qué hace cada parte
+
+- `frontend/` → captura con la webcam, cuenta regresiva, vista previa del
+  boceto, aprobación y seguimiento del trabajo del robot.
+- `backend/` → `POST /api/sketch` (foto → boceto en líneas + SVG + trazos) y
+  `POST /api/jobs` (boceto → trabajo de dibujo) / `GET /api/jobs/{id}`
+  (progreso). Hoy el robot es un simulador (`MockRobotClient`); falta
+  enchufar el driver TCP/IP real del MG400.

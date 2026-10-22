@@ -417,13 +417,13 @@ Tarjeta glass (§17.2) con icono `Sparkles`/`Info` en `--blue-100`. **Sin badges
 
 ### 17.7 Logo sobre escenario
 
-El logo oficial (`assets/brand/syscomLargeLogo.webp`, servido desde `windows/public/brand/`) es **negro**: sobre el escenario oscuro siempre con `filter: brightness(0) invert(1)` (versión monocromática blanca, §2). Altura `26px` en brand bar, `draggable={false}`.
+El logo oficial (`assets/brand/syscomLargeLogo.webp`, servido desde `windows/frontend/public/brand/`) es **negro**: sobre el escenario oscuro siempre con `filter: brightness(0) invert(1)` (versión monocromática blanca, §2). Altura `26px` en brand bar, `draggable={false}`.
 
 ### 17.8 Wizard, robot y reinicio
 
-- **attract**: foto real `assets/robot/dobotsayinghello.webp` (servida en `windows/public/robot/`) + “Tómate una foto, evalúala, envíala y recibe tu dibujo robótico” + **COMENZAR**.
-- **drawing** (3 s): `assets/robot/dobotidlemarker.webp` y “El robot está dibujando tu imagen ahora”. Ahí vive el `TODO` de la orden al Dobot.
-- **thanks** (~8 s): “LISTO. TOMA TU DIBUJO.” / “SYSCOM agradece tu visita.” y `windows/public/wizard/portrait-ready.jpg`. Vuelve solo a `attract`.
+- **attract**: foto real `assets/robot/dobotsayinghello.webp` (servida en `windows/frontend/public/robot/`) + “Tómate una foto, evalúala, envíala y recibe tu dibujo robótico” + **COMENZAR**.
+- **drawing**: `assets/robot/dobotidlemarker.webp` y “El robot está dibujando tu imagen ahora”. El boceto sale de `POST /api/sketch` y ¡SÍ! crea el trabajo del robot (`POST /api/jobs`). La escena espera a que el trabajo termine; si el backend no responde, cierra a los 3 s.
+- **thanks** (~8 s): “LISTO. TOMA TU DIBUJO.” / “SYSCOM agradece tu visita.” y `windows/frontend/public/wizard/portrait-ready.jpg`. Vuelve solo a `attract`.
 - Las fotos del robot van sobre negro: se integran con `mix-blend-mode: lighten`. **No** se invierten; el filtro blanco es solo del logo.
 - **Timeout:** si `attract`, `camera`, `countdown`, `capture`, `reveal` o `confirm` no cambian en **3 minutos**, el wizard vuelve a `attract` y borra foto y sketch. `drawing` y `thanks` no usan ese timer.
 - Sin indicadores de paso (“1/4”, dots, pills). El avance es la escena.

@@ -38,8 +38,8 @@ const headingAnimation = {
 } as const
 
 /**
- * Wizard de una sola pantalla: bienvenida, toma, reveal, confirmación,
- * dibujo del robot y agradecimiento.
+ * Wizard de una sola pantalla sobre el backend de main:
+ * el boceto y el trabajo del robot siguen saliendo de /api.
  */
 export function PhotoboothApp() {
   const webcamRef = useRef<Webcam>(null)
@@ -74,15 +74,13 @@ export function PhotoboothApp() {
           />
           <span className="booth-brand-divider" aria-hidden="true" />
           <span className="booth-product">Robot Dobot</span>
-          <span className="booth-demo-note">Modo demo · Sin robot conectado</span>
+          <span className="booth-demo-note">Conectado al backend del robot</span>
         </div>
       </header>
 
       <main className="booth-main">
         <AnimatePresence mode="wait">
-          {booth.status === 'attract' && (
-            <WelcomeScreen key="attract" onBegin={booth.begin} />
-          )}
+          {booth.status === 'attract' && <WelcomeScreen key="attract" onBegin={booth.begin} />}
 
           {booth.inCameraFlow && (
             <motion.div
@@ -129,7 +127,7 @@ export function PhotoboothApp() {
             </motion.div>
           )}
 
-          {booth.status === 'drawing' && <DrawingScreen key="drawing" />}
+          {booth.status === 'drawing' && <DrawingScreen key="drawing" job={booth.robotJob} />}
           {booth.status === 'thanks' && <ThanksScreen key="thanks" />}
         </AnimatePresence>
       </main>

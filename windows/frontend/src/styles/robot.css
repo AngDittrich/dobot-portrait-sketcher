@@ -1,0 +1,55 @@
+/* ---------- Aviso de progreso del robot ---------- */
+
+.robot-status {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  background: rgba(7, 15, 32, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(12px);
+}
+
+.robot-status-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.robot-status-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.robot-status-value {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(226, 232, 240, 0.72);
+  white-space: nowrap;
+}
+
+.robot-status-track {
+  height: 6px;
+  border-radius: var(--radius-pill, 999px);
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.robot-status-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1a3a6b, #3b82c4);
+  transition: width 0.4s ease;
+}
+
+.robot-status--done .robot-status-fill {
+  background: #16a34a;
+}
+
+.robot-status--error .robot-status-fill {
+  background: #dc2626;
+}

@@ -1,0 +1,9 @@
+# Pesos de los modelos (unos 180 MB): se descargan con download_models.py
+models/
+.venv/
+venv
+.env
+__pycache__/
+*.pyc
+# Capturas crudas que deja SAVE_RAW=1 para comparar ajustes del boceto
+captures/

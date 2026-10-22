@@ -1,0 +1,8 @@
+# Modelos ONNX/task descargados con download_models.py (pesados, regenerables).
+models/
+# Salidas de prueba del lab (pngs de depuracion, no commitear).
+out/
+samples/out/
+# Bytecode Python.
+__pycache__/
+*.pyc

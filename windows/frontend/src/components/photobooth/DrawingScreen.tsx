@@ -1,10 +1,12 @@
 import { motion } from 'framer-motion'
+import type { RobotJob } from '../../hooks/usePhotobooth'
+import { RobotStatus } from './RobotStatus'
 
 /**
- * El Dobot "dibuja" durante DRAWING_MS. La orden real al robot
- * se dispara en usePhotobooth.accept (TODO backend).
+ * El Dobot dibuja. La orden real sale de usePhotobooth.accept
+ * (POST /api/jobs). RobotStatus muestra el progreso del backend.
  */
-export function DrawingScreen() {
+export function DrawingScreen({ job }: { job: RobotJob | null }) {
   return (
     <motion.section
       className="booth-scene"
@@ -23,6 +25,7 @@ export function DrawingScreen() {
       />
       <div className="booth-scene-copy">
         <h1 className="booth-scene-title booth-dots">El robot está dibujando tu imagen ahora</h1>
+        <RobotStatus job={job} />
       </div>
     </motion.section>
   )

@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useReducer } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import type Webcam from 'react-webcam'
+import { getJob, getLastSketchId, postJob } from '../lib/api'
 import { generateSketch } from '../lib/sketch'
 
 /**
- * Wizard de la Cabina de Retratos.
+ * Wizard de la cabina, conectado al backend de main.
  *
  *   attract → camera → countdown → capture → reveal → confirm
  *        → drawing → thanks → attract
  *
- * "TOMAR OTRA" vuelve a `camera`. Si una sección que espera al usuario
- * no cambia en 3 minutos, todo regresa a `attract`.
+ * El boceto sale de POST /api/sketch (con respaldo local). Al pulsar ¡SÍ!
+ * se crea el trabajo del robot y la pantalla de dibujo sigue su progreso.
+ * Si el backend no responde, el dibujo dura 3 s y sigue el cierre.
  */
 
 export type PhotoboothStatus =
@@ -27,6 +29,14 @@ export interface ToastData {
   id: number
   kind: 'success' | 'info'
   message: string
+}
+
+/** Trabajo de dibujo del robot, tal como lo reporta el backend. */
+export interface RobotJob {
+  jobId: string
+  status: 'queued' | 'drawing' | 'done' | 'error'
+  progress: number
+  etaSeconds: number
 }
 
 interface PhotoboothState {
@@ -53,22 +63,18 @@ type Action =
   | { type: 'RETAKE' }
   | { type: 'TIMEOUT' }
   | { type: 'ATTRACT'; toast?: ToastData }
+  | { type: 'TOAST'; toast: ToastData }
   | { type: 'DISMISS_TOAST'; id: number }
 
 export const COUNTDOWN_FROM = 3
 export const FLASH_MS = 550
-/** Iris de entrada de la foto, antes de que empiece el grafito. */
 export const IRIS_MS = 900
-/** Transformación foto → sketch. */
 export const SKETCH_MS = 3200
 export const REVEAL_MS = IRIS_MS + SKETCH_MS
-/** Fracción del reveal que corresponde al iris. */
 export const IRIS_SHARE = IRIS_MS / REVEAL_MS
-/** El robot "dibuja" este tiempo antes del cierre. */
+/** Si el backend no acepta el trabajo, el dibujo en pantalla dura esto. */
 export const DRAWING_MS = 3000
-/** El agradecimiento vuelve solo a la bienvenida. */
 export const THANKS_MS = 8000
-/** Misma sección sin avanzar: reinicio completo. */
 export const SECTION_TIMEOUT_MS = 3 * 60 * 1000
 export const TOAST_MS = 3200
 
@@ -121,6 +127,8 @@ function reducer(state: PhotoboothState, action: Action): PhotoboothState {
         celebrationId: state.celebrationId,
         toast: action.type === 'ATTRACT' ? action.toast : null,
       })
+    case 'TOAST':
+      return { ...state, toast: action.toast }
     case 'DISMISS_TOAST':
       return state.toast?.id === action.id ? { ...state, toast: null } : state
     default:
@@ -134,8 +142,18 @@ function makeToast(kind: ToastData['kind'], message: string): ToastData {
 
 export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
   const [state, dispatch] = useReducer(reducer, initialState)
+  const [robotJob, setRobotJob] = useState<RobotJob | null>(null)
+  const robotTimer = useRef<number | null>(null)
 
-  /* Cuenta regresiva: al llegar a 0 se congela el frame. */
+  const stopRobotPolling = useCallback(() => {
+    if (robotTimer.current !== null) {
+      window.clearInterval(robotTimer.current)
+      robotTimer.current = null
+    }
+  }, [])
+
+  useEffect(() => stopRobotPolling, [stopRobotPolling])
+
   useEffect(() => {
     if (state.status !== 'countdown') return
 
@@ -156,14 +174,12 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     return () => clearTimeout(timer)
   }, [state.status, state.countdown, webcamRef])
 
-  /* Flash breve y arranca el reveal. */
   useEffect(() => {
     if (state.status !== 'capture') return
     const timer = setTimeout(() => dispatch({ type: 'REVEAL' }), FLASH_MS)
     return () => clearTimeout(timer)
   }, [state.status])
 
-  /* Reveal: iris + sketch en paralelo con el progreso visual. */
   useEffect(() => {
     if (state.status !== 'reveal' || !state.photo) return
 
@@ -178,7 +194,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
       }
     }
 
-    // TODO(BACKEND): sustituir la simulación local por POST /api/sketch.
+    // generateSketch llama a POST /api/sketch y, si el backend no está, dibuja en local.
     generateSketch(state.photo)
       .then((sketch) => {
         sketchResult = sketch
@@ -215,24 +231,26 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     }
   }, [state.status, state.photo])
 
-  /* El robot dibuja 3 s y pasa al cierre. */
+  /**
+   * Pantalla de dibujo: si hay un trabajo del robot, espera a que termine.
+   * Si no hay backend, cierra a los 3 s.
+   */
   useEffect(() => {
     if (state.status !== 'drawing') return
-    const timer = setTimeout(() => dispatch({ type: 'THANKS' }), DRAWING_MS)
-    return () => clearTimeout(timer)
-  }, [state.status])
+    const waiting = robotJob && (robotJob.status === 'queued' || robotJob.status === 'drawing')
+    if (waiting) return
 
-  /* El agradecimiento regresa solo a la bienvenida. */
+    const delay = robotJob?.status === 'done' ? 600 : robotJob ? 1600 : DRAWING_MS
+    const timer = setTimeout(() => dispatch({ type: 'THANKS' }), delay)
+    return () => clearTimeout(timer)
+  }, [state.status, robotJob])
+
   useEffect(() => {
     if (state.status !== 'thanks') return
     const timer = setTimeout(() => dispatch({ type: 'TIMEOUT' }), THANKS_MS)
     return () => clearTimeout(timer)
   }, [state.status])
 
-  /**
-   * Misma sección 3 minutos → bienvenida.
-   * `drawing` y `thanks` tienen su propio delay corto.
-   */
   useEffect(() => {
     if (state.status === 'drawing' || state.status === 'thanks') return
     const timer = setTimeout(() => dispatch({ type: 'TIMEOUT' }), SECTION_TIMEOUT_MS)
@@ -246,15 +264,75 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     return () => clearTimeout(timer)
   }, [state.toast])
 
-  const begin = useCallback(() => dispatch({ type: 'BEGIN' }), [])
+  /** Manda el boceto aprobado al backend y sigue el progreso del dibujo. */
+  const startRobotJob = useCallback(async () => {
+    try {
+      const job = await postJob(getLastSketchId())
+      setRobotJob({
+        jobId: job.job_id,
+        status: 'drawing',
+        progress: 0,
+        etaSeconds: job.est_seconds,
+      })
+
+      stopRobotPolling()
+      robotTimer.current = window.setInterval(() => {
+        void (async () => {
+          try {
+            const status = await getJob(job.job_id)
+            setRobotJob((previous) =>
+              previous
+                ? {
+                    ...previous,
+                    status: status.status,
+                    progress: status.progress,
+                    etaSeconds: status.eta_seconds,
+                  }
+                : previous,
+            )
+            if (status.status === 'done' || status.status === 'error') {
+              stopRobotPolling()
+              if (status.status === 'error') {
+                dispatch({
+                  type: 'TOAST',
+                  toast: makeToast('info', 'El robot no pudo terminar el dibujo.'),
+                })
+              }
+            }
+          } catch (error) {
+            console.warn('Se perdió el seguimiento del trabajo.', error)
+            stopRobotPolling()
+            setRobotJob((previous) => (previous ? { ...previous, status: 'error' } : previous))
+          }
+        })()
+      }, 1000)
+    } catch (error) {
+      console.warn('No se pudo enviar el retrato al robot.', error)
+      dispatch({
+        type: 'TOAST',
+        toast: makeToast('info', 'El robot no está conectado. Mostramos el cierre de la cabina.'),
+      })
+    }
+  }, [stopRobotPolling])
+
+  const begin = useCallback(() => {
+    stopRobotPolling()
+    setRobotJob(null)
+    dispatch({ type: 'BEGIN' })
+  }, [stopRobotPolling])
+
   const start = useCallback(() => dispatch({ type: 'START' }), [])
 
   const accept = useCallback(() => {
-    // TODO(BACKEND/ROBOT): POST /api/jobs con el sketch aprobado para que el Dobot lo trace.
     dispatch({ type: 'DRAW' })
-  }, [])
+    void startRobotJob()
+  }, [startRobotJob])
 
-  const retake = useCallback(() => dispatch({ type: 'RETAKE' }), [])
+  const retake = useCallback(() => {
+    stopRobotPolling()
+    setRobotJob(null)
+    dispatch({ type: 'RETAKE' })
+  }, [stopRobotPolling])
 
   const dismissToast = useCallback(() => {
     dispatch({ type: 'DISMISS_TOAST', id: state.toast?.id ?? -1 })
@@ -263,6 +341,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
   return {
     ...state,
     inCameraFlow: CAMERA_FLOW.includes(state.status),
+    robotJob,
     begin,
     start,
     accept,

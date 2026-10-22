@@ -1,18 +1,15 @@
 /**
  * Motor de transformación a "sketch" (efecto dibujo a lápiz).
  *
- * SIMULACIÓN 100% LOCAL — el pipeline completo corre en el navegador vía <canvas>:
- *   1. Desaturado por luminancia
- *   2. Inversión de la copia en grises
- *   3. Desenfoque (box blur separable ×2 pasadas ≈ gaussiano)
- *   4. Mezcla "color dodge" entre el gris original y el invertido desenfocado
- *   5. Tinte de papel + grafito en la paleta de marca (slate) para el acabado
+ * El boceto de verdad lo genera el backend Python (`windows/backend`): la
+ * foto viaja como data URL a `POST /api/sketch` y vuelve como dibujo de
+ * líneas (el mismo que después lleva el robot al papel).
  *
- * TODO(BACKEND): sustituir `generateSketch` por una llamada `POST /api/sketch`
- * que reciba la foto y devuelva el retrato procesado en el servidor.
- * Mantener la misma firma `(dataUrl: string) => Promise<string>` para que
- * `usePhotobooth` no requiera cambios.
+ * `generateSketchLocal` conserva la versión de navegador (canvas) como
+ * respaldo: si el backend no está levantado, la cabina sigue funcionando.
  */
+
+import { postSketch } from './api'
 
 /** Ancho máximo de trabajo: suficiente para pantalla y ágil para el blur. */
 const MAX_WIDTH = 1024
@@ -23,7 +20,22 @@ const BLUR_RADIUS = 6
 const GRAPHITE = { r: 30, g: 41, b: 59 } // --slate-800
 const PAPER = { r: 250, g: 250, b: 249 }
 
+/**
+ * Boceto del backend. Si el backend no responde se cae al sketch local,
+ * para que la demo siga viva sin el servidor levantado.
+ */
 export async function generateSketch(photoDataUrl: string): Promise<string> {
+  try {
+    const result = await postSketch(photoDataUrl)
+    return result.image
+  } catch (error) {
+    console.warn('El backend no respondió; se usa el sketch local.', error)
+    return generateSketchLocal(photoDataUrl)
+  }
+}
+
+/** Versión 100 % local en el navegador (canvas). */
+export async function generateSketchLocal(photoDataUrl: string): Promise<string> {
   const img = await loadImage(photoDataUrl)
   const { width, height } = fitWithin(img.naturalWidth, img.naturalHeight, MAX_WIDTH)
 
