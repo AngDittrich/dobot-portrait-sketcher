@@ -41,6 +41,30 @@ NOSE_SEGMENTS = (
     (294, 278),
 )
 
+# Abertura de la boca (anillo interior de 20 puntos): la linea donde se
+# juntan los labios.
+#
+# Se usa el anillo INTERIOR y no el exterior (la bermeja) a proposito. El
+# exterior de MediaPipe sigue la bermeja real, y con bigote o labios carnos
+# esa bermeja es enorme: al dibujarla sale un "pico de pato" muy de
+# caricatura. La abertura es siempre el hueco real de la boca, y encima
+# encaja con lo que ya dibujo el modelo de line art (que pone el bigote,
+# los dientes y el detalle).
+LIPS = (
+    78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308,
+    415, 310, 311, 312, 13, 82, 81, 80, 191,
+)
+
+# Borde inferior del labio inferior: la mitad de abajo del anillo exterior.
+# Con la abertura de la boca (arriba) y esta curva el boceto lleva las dos
+# lineas de una boca a lapiz. Se dibuja abierta, no cerrada: en las bocas
+# abiertas (la del modelo de line art ya trae los dientes) cerrarla lo
+# convertiria en un aro.
+LIPS_LOWER = (61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291)
+
+# Rasgos que se pueden dibujar por separado.
+FEATURES = ("jaw", "brows", "eyes", "lips", "nose")
+
 
 class FaceLandmarks:
     """Envoltura mínima del Face Landmarker de MediaPipe (tarea .task)."""
@@ -101,6 +125,8 @@ class FaceLandmarks:
         landmarks: np.ndarray,
         size: tuple[int, int],
         thickness: float = 2.2,
+        features: tuple[str, ...] = FEATURES,
+        lips_scale: float = 1.0,
     ) -> np.ndarray:
         """Dibuja los rasgos como mapa de líneas (1.0 = línea, 0.0 = vacío).
 
@@ -125,34 +151,72 @@ class FaceLandmarks:
 
         # Óvalo de la cara: solo la mandíbula (por debajo de la línea de los
         # ojos). Con la frente sale una cabeza de "huevo" calvo.
-        for connection in self._connections.get("oval", []):
-            start, end = connection.start, connection.end
-            if min(float(landmarks[start][1]), float(landmarks[end][1])) < eye_y:
-                continue
-            line(to_px(start), to_px(end))
+        if "jaw" in features:
+            for connection in self._connections.get("oval", []):
+                start, end = connection.start, connection.end
+                if min(float(landmarks[start][1]), float(landmarks[end][1])) < eye_y:
+                    continue
+                line(to_px(start), to_px(end))
 
-        for name in ("brows", "eyes", "lips"):
+        for name in ("brows", "eyes"):
+            if name not in features:
+                continue
             for connection in self._connections.get(name, []):
                 line(to_px(connection.start), to_px(connection.end))
 
-        for start, end in NOSE_SEGMENTS:
-            if start < len(landmarks) and end < len(landmarks):
-                line(to_px(start), to_px(end))
+        if "nose" in features:
+            for start, end in NOSE_SEGMENTS:
+                if start < len(landmarks) and end < len(landmarks):
+                    line(to_px(start), to_px(end))
+
+        # Labios: la abertura de la boca, como una sola polilínea cerrada.
+        if "lips" in features:
+            points = np.array(
+                [to_px(index) for index in LIPS if index < len(landmarks)],
+                dtype=np.float32,
+            )
+            if len(points) >= 3:
+                if lips_scale != 1.0:
+                    centre = points.mean(axis=0)
+                    points = centre + (points - centre) * lips_scale
+                cv2.polylines(
+                    canvas,
+                    [np.round(points).astype(np.int32)],
+                    True,
+                    1.0,
+                    int(round(thickness)),
+                    cv2.LINE_AA,
+                )
+            # Borde inferior del labio: segunda linea de la boca.
+            lower = np.array(
+                [to_px(index) for index in LIPS_LOWER if index < len(landmarks)],
+                dtype=np.float32,
+            )
+            if len(lower) >= 2:
+                cv2.polylines(
+                    canvas,
+                    [np.round(lower).astype(np.int32)],
+                    False,
+                    1.0,
+                    int(round(thickness)),
+                    cv2.LINE_AA,
+                )
 
         # Iris: círculo alrededor del centro + pupila.
-        for center_index in (RIGHT_IRIS_CENTER, LEFT_IRIS_CENTER):
-            if center_index >= len(landmarks):
-                continue
-            ring = landmarks[center_index : center_index + 5]
-            if len(ring) < 4:
-                continue
-            centre = landmarks[center_index]
-            radius = float(np.mean(np.hypot(ring[:, 0] - centre[0], ring[:, 1] - centre[1])))
-            # Iris un poco menor que el real: con el tamaño completo el ojo
-            # queda de "muñeca" y el boceto parece un dibujo animado.
-            pixel_radius = max(2, int(round(radius * 0.8)))
-            center_px = to_px(center_index)
-            cv2.circle(canvas, center_px, pixel_radius, 1.0, int(round(thickness)), cv2.LINE_AA)
-            cv2.circle(canvas, center_px, max(1, int(round(pixel_radius * 0.4))), 1.0, -1, cv2.LINE_AA)
+        if "eyes" in features:
+            for center_index in (RIGHT_IRIS_CENTER, LEFT_IRIS_CENTER):
+                if center_index >= len(landmarks):
+                    continue
+                ring = landmarks[center_index : center_index + 5]
+                if len(ring) < 4:
+                    continue
+                centre = landmarks[center_index]
+                radius = float(np.mean(np.hypot(ring[:, 0] - centre[0], ring[:, 1] - centre[1])))
+                # Iris un poco menor que el real: con el tamaño completo el ojo
+                # queda de "muñeca" y el boceto parece un dibujo animado.
+                pixel_radius = max(2, int(round(radius * 0.8)))
+                center_px = to_px(center_index)
+                cv2.circle(canvas, center_px, pixel_radius, 1.0, int(round(thickness)), cv2.LINE_AA)
+                cv2.circle(canvas, center_px, max(1, int(round(pixel_radius * 0.4))), 1.0, -1, cv2.LINE_AA)
 
         return canvas

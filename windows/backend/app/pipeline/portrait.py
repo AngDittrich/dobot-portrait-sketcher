@@ -25,11 +25,35 @@ import numpy as np
 from . import sketch as sketch_ops
 from . import vectorize as vectorize_ops
 from .landmarks import FaceLandmarks
+from .lineart import LineArtModel
 from .segmentation import FaceDetector, U2NetHuman
 
 ELLIPSE_AXES = (0.95, 1.0)  # respecto al ancho/alto del bbox de YuNet
 FEATHER = 25
 TARGET_PX = 900
+# Umbrales del modelo de line art, en escala de gris (1 = papel, 0 = linea).
+# "strong" es la tinta segura; "weak" son los trazos tenues (pelo, barba) que
+# solo se conservan si tocan a una linea fuerte. Con un unico umbral fijo
+# el dibujo salia troceado: se perdian los ojos y la barba.
+LINEART_STRONG = 0.72
+LINEART_WEAK = 0.86
+# Cierre morfológico antes de adelgazar: une los huecos de 1-2 px que deja
+# el umbral para que el esqueleto salga en trazos largos, no en guiones.
+LINEART_CLOSE = 3
+# Motas de ruido que se descartan (en px de area). Con 24 se perdia pelo.
+LINEART_SPECK_AREA = 6
+
+
+def prepare_for_lineart(image: np.ndarray) -> np.ndarray:
+    """Limpia la foto antes del modelo: quita el granulado y recupera pelo oscuro."""
+    denoised = image
+    for _ in range(2):
+        denoised = cv2.bilateralFilter(denoised, 7, 50, 50)
+    lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
+    lightness, a_channel, b_channel = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    lab = cv2.merge((clahe.apply(lightness), a_channel, b_channel))
+    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
 
 # Landmark de la barbilla (el punto más bajo de la cara).
 CHIN_LANDMARK = 152
@@ -181,12 +205,14 @@ class PortraitRenderer:
         self.face = FaceDetector(models_dir / "face_detection_yunet_2023mar.onnx")
         self.u2net = U2NetHuman(models_dir / "u2net_human_seg.onnx")
         self.landmarks = FaceLandmarks(models_dir / "face_landmarker.task")
+        self.lineart = LineArtModel(models_dir)
 
     def health(self) -> dict:
         return {
             "face_detector": self.face.available,
             "u2net": self.u2net.available,
             "landmarks": self.landmarks.available,
+            "lineart": self.lineart.available,
         }
 
     def render(
@@ -200,6 +226,9 @@ class PortraitRenderer:
         use_landmarks: bool = True,
         use_ellipse: bool = True,
         target_px: int = TARGET_PX,
+        use_lineart: bool = True,
+        lineart_strong: float = LINEART_STRONG,
+        lineart_weak: float = LINEART_WEAK,
     ) -> dict:
         started = time.perf_counter()
         height, width = image.shape[:2]
@@ -234,30 +263,37 @@ class PortraitRenderer:
 
         crop = crop_and_upscale(cutout_full, box, target_px=target_px)
 
-        gray = sketch_ops.to_gray(crop, contrast)
-        lines = sketch_ops.xdog(gray, sigma=sigma, epsilon=epsilon, phi=phi)
-
-        # Silueta (pelo) + rasgos: por encima de lo que encuentre el XDoG.
-        silhouette = silhouette_lines(alpha, box, (crop.shape[1], crop.shape[0]))
-        lines = np.maximum(lines, silhouette)
-
         landmark_lines = None
-        if landmarks is not None:
-            # Los landmarks están en coordenadas de la imagen completa:
-            # hay que llevarlos al recorte (x0, y0) y escalarlos.
-            x0, y0, x1, y1 = box
-            crop_width, crop_height = crop.shape[1], crop.shape[0]
-            scale_x = crop_width / max(1, (x1 - x0))
-            scale_y = crop_height / max(1, (y1 - y0))
-            scaled = landmarks.copy()
-            scaled[:, 0] = (scaled[:, 0] * width - x0) * scale_x
-            scaled[:, 1] = (scaled[:, 1] * height - y0) * scale_y
-            landmark_lines = self.landmarks.draw_lines(scaled, (crop_width, crop_height))
-            lines = np.maximum(lines, landmark_lines)
+        if use_lineart and self.lineart.available:
+            # Camino bueno: el modelo de line art ya dibuja el pelo, la barba
+            # y las gafas. La mascara sale con histéresis (tinta fuerte
+            # siempre, tinta debil solo si toca a una fuerte) y encima se
+            # superponen los landmarks de MediaPipe, que son la geometria
+            # correcta de la cara: sin ellos el dibujo depende de que el
+            # modelo acierte con los ojos y la boca.
+            art = self.lineart.art(prepare_for_lineart(crop))
+            mask = self.lineart.hysteresis(
+                art, strong=lineart_strong, weak=lineart_weak
+            )
+            kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (LINEART_CLOSE, LINEART_CLOSE)
+            )
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+            if use_landmarks and landmarks is not None:
+                landmark_lines = self._landmark_lines(landmarks, box, crop, image.shape)
+                mask = np.maximum(
+                    mask, (landmark_lines > 0.5).astype(np.uint8) * 255
+                )
+            lines = mask.astype(np.float32) / 255.0
+        else:
+            # Respaldo: sin modelo de line art se usa XDoG (mas tosco).
+            lines = self._xdog_lines(crop, alpha, box, sigma, epsilon, phi, contrast)
+            landmark_lines = self._landmark_lines(landmarks, box, crop, image.shape)
+            if landmark_lines is not None:
+                lines = np.maximum(lines, landmark_lines)
+            mask = vectorize_ops.lines_to_mask(lines, threshold)
 
-        mask = vectorize_ops.remove_specks(
-            vectorize_ops.lines_to_mask(lines, threshold), min_area=24
-        )
+        mask = vectorize_ops.remove_specks(mask, min_area=LINEART_SPECK_AREA)
 
         return {
             "face": face,
@@ -275,3 +311,25 @@ class PortraitRenderer:
             "mask": mask,
             "total_ms": round((time.perf_counter() - started) * 1000, 1),
         }
+
+    def _xdog_lines(self, crop, alpha, box, sigma, epsilon, phi, contrast) -> np.ndarray:
+        gray = sketch_ops.to_gray(crop, contrast)
+        lines = sketch_ops.xdog(gray, sigma=sigma, epsilon=epsilon, phi=phi)
+        # Silueta (pelo) + rasgos: por encima de lo que encuentre el XDoG.
+        silhouette = silhouette_lines(alpha, box, (crop.shape[1], crop.shape[0]))
+        return np.maximum(lines, silhouette)
+
+    def _landmark_lines(self, landmarks, box, crop, image_shape):
+        if landmarks is None:
+            return None
+        # Los landmarks están en coordenadas de la imagen completa:
+        # hay que llevarlos al recorte (x0, y0) y escalarlos.
+        height, width = image_shape[:2]
+        x0, y0, x1, y1 = box
+        crop_width, crop_height = crop.shape[1], crop.shape[0]
+        scale_x = crop_width / max(1, (x1 - x0))
+        scale_y = crop_height / max(1, (y1 - y0))
+        scaled = landmarks.copy()
+        scaled[:, 0] = (scaled[:, 0] * width - x0) * scale_x
+        scaled[:, 1] = (scaled[:, 1] * height - y0) * scale_y
+        return self.landmarks.draw_lines(scaled, (crop_width, crop_height))
