@@ -82,6 +82,30 @@ def remove_specks(mask: np.ndarray, min_area: int = 12) -> np.ndarray:
     return cleaned
 
 
+def strokes_from_mask(mask: np.ndarray, min_length_px: float = 10.0) -> list[np.ndarray]:
+    """Contorno de cada mancha de tinta, no su esqueleto.
+
+    Adelgazar la máscara convierte un ojo o una ceja en unos píxeles sueltos
+    y el filtro de trazos cortos los tira: la cara queda vacía. El contorno
+    sigue la forma que ya se ve en el boceto (párpado, nariz, labios, pelo).
+    """
+    binary = (mask > 0).astype(np.uint8)
+    if not binary.any():
+        return []
+    contours, _ = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+    strokes: list[np.ndarray] = []
+    for contour in contours:
+        points = contour.reshape(-1, 2).astype(np.float32)
+        if len(points) < 3:
+            continue
+        if float(np.hypot(*(points[0] - points[-1]))) > 1.5:
+            points = np.vstack((points, points[:1]))
+        if _polyline_length(points) < min_length_px:
+            continue
+        strokes.append(points)
+    return strokes
+
+
 def skeletonize(mask: np.ndarray) -> np.ndarray:
     """Adelgaza la máscara de líneas a un esqueleto de 1 px.
 
