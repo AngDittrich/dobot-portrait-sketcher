@@ -1,6 +1,7 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import type Webcam from 'react-webcam'
+import { useFraming } from '../../hooks/useFraming'
 import { usePhotobooth } from '../../hooks/usePhotobooth'
 import type { PhotoboothStatus } from '../../hooks/usePhotobooth'
 import { BoothControls } from './BoothControls'
@@ -45,6 +46,21 @@ export function PhotoboothApp() {
   const webcamRef = useRef<Webcam>(null)
   const booth = usePhotobooth(webcamRef)
   const [cameraError, setCameraError] = useState(false)
+  const watching = !cameraError && (booth.status === 'camera' || booth.status === 'countdown')
+  const pose = useFraming(webcamRef, watching)
+  const autoShot = useRef(false)
+
+  // Silueta verde → la cuenta de 3 empieza sola. Si se sale, se cancela.
+  const { status, start, release } = booth
+  useEffect(() => {
+    if (status === 'camera' && pose === 'ready') {
+      autoShot.current = true
+      start()
+    } else if (status === 'countdown' && pose === 'off' && autoShot.current) {
+      autoShot.current = false
+      release()
+    }
+  }, [status, pose, start, release])
   const [webcamKey, setWebcamKey] = useState(0)
 
   const handleCameraReady = useCallback(() => setCameraError(false), [])
@@ -111,6 +127,7 @@ export function PhotoboothApp() {
                   sketch={booth.sketch}
                   progress={booth.progress}
                   cameraError={cameraError}
+                  pose={pose ?? 'off'}
                   onCameraReady={handleCameraReady}
                   onCameraError={handleCameraError}
                   onRetryCamera={retryCamera}
@@ -120,7 +137,10 @@ export function PhotoboothApp() {
                     countdown={booth.countdown}
                     progress={booth.progress}
                     cameraError={cameraError}
-                    onStart={booth.start}
+                    onStart={() => {
+                      autoShot.current = false
+                      booth.start()
+                    }}
                   />
                 </CameraStage>
               </div>
@@ -156,7 +176,11 @@ export function PhotoboothApp() {
       <ConfettiCanvas trigger={booth.celebrationId} />
 
       <p className="sr-only" aria-live="polite">
-        {STATUS_MESSAGES[booth.status]}
+        {booth.status === 'camera'
+          ? pose === 'ready'
+            ? 'Encuadre listo. La foto se toma en 3 segundos.'
+            : 'Colócate dentro de la silueta.'
+          : STATUS_MESSAGES[booth.status]}
         {booth.status === 'countdown' && booth.countdown > 0 ? ` ${booth.countdown}` : ''}
       </p>
     </div>

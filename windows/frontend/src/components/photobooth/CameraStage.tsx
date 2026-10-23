@@ -3,8 +3,10 @@ import { CameraOff } from 'lucide-react'
 import Webcam from 'react-webcam'
 import type { ReactNode, RefObject } from 'react'
 import type { PhotoboothStatus } from '../../hooks/usePhotobooth'
+import type { FramingPose } from '../../hooks/useFraming'
 import { CountdownOverlay } from './CountdownOverlay'
 import { FlashOverlay } from './FlashOverlay'
+import { FramingGuide } from './FramingGuide'
 import { ProcessingOverlay } from './ProcessingOverlay'
 
 interface CameraStageProps {
@@ -17,6 +19,8 @@ interface CameraStageProps {
   sketch: string | null
   progress: number
   cameraError: boolean
+  /** Verde cuando la cara está dentro de la silueta. */
+  pose: FramingPose
   onCameraReady: () => void
   onCameraError: () => void
   onRetryCamera: () => void
@@ -39,6 +43,7 @@ export function CameraStage({
   sketch,
   progress,
   cameraError,
+  pose,
   onCameraReady,
   onCameraError,
   onRetryCamera,
@@ -108,6 +113,8 @@ export function CameraStage({
 
       {/* Barrido de luz ambiental mientras el robot espera */}
       {status === 'camera' && !cameraError && <div className="booth-scan" aria-hidden="true" />}
+
+      {liveVisible && !cameraError && <FramingGuide pose={pose} />}
 
       {showFrame && (
         <>
