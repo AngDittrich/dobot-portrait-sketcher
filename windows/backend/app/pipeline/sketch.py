@@ -89,6 +89,165 @@ def binarize(lines: np.ndarray, threshold: float = 0.20) -> np.ndarray:
     return 255 - mask
 
 
+# Parámetros del laboratorio: son los que dejaban el boceto limpio en la
+# cabina (bilateral suave, XDoG un poco más ancho que el de la ruta vieja).
+LAB_SIGMA = 1.2
+LAB_PHI = 40.0
+LAB_CONTRAST = 0.4
+SPECK_AREA = 8
+
+
+def lab_to_gray(image: np.ndarray, contrast: float = LAB_CONTRAST) -> np.ndarray:
+    """Gris del laboratorio: bilateral 35 y CLAHE 8×8."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.bilateralFilter(gray, d=7, sigmaColor=35, sigmaSpace=7)
+    contrast = float(np.clip(contrast, 0.0, 1.0))
+    if contrast > 0:
+        equalized = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+        gray = cv2.addWeighted(gray, 1.0 - contrast, equalized, contrast, 0)
+    return gray.astype(np.float32) / 255.0
+
+
+def _dark_glasses(gray: np.ndarray, points: np.ndarray) -> tuple[bool, float]:
+    """True si hay lentes oscuros. Compara el brillo de los ojos con las mejillas."""
+    height, width = gray.shape[:2]
+    eye_ids = (468, 473) if len(points) > 468 else (159, 386)
+    cheek_ids = (205, 425)
+
+    def sample(index: int, radius: int = 4) -> float:
+        x, y = int(points[index][0]), int(points[index][1])
+        x0, x1 = max(0, x - radius), min(width, x + radius)
+        y0, y1 = max(0, y - radius), min(height, y + radius)
+        if x0 == x1 or y0 == y1:
+            return 127.0
+        return float(gray[y0:y1, x0:x1].mean())
+
+    eye_mean = sum(sample(index) for index in eye_ids) / 2.0
+    cheek_mean = sum(sample(index) for index in cheek_ids) / 2.0
+    ratio = eye_mean / max(cheek_mean, 1e-6)
+    # En esta webcam un ojo normal ya ronda 0.40. Solo se omiten los ojos
+    # si el iris está tapado de verdad (lentes oscuros).
+    return ratio < 0.34, ratio
+
+
+def _torso_fade(shape: tuple[int, int], chin_y: float, face_h: float) -> np.ndarray | None:
+    """Máscara 1..0 que apaga las arrugas de la playera bajo el pecho."""
+    height, width = shape[:2]
+    start = chin_y + 0.7 * face_h
+    end = min(float(height), chin_y + 1.8 * face_h)
+    if end <= start or face_h <= 0:
+        return None
+    rows = np.arange(height, dtype=np.float32)
+    fade = np.clip((end - rows) / max(1.0, end - start), 0.0, 1.0)
+    return np.broadcast_to(fade[:, None], (height, width)).copy()
+
+
+def _open_mask(lines: np.ndarray, threshold) -> np.ndarray:
+    """Umbral (escalar o mapa) → 255 donde hay línea, sin motas de 1-2 px."""
+    mask = (lines >= threshold).astype(np.uint8) * 255
+    return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+
+
+def _drop_specks(mask: np.ndarray, min_area: int = SPECK_AREA) -> np.ndarray:
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    keep = np.zeros_like(mask)
+    for index in range(1, count):
+        if stats[index, cv2.CC_STAT_AREA] >= min_area:
+            keep[labels == index] = 255
+    return keep
+
+
+def lab_portrait_lines(
+    crop: np.ndarray,
+    landmarks_px: np.ndarray | None,
+    landmarker,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Boceto del laboratorio sobre el recorte ya puesto en blanco.
+
+    XDoG + rasgos de MediaPipe (cejas un poco más gruesas, sin ojos si hay
+    lentes oscuros) + fundido del torso + umbral más suave dentro de la cara.
+    Devuelve (intensidad 0..1, máscara con 255 en la tinta, metadatos).
+    """
+    gray = lab_to_gray(crop)
+    lines = xdog(gray, sigma=LAB_SIGMA, phi=LAB_PHI)
+    glasses, ratio = "clear", 1.0
+    landmark_map = None
+    faded = False
+    zoned = False
+
+    if landmarks_px is not None and landmarker is not None:
+        try:
+            raw = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+            dark, ratio = _dark_glasses(raw, landmarks_px)
+            glasses = "dark" if dark else "clear"
+            width, height = crop.shape[1], crop.shape[0]
+            features = (
+                ("jaw", "brows", "lips", "nose")
+                if dark
+                else ("jaw", "brows", "eyes", "lips", "nose")
+            )
+            base = tuple(name for name in features if name != "brows")
+            drawn_base = landmarker.draw_lines(
+                landmarks_px, (width, height), thickness=1.2, features=base
+            )
+            drawn_brows = landmarker.draw_lines(
+                landmarks_px, (width, height), thickness=1.5, features=("brows",)
+            )
+            landmark_map = np.maximum(drawn_base, drawn_brows)
+            lines = np.maximum(lines, landmark_map)
+        except Exception:
+            landmark_map = None
+
+        try:
+            from .landmarks import CHIN, LEFT_EYE_OUTER, RIGHT_EYE_OUTER
+
+            height, width = crop.shape[:2]
+            eye_y = 0.5 * (
+                float(landmarks_px[RIGHT_EYE_OUTER][1]) + float(landmarks_px[LEFT_EYE_OUTER][1])
+            )
+            chin_y = float(landmarks_px[CHIN][1])
+            fade = _torso_fade((height, width), chin_y, chin_y - eye_y)
+            if fade is not None:
+                lines = lines * fade
+                faded = True
+        except Exception:
+            pass
+
+        try:
+            height, width = crop.shape[:2]
+            hull = cv2.convexHull(np.round(landmarks_px[landmarker.oval_indices()]).astype(np.int32))
+            zone = np.zeros((height, width), np.float32)
+            cv2.fillConvexPoly(zone, hull, 1.0)
+            zone = cv2.GaussianBlur(zone, (0, 0), max(3, int(0.01 * (width + height) / 2)))
+            outside = 1.0 - zone
+            weak = (lines < 0.5).astype(np.float32)
+            lines = lines * (1.0 - outside * weak * 0.8)
+            ink = _drop_specks(_open_mask(lines, 0.28 - 0.16 * zone))
+            if landmark_map is not None:
+                # Tinta débil y aislada dentro de la cara que no toca un rasgo:
+                # se borra. Lo fuerte y los rasgos (dilatados) se quedan.
+                protect = (
+                    cv2.dilate((landmark_map > 0.5).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+                )
+                inside = zone > 0.5
+                weak_skin = ((ink == 255) & inside & (lines < 0.5) & ~protect).astype(np.uint8) * 255
+                kept = _drop_specks(weak_skin, 16)
+                ink = np.where((weak_skin == 255) & (kept == 0), 0, ink).astype(np.uint8)
+            zoned = True
+        except Exception:
+            zoned = False
+
+    if not zoned:
+        ink = _drop_specks(_open_mask(lines, 0.20))
+
+    return lines, ink, {
+        "glasses": glasses,
+        "glasses_ratio": round(float(ratio), 3),
+        "fade": faded,
+        "zoned": zoned,
+    }
+
+
 def pencil_sketch(image: np.ndarray) -> np.ndarray:
     """Fallback clásico de OpenCV, para comparar con XDoG."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)

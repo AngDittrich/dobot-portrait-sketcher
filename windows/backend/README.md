@@ -5,14 +5,13 @@ líneas y prepara la trayectoria que dibuja el Dobot MG400.
 
 ## Qué hace
 
-1. **Foto -> retrato**: U2Net (persona) + YuNet (cara) recortan la cabeza
-   (pelo + cara + un poco de hombros) y dejan el fondo fuera.
-2. **Líneas**: modelo de line art (Paint2Sketch, `line-drawings.onnx`) dibuja
-   pelo, barba, gafas y textura; el resultado se limpia con umbral de
-   histéresis (tinta fuerte siempre, tinta débil solo si toca a una fuerte) y
-   un cierre morfológico. Encima se superponen los landmarks de MediaPipe
-   (mandíbula, cejas, ojos con iris, nariz, abertura de la boca), que son la
-   geometría correcta de la cara. Sin modelo de line art se cae al XDoG.
+1. **Foto -> retrato**: U2Net (persona) se afina con GrabCut en el borde,
+   se queda el componente de la cara (YuNet) y se recorta la cabeza
+   (pelo + cara + un poco de hombros).
+2. **Líneas** (lo que salió del laboratorio): XDoG, landmarks de MediaPipe
+   con cejas un poco más gruesas, sin ojos cuando hay lentes oscuros,
+   fundido del torso y umbral más suave dentro de la cara. El modelo de
+   line art (`line-drawings.onnx`) queda como ruta opcional (`use_lineart`).
 3. **Vector**: thinning (esqueleto) → polilíneas → RDP → puente de trazos
    alineados (solo une extremos cercanos si las direcciones encajan) → orden
    de dibujo (vecino más cercano + 2-opt) → poda por presupuesto de tiempo.

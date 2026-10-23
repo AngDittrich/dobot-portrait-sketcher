@@ -1,11 +1,12 @@
 """Pipeline de retrato "calidad": fondo fuera + rasgos marcados + líneas.
 
-Ruta por defecto (XDoG + landmarks + silueta): es la que mejor funciona
-con fotos de webcam reales y la que mejor dibuja el MG400:
+Ruta por defecto (la del laboratorio, la que dibuja el MG400):
 
-    YuNet (rostro) + U2Net (persona)  ->  recorte de la cabeza (pelo + cara)
-    + MediaPipe landmarks             ->  contorno de mandíbula, cejas, ojos
-    + XDoG                            ->  pelo, contorno y rasgos
+    YuNet (rostro) + U2Net refinado con GrabCut  ->  persona sin fondo
+    recorte de la cabeza (pelo + cara)
+    + XDoG del laboratorio
+    + MediaPipe (cejas más marcadas, sin ojos si hay lentes oscuros)
+    + fundido del torso y umbral más suave dentro de la cara
     = máscara de líneas lista para vectorizar
 
 Ruta opcional (`use_lineart=True`): modelo line-drawings.onnx (estilo
@@ -245,8 +246,12 @@ class PortraitRenderer:
         if use_landmarks and self.landmarks.available:
             landmarks = self.landmarks.detect(image)
 
-        # Máscara de persona: conserva el pelo y quita el fondo.
-        alpha = self.u2net.predict(image) if self.u2net.available else None
+        # Máscara de persona del laboratorio: U2Net + GrabCut en el borde.
+        alpha = (
+            self.u2net.segment(image, face["bbox"] if face else None)
+            if self.u2net.available
+            else None
+        )
         if alpha is None:
             # Respaldo: sin U2Net se usa una elipse alrededor de la cara.
             alpha = (
@@ -270,6 +275,7 @@ class PortraitRenderer:
         crop = crop_and_upscale(cutout_full, box, target_px=target_px)
 
         landmark_lines = None
+        lab_meta: dict = {}
         if use_lineart and self.lineart.available:
             # Ruta opcional: el modelo de line art estilo anime genera tramas
             # ruidosas que fragmentan los trazos del robot y empeoran el
@@ -292,16 +298,18 @@ class PortraitRenderer:
                     mask, (landmark_lines > 0.5).astype(np.uint8) * 255
                 )
             lines = mask.astype(np.float32) / 255.0
+            mask = vectorize_ops.remove_specks(mask, min_area=LINEART_SPECK_AREA)
         else:
-            # Ruta por defecto: XDoG + silueta de U2Net + landmarks.
-            # Líneas limpias y continuas, óptimas para vectorizar.
-            lines = self._xdog_lines(crop, alpha, box, sigma, epsilon, phi, contrast)
-            landmark_lines = self._landmark_lines(landmarks, box, crop, image.shape)
-            if landmark_lines is not None:
-                lines = np.maximum(lines, landmark_lines)
-            mask = vectorize_ops.lines_to_mask(lines, threshold)
-
-        mask = vectorize_ops.remove_specks(mask, min_area=LINEART_SPECK_AREA)
+            # Boceto del laboratorio sobre el recorte (lentes, zonas, torso).
+            # Esta ruta usa los valores afinados en el lab. La silueta de
+            # U2Net no se redibuja: el borde duro contra el blanco ya entra
+            # en el XDoG.
+            scaled = self._scaled_landmarks(landmarks, box, crop, image.shape)
+            lines, mask, lab_meta = sketch_ops.lab_portrait_lines(
+                crop,
+                scaled,
+                self.landmarks if scaled is not None else None,
+            )
 
         return {
             "face": face,
@@ -317,8 +325,23 @@ class PortraitRenderer:
             "lines": lines,
             "landmark_lines": landmark_lines,
             "mask": mask,
+            "lab": lab_meta,
             "total_ms": round((time.perf_counter() - started) * 1000, 1),
         }
+
+    def _scaled_landmarks(self, landmarks, box, crop, image_shape):
+        """Landmarks de la foto completa, en píxeles del recorte."""
+        if landmarks is None:
+            return None
+        height, width = image_shape[:2]
+        x0, y0, x1, y1 = box
+        crop_width, crop_height = crop.shape[1], crop.shape[0]
+        scale_x = crop_width / max(1, (x1 - x0))
+        scale_y = crop_height / max(1, (y1 - y0))
+        scaled = landmarks.copy()
+        scaled[:, 0] = (scaled[:, 0] * width - x0) * scale_x
+        scaled[:, 1] = (scaled[:, 1] * height - y0) * scale_y
+        return scaled
 
     def _xdog_lines(self, crop, alpha, box, sigma, epsilon, phi, contrast) -> np.ndarray:
         gray = sketch_ops.to_gray(crop, contrast)
@@ -328,16 +351,7 @@ class PortraitRenderer:
         return np.maximum(lines, silhouette)
 
     def _landmark_lines(self, landmarks, box, crop, image_shape):
-        if landmarks is None:
+        scaled = self._scaled_landmarks(landmarks, box, crop, image_shape)
+        if scaled is None:
             return None
-        # Los landmarks están en coordenadas de la imagen completa:
-        # hay que llevarlos al recorte (x0, y0) y escalarlos.
-        height, width = image_shape[:2]
-        x0, y0, x1, y1 = box
-        crop_width, crop_height = crop.shape[1], crop.shape[0]
-        scale_x = crop_width / max(1, (x1 - x0))
-        scale_y = crop_height / max(1, (y1 - y0))
-        scaled = landmarks.copy()
-        scaled[:, 0] = (scaled[:, 0] * width - x0) * scale_x
-        scaled[:, 1] = (scaled[:, 1] * height - y0) * scale_y
-        return self.landmarks.draw_lines(scaled, (crop_width, crop_height))
+        return self.landmarks.draw_lines(scaled, (crop.shape[1], crop.shape[0]))

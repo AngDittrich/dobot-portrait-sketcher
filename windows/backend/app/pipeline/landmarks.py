@@ -120,6 +120,15 @@ class FaceLandmarks:
         points = result.face_landmarks[0]
         return np.array([(p.x, p.y) for p in points], dtype=np.float32)
 
+    def oval_indices(self) -> list[int]:
+        """Índices del anillo del óvalo facial (para la máscara de la cara)."""
+        self._ensure()
+        seen: dict[int, None] = {}
+        for connection in self._connections.get("oval", []):
+            seen.setdefault(connection.start)
+            seen.setdefault(connection.end)
+        return list(seen.keys())
+
     def draw_lines(
         self,
         landmarks: np.ndarray,
