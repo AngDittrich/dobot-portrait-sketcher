@@ -53,6 +53,7 @@ interface PhotoboothState {
 type Action =
   | { type: 'BEGIN' }
   | { type: 'START' }
+  | { type: 'RELEASE' }
   | { type: 'TICK' }
   | { type: 'CAPTURED'; photo: string }
   | { type: 'REVEAL' }
@@ -105,6 +106,9 @@ function reducer(state: PhotoboothState, action: Action): PhotoboothState {
       return cleared('camera', { celebrationId: state.celebrationId })
     case 'START':
       return { ...state, status: 'countdown', countdown: COUNTDOWN_FROM }
+    case 'RELEASE':
+      if (state.status !== 'countdown') return state
+      return { ...state, status: 'camera', countdown: COUNTDOWN_FROM }
     case 'TICK':
       return { ...state, countdown: state.countdown - 1 }
     case 'CAPTURED':
@@ -323,6 +327,9 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
 
   const start = useCallback(() => dispatch({ type: 'START' }), [])
 
+  /** Sale de la cuenta si la persona se salió de la silueta. */
+  const release = useCallback(() => dispatch({ type: 'RELEASE' }), [])
+
   const accept = useCallback(() => {
     dispatch({ type: 'DRAW' })
     void startRobotJob()
@@ -344,6 +351,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     robotJob,
     begin,
     start,
+    release,
     accept,
     retake,
     dismissToast,

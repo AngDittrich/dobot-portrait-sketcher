@@ -1,6 +1,6 @@
 """API de la Cabina de Retratos (Dobot MG400).
 
-Contrato que consume el frontend React (`windows/src`):
+Contrato que consume el frontend React (`windows/frontend`):
 
     POST /api/sketch        foto (data URL) -> boceto + SVG + trayectoria
     POST /api/jobs          boceto aprobado  -> trabajo de dibujo del robot
@@ -125,18 +125,11 @@ def build_sketch(image, params: SketchParams) -> dict:
     crop = portrait["crop"]
     crop_height, crop_width = crop.shape[:2]
 
-    skeleton = vectorize_ops.skeletonize(mask)
-    strokes_px = vectorize_ops.extract_strokes(
-        skeleton, min_length_px=params.min_stroke_px
-    )
+    # Contorno de la tinta. El esqueleto (medial axis) borraba ojos, nariz y
+    # pelo: eran manchas cortas y el robot se quedaba con el óvalo de la cara.
+    strokes_px = vectorize_ops.strokes_from_mask(mask, min_length_px=params.min_stroke_px)
     simplified = [vectorize_ops.simplify_stroke(s, params.simplify_px) for s in strokes_px]
-    bridged = vectorize_ops.bridge_aligned_strokes(
-        simplified,
-        max_gap_px=params.bridge_gap_px,
-        max_angle_deg=params.bridge_angle_deg,
-    )
-    smoothed = [vectorize_ops.smooth_stroke(s) for s in bridged]
-    ordered = [stroke for stroke, _ in vectorize_ops.order_strokes(smoothed)]
+    ordered = [stroke for stroke, _ in vectorize_ops.order_strokes(simplified)]
     # Tope de tiempo: si el retrato sale muy largo se van los trazos mas
     # cortos (textura) antes de mandar al robot.
     ordered = vectorize_ops.prune_to_budget(
@@ -154,8 +147,7 @@ def build_sketch(image, params: SketchParams) -> dict:
         spacing_mm=params.spacing_mm,
     )
 
-    # Vista previa: exactamente las líneas que dibuja el robot (finas, sobre
-    # blanco). Antes se mostraba la máscara binaria y se veía gruesa y sucia.
+    # Vista previa: los mismos contornos que va a trazar el robot.
     preview = vectorize_ops.render_black_strokes(ordered, crop_width, crop_height, thickness=2)
     svg = vectorize_ops.strokes_to_svg(ordered, crop_width, crop_height)
 
@@ -172,6 +164,7 @@ def build_sketch(image, params: SketchParams) -> dict:
             "height": crop_height,
             "portrait_ms": portrait["total_ms"],
             "face_detected": portrait["face"] is not None,
+            **portrait.get("lab", {}),
         },
     }
 
