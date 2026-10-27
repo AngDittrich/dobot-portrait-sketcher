@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Cabina SYSCOM</string>
+    <string name="title_activity_main">Cabina SYSCOM</string>
+    <string name="package_name">com.syscom.cabina</string>
+    <string name="custom_url_scheme">com.syscom.cabina</string>
+</resources>
