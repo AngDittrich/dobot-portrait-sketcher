@@ -34,10 +34,12 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 API_URL = "https://openrouter.ai/api/v1/images"
 DEFAULT_TIMEOUT_S = 25.0
-# Fracción de píxeles que se quedan como tinta. El modelo devuelve línea negra
-# sobre blanco: fijar la cantidad de tinta conserva el trazo fino, mientras que
-# un umbral de Otsu se come el pelo y las zonas claras.
-INK_FRACTION = 0.05
+# Todo lo que no sea papel cuenta como tinta. El modelo no siempre dibuja con el
+# mismo grosor: con umbral por cuantil, las caras que dibujaba con línea fina se
+# partían en guiones (medido en spike_gpu/diag_thin.py). Fijo aguanta ambas.
+INK_THRESHOLD = 200
+# Cierre en px para volver a pegar los huecos de un píxel de la línea fina.
+GAP_CLOSE_PX = 3
 OUTPUT_WIDTH = 768
 OUTPUT_HEIGHT = 1024
 
@@ -223,21 +225,48 @@ def _request_image(settings: Settings, model: str, reference: np.ndarray) -> tup
 # ---------------------------------------------------------------------------
 
 
-def mask_from_png(png: bytes, ink_fraction: float = INK_FRACTION) -> np.ndarray:
+def mask_from_png(png: bytes, ink_threshold: int = INK_THRESHOLD) -> np.ndarray:
     """PNG del modelo -> máscara de tinta (255 = línea).
 
-    Se queda con la fracción `ink_fraction` más oscura: así una línea de un
-    píxel sigue siendo una línea, en vez del sombreado que sí se comería un
-    umbral fijo.
+    El umbral es fijo y generoso (todo lo que no sea papel cuenta como tinta)
+    porque el modelo no siempre dibuja igual: a una cara con gafas y barba le
+    pone trazo grueso y negro, y a una cara lisa se le va la mano a líneas
+    finas y claras. Con el umbral por cuantil que había antes, esa segunda
+    versión se partía en trozos y el robot dibujaba guiones. Medido sobre las
+    salidas reales: fijo + cierre de huecos da trazos 25 % más largos que el
+    cuantil, y aguanta las líneas claras.
+
+    El cierre de 3 px vuelve a pegar los huecos de un píxel que deja la línea
+    fina al binarizarse; sin él el contorno se corta y el ojo sale abierto.
     """
     image = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise SketchProviderError("el modelo devolvió un PNG ilegible")
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (3, 3), 0)
-    cutoff = float(np.quantile(gray, max(0.001, min(0.5, ink_fraction))))
-    mask = (gray <= cutoff).astype(np.uint8) * 255
+    mask = (gray <= max(1, min(254, ink_threshold))).astype(np.uint8) * 255
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (GAP_CLOSE_PX, GAP_CLOSE_PX))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
     return _drop_specks(mask, min_area=6)
+
+
+def _dump_debug(png: bytes, mask: np.ndarray, reference: np.ndarray, meta: dict) -> None:
+    """Guarda referencia, PNG del modelo y máscara si `SKETCH_DEBUG_DIR` existe.
+
+    Sirve para reproducir un caso raro (una cara que salió en guiones) sin
+    gastar otra llamada a la API. Apagado por defecto: en la expo no se escribe
+    nada en disco.
+    """
+    target = os.environ.get("SKETCH_DEBUG_DIR")
+    if not target:
+        return
+    folder = Path(target)
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    model = str(meta.get("model") or "modelo").replace("/", "_")
+    cv2.imwrite(str(folder / f"{stamp}_{model}_reference.png"), reference)
+    (folder / f"{stamp}_{model}_raw.png").write_bytes(png)
+    cv2.imwrite(str(folder / f"{stamp}_{model}_mask.png"), mask)
 
 
 def _drop_specks(mask: np.ndarray, min_area: int) -> np.ndarray:
@@ -303,6 +332,7 @@ def generate_mask(
             except SketchProviderError as exc:
                 errors.append(str(exc))
                 continue
+            _dump_debug(png, mask, reference, meta)
             meta["reference_sha"] = hashlib.sha256(reference.tobytes()).hexdigest()[:12]
             meta["size"] = f"{reference.shape[1]}x{reference.shape[0]}"
             return mask, meta
