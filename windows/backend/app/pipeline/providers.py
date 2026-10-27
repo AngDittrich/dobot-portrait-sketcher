@@ -36,7 +36,7 @@ API_URL = "https://openrouter.ai/api/v1/images"
 DEFAULT_TIMEOUT_S = 25.0
 # Todo lo que no sea papel cuenta como tinta. El modelo no siempre dibuja con el
 # mismo grosor: con umbral por cuantil, las caras que dibujaba con línea fina se
-# partían en guiones (medido en spike_gpu/diag_thin.py). Fijo aguanta ambas.
+# partían en guiones. Fijo aguanta ambas.
 INK_THRESHOLD = 200
 # Cierre en px para volver a pegar los huecos de un píxel de la línea fina.
 GAP_CLOSE_PX = 3
@@ -45,7 +45,8 @@ OUTPUT_HEIGHT = 1024
 
 # Prompt validado contra la API: con estas reglas el modelo deja de inventar
 # barba, respeta el peinado y no dibuja el texto de la camiseta (que llenaba el
-# dibujo de trazos basura). Ver spike_gpu/prompt_v2.txt.
+# dibujo de trazos basura). No cambiar sin volver a comparar contra una foto
+# real: las tres reglas existen por un defecto concreto que ya se vio en papel.
 PROMPT = """Redraw this photograph as a minimal black ink line drawing on plain white paper,
 in the style of a confident pen portrait by a fashion illustrator.
 

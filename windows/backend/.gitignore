@@ -7,5 +7,5 @@ __pycache__/
 *.pyc
 # Capturas crudas que deja SAVE_RAW=1 para comparar ajustes del boceto
 captures/
-# Salidas del banco de pruebas de difusion (spike_gpu/probe_gpu.py)
-spike_gpu/out/
+# Volcados de depuracion del proveedor de IA (SKETCH_DEBUG_DIR)
+sketch_debug/
