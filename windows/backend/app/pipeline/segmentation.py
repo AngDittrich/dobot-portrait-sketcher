@@ -170,11 +170,19 @@ class U2NetHuman:
         output = output / (output.max() + 1e-8)
         return cv2.resize(output, (width, height), interpolation=cv2.INTER_LINEAR)
 
-    def segment(self, image: np.ndarray, face_bbox: list | tuple | None = None) -> np.ndarray:
+    def segment(
+        self,
+        image: np.ndarray,
+        face_bbox: list | tuple | None = None,
+        stages: dict | None = None,
+    ) -> np.ndarray:
         """Máscara de persona del laboratorio: U2Net + GrabCut en el borde.
 
         Devuelve alpha 0..1 del tamaño original. Si el refinado falla, queda
         el umbral de U2Net. Sin modelo, el llamador usa su propio respaldo.
+
+        Con ``stages`` se guardan la probabilidad, la máscara previa y la
+        máscara ya afinada, en el tamaño de trabajo (máximo 640 px).
         """
         height, width = image.shape[:2]
         scale = min(1.0, 640.0 / max(height, width))
@@ -188,15 +196,21 @@ class U2NetHuman:
             small = image
         small_h, small_w = small.shape[:2]
         prob = self.predict(small)
-        mask = (prob > 0.5).astype(np.uint8) * 255
+        raw_mask = (prob > 0.5).astype(np.uint8) * 255
+        mask = raw_mask
         face_small = None
         if face_bbox is not None:
             x, y, w, h = (float(value) * scale for value in face_bbox)
             face_small = (int(x), int(y), int(w), int(h))
         try:
-            mask = refine_person_mask(small, mask, face_small)
+            mask = refine_person_mask(small, raw_mask, face_small)
         except Exception:
             pass
+        if stages is not None:
+            stages["prob"] = prob.copy()
+            stages["mask_before"] = raw_mask.copy()
+            stages["mask_after"] = mask.copy()
+            stages["work_wh"] = (int(small_w), int(small_h))
         if scale < 1.0:
             mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_LINEAR)
             mask = (mask > 127).astype(np.uint8) * 255

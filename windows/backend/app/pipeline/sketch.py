@@ -94,13 +94,21 @@ def binarize(lines: np.ndarray, threshold: float = 0.20) -> np.ndarray:
 LAB_SIGMA = 1.2
 LAB_PHI = 40.0
 LAB_CONTRAST = 0.4
+LAB_BILATERAL = 35.0
+# Dentro de la cara el umbral es INK_HIGH - INK_SPAN (más tinta). Afuera, INK_HIGH.
+INK_HIGH = 0.28
+INK_SPAN = 0.16
 SPECK_AREA = 8
 
 
-def lab_to_gray(image: np.ndarray, contrast: float = LAB_CONTRAST) -> np.ndarray:
+def lab_to_gray(
+    image: np.ndarray,
+    contrast: float = LAB_CONTRAST,
+    bilateral: float = LAB_BILATERAL,
+) -> np.ndarray:
     """Gris del laboratorio: bilateral 35 y CLAHE 8×8."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    gray = cv2.bilateralFilter(gray, d=7, sigmaColor=35, sigmaSpace=7)
+    gray = cv2.bilateralFilter(gray, d=7, sigmaColor=float(bilateral), sigmaSpace=7)
     contrast = float(np.clip(contrast, 0.0, 1.0))
     if contrast > 0:
         equalized = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
@@ -161,15 +169,28 @@ def lab_portrait_lines(
     crop: np.ndarray,
     landmarks_px: np.ndarray | None,
     landmarker,
+    sigma: float = LAB_SIGMA,
+    phi: float = LAB_PHI,
+    contrast: float = LAB_CONTRAST,
+    bilateral: float = LAB_BILATERAL,
+    ink_high: float = INK_HIGH,
+    ink_span: float = INK_SPAN,
+    speck_area: int = SPECK_AREA,
+    stages: dict | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict]:
     """Boceto del laboratorio sobre el recorte ya puesto en blanco.
 
     XDoG + rasgos de MediaPipe (cejas un poco más gruesas, sin ojos si hay
     lentes oscuros) + fundido del torso + umbral más suave dentro de la cara.
     Devuelve (intensidad 0..1, máscara con 255 en la tinta, metadatos).
+
+    Los argumentos extra repiten las constantes de la cabina. Si no se
+    pasan, el dibujo es el de siempre. Con ``stages`` se guardan las
+    imágenes intermedias para el laboratorio, sin alterar la tinta.
     """
-    gray = lab_to_gray(crop)
-    lines = xdog(gray, sigma=LAB_SIGMA, phi=LAB_PHI)
+    gray = lab_to_gray(crop, contrast=contrast, bilateral=bilateral)
+    lines = xdog(gray, sigma=sigma, phi=phi)
+    xdog_only = lines.copy() if stages is not None else None
     glasses, ratio = "clear", 1.0
     landmark_map = None
     faded = False
@@ -222,7 +243,7 @@ def lab_portrait_lines(
             outside = 1.0 - zone
             weak = (lines < 0.5).astype(np.float32)
             lines = lines * (1.0 - outside * weak * 0.8)
-            ink = _drop_specks(_open_mask(lines, 0.28 - 0.16 * zone))
+            ink = _drop_specks(_open_mask(lines, ink_high - ink_span * zone), speck_area)
             if landmark_map is not None:
                 # Tinta débil y aislada dentro de la cara que no toca un rasgo:
                 # se borra. Lo fuerte y los rasgos (dilatados) se quedan.
@@ -238,7 +259,14 @@ def lab_portrait_lines(
             zoned = False
 
     if not zoned:
-        ink = _drop_specks(_open_mask(lines, 0.20))
+        ink = _drop_specks(_open_mask(lines, 0.20), speck_area)
+
+    if stages is not None:
+        stages["gray"] = gray
+        stages["xdog"] = xdog_only
+        stages["landmarks"] = None if landmark_map is None else landmark_map.copy()
+        stages["fused"] = lines.copy()
+        stages["ink"] = ink.copy()
 
     return lines, ink, {
         "glasses": glasses,
