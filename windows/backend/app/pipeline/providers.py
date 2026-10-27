@@ -56,6 +56,10 @@ FIDELITY_RULES = """FIDELITY RULES, most important:
   the eyes, the same eyebrows, nose and lips.
 - Keep their real age. Do not beautify, slim, widen or age the face.
 - Keep the same hairstyle and hair length. Never restyle, shorten or lengthen it.
+- Keep the real hairline and the real amount of hair. Short, faded or shaved at
+  the sides is not the same as bald: draw the hair mass over the whole skull and
+  the visible hairline. Never give a receding hairline or an empty scalp that the
+  photo does not have.
 - Draw facial hair only if it is visible in the photo. Never invent a beard,
   mustache or goatee.
 - The eyes stay open with a visible pupil. Never draw them closed or as arcs."""
@@ -70,6 +74,9 @@ DRAWING_RULES = """DRAWING RULES:
   any kind. Fewer lines is better.
 - Hair and facial hair keep their real silhouette and volume, drawn with a few
   long confident strokes. Never leave the head bald or with a few stray hairs.
+- Hair, beards and mustaches are an outline with a few interior strokes, never a
+  filled solid black shape. A thin goatee or mustache stays thin: one contour,
+  not a black patch.
 - No words, letters, numbers, logos, signatures or watermarks anywhere.
 - Plain white background, nothing else in the frame: no border, no vignette.
 - Clothing stays blank unless a costume is added below.
