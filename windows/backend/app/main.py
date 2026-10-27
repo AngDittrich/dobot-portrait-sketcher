@@ -60,6 +60,12 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:4173",
         "http://127.0.0.1:4173",
+        # La app de Android (android/capacitor) sirve la UI desde
+        # https://localhost, así que su origen no es un puerto de Vite: sin
+        # esta línea el APK se queda con la pantalla en «convirtiendo» porque
+        # el navegador rechaza la primera llamada.
+        "https://localhost",
+        "capacitor://localhost",
     ],
     allow_methods=["*"],
     allow_headers=["*"],
