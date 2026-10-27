@@ -19,6 +19,9 @@ export function ProcessingOverlay({ photo, sketch, progress }: ProcessingOverlay
   const sketchT = progress <= IRIS_SHARE ? 0 : (progress - IRIS_SHARE) / (1 - IRIS_SHARE)
   const cover = sketchT * 200
   const band = Math.round(sketchT * 100)
+  // El iris ya se abrió pero el dibujo todavía no existe: en vez de dejar la
+  // foto quieta, una banda de grafito la recorre mientras se genera.
+  const waiting = !sketch && iris >= 1
 
   return (
     <div className="booth-processing" aria-hidden="true">
@@ -43,7 +46,7 @@ export function ProcessingOverlay({ photo, sketch, progress }: ProcessingOverlay
         />
       )}
 
-      {sketchT > 0 && sketchT < 1 && (
+      {!waiting && sketch && sketchT > 0 && sketchT < 1 && (
         <div
           className="booth-diagonal-glow"
           style={{
@@ -51,6 +54,8 @@ export function ProcessingOverlay({ photo, sketch, progress }: ProcessingOverlay
           }}
         />
       )}
+
+      {waiting && <div className="booth-diagonal-glow is-waiting" aria-hidden="true" />}
 
       <div className="booth-progress-rail">
         <div className="booth-progress-fill" style={{ width: `${Math.round(progress * 100)}%` }} />

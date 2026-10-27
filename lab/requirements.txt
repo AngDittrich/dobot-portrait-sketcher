@@ -1,5 +1,0 @@
-fastapi>=0.115
-uvicorn[standard]>=0.32
-numpy>=1.26,<3
-opencv-contrib-python>=4.10
-onnxruntime>=1.20

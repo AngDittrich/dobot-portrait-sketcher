@@ -73,6 +73,14 @@ export const IRIS_MS = 900
 export const SKETCH_MS = 3200
 export const REVEAL_MS = IRIS_MS + SKETCH_MS
 export const IRIS_SHARE = IRIS_MS / REVEAL_MS
+/**
+ * Hasta dónde llega el reveal mientras falta el dibujo. La IA tarda ~12 s y
+ * la animación dura 4 s: sin este tope la pantalla se quedaba quieta con el
+ * dibujo a medio formar. Nunca se cierra antes de que el dibujo exista.
+ */
+export const REVEAL_HOLD = 0.94
+/** Cierre suave del reveal cuando el dibujo llega tarde. */
+export const REVEAL_SETTLE_MS = 260
 /** Si el backend no acepta el trabajo, el dibujo en pantalla dura esto. */
 export const DRAWING_MS = 3000
 export const THANKS_MS = 8000
@@ -215,10 +223,29 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
       })
 
     const startedAt = performance.now()
+    let current = 0
+    let settleStart: number | null = null
     let raf = 0
     const step = () => {
       if (cancelled) return
-      const value = Math.min(1, (performance.now() - startedAt) / REVEAL_MS)
+      const now = performance.now()
+      const elapsed = now - startedAt
+      let value: number
+      if (elapsed <= REVEAL_MS) {
+        // Con el dibujo en mano el reveal dura lo de siempre; sin él se frena
+        // antes del final para no cerrar una transformación que no existe.
+        value = sketchReady ? elapsed / REVEAL_MS : (elapsed / REVEAL_MS) * REVEAL_HOLD
+      } else if (sketchReady) {
+        // Llegó tarde: los últimos puntos se completan en REVEAL_SETTLE_MS.
+        if (settleStart === null) settleStart = now
+        const settle = Math.min(1, (now - settleStart) / REVEAL_SETTLE_MS)
+        value = current + (1 - current) * settle
+      } else {
+        // Sigue avanzando, cada vez más despacio: la pantalla nunca se congela.
+        const late = elapsed - REVEAL_MS
+        value = REVEAL_HOLD + (1 - REVEAL_HOLD) * 0.4 * (1 - Math.exp(-late / 2400))
+      }
+      current = value
       dispatch({ type: 'PROGRESS', value })
       if (value < 1) {
         raf = requestAnimationFrame(step)

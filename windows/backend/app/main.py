@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field  # noqa: E402
 from starlette.concurrency import run_in_threadpool  # noqa: E402
 
 from app.imaging import decode_data_url, encode_data_url, fit_max_side  # noqa: E402
+from app.pipeline import providers  # noqa: E402
 from app.pipeline import vectorize as vectorize_ops  # noqa: E402
 from app.pipeline.portrait import PortraitRenderer  # noqa: E402
 from app.robot.client import MockRobotClient, Segment, Trajectory  # noqa: E402
@@ -71,15 +72,19 @@ jobs = JobStore()
 class SketchParams(BaseModel):
     """Ajustes del boceto (los mismos que se tocan en el laboratorio)."""
 
-    sigma: float = Field(0.9, ge=0.2, le=4.0)
-    phi: float = Field(32.0, ge=1.0, le=80.0)
+    sigma: float = Field(1.2, ge=0.2, le=4.0)
+    phi: float = Field(40.0, ge=1.0, le=80.0)
     epsilon: float = Field(0.0, ge=0.0, le=0.5)
     contrast: float = Field(0.7, ge=0.0, le=1.0)
     threshold: float = Field(0.12, ge=0.02, le=0.9)
+    bg_threshold: float = Field(0.28, ge=0.02, le=0.9)
+    beard_thresh: float = Field(0.45, ge=0.02, le=0.9)
+    use_faceparse: bool = Field(False, description="Base de regiones BiSeNet (experimental)")
     use_landmarks: bool = True
     target_width_mm: float = Field(140.0, ge=20.0, le=400.0)
     spacing_mm: float = Field(1.5, ge=0.2, le=10.0)
-    simplify_px: float = Field(1.2, ge=0.0, le=5.0)
+    simplify_px: float = Field(2.5, ge=0.0, le=5.0)
+    smooth_iters: int = Field(2, ge=0, le=4, description="Pasadas Chaikin antes de RDP (lineas mas rectas)")
     min_stroke_px: float = Field(12.0, ge=1.0, le=80.0)
     # Union de trazos: solo si el hueco es pequeño y la linea sigue recta.
     bridge_gap_px: float = Field(16.0, ge=0.0, le=40.0)
@@ -94,6 +99,16 @@ class SketchParams(BaseModel):
     # 150 s deja margen bajo el límite de 180 s del MG400 sin podar
     # retratos normales (50-70 s sin podar).
     max_draw_seconds: float = Field(150.0, ge=5.0, le=600.0)
+    # Ruta nueva: el boceto lo dibuja un modelo de imagen (ver providers.py).
+    # use_ai=False obliga al XDoG de siempre, que queda como respaldo sin red.
+    use_ai: bool = True
+    ai_min_stroke_px: float = Field(
+        10.0, ge=1.0, le=40.0, description="Trazos mínimos que sobreviven al trazar la tinta"
+    )
+    # Unión de los huecos de la binarización antes de adelgazar. Sin esto la
+    # línea se corta donde el modelo aclaró la pluma y el dibujo sale a guiones.
+    ai_bridge_gap_px: float = Field(16.0, ge=0.0, le=40.0)
+    ai_bridge_angle_deg: float = Field(60.0, ge=0.0, le=180.0)
 
 
 class SketchRequest(BaseModel):
@@ -107,28 +122,60 @@ class JobRequest(BaseModel):
 
 
 def build_sketch(image, params: SketchParams) -> dict:
-    """Foto -> recorte -> líneas -> trazos -> SVG + trayectoria en mm."""
-    portrait = renderer.render(
-        image,
-        sigma=params.sigma,
-        phi=params.phi,
-        epsilon=params.epsilon,
-        contrast=params.contrast,
-        threshold=params.threshold,
-        use_landmarks=params.use_landmarks,
-        use_lineart=params.use_lineart,
-        lineart_strong=params.lineart_strong,
-        lineart_weak=params.lineart_weak,
-    )
+    """Foto -> líneas -> trazos -> SVG + trayectoria en mm.
 
-    mask = portrait["mask"]
-    crop = portrait["crop"]
-    crop_height, crop_width = crop.shape[:2]
+    Las líneas las pone el proveedor de IA (`providers.py`). Si no hay red, no
+    hay key o el modelo falla, se cae al XDoG congelado y la cabina sigue
+    funcionando: un boceto peor es mejor que una pantalla de error delante del
+    visitante.
+    """
+    ai_meta: dict | None = None
+    mask = None
+    if params.use_ai:
+        try:
+            mask, ai_meta = providers.generate_mask(image, models_dir=MODELS_DIR)
+        except providers.SketchProviderError as exc:
+            ai_meta = {"provider": "xdog", "fallback_reason": str(exc)}
 
-    # Contorno de la tinta. El esqueleto (medial axis) borraba ojos, nariz y
-    # pelo: eran manchas cortas y el robot se quedaba con el óvalo de la cara.
-    strokes_px = vectorize_ops.strokes_from_mask(mask, min_length_px=params.min_stroke_px)
-    simplified = [vectorize_ops.simplify_stroke(s, params.simplify_px) for s in strokes_px]
+    portrait: dict = {}
+    if mask is not None:
+        mask = vectorize_ops.trim_to_ink(mask)
+        crop_height, crop_width = mask.shape[:2]
+        # Línea central: cada trazo que dibuja el modelo se recorre una sola vez.
+        # Trazarlo por contorno recorría los dos bordes y en papel se veía doble,
+        # sobre todo donde el modelo aprieta la pluma (pelo, cuello, audífonos).
+        strokes_px = vectorize_ops.strokes_from_centerline(
+            mask,
+            min_length_px=params.ai_min_stroke_px,
+            bridge_gap_px=params.ai_bridge_gap_px,
+            bridge_angle_deg=params.ai_bridge_angle_deg,
+        )
+        portrait_ms = int(float((ai_meta or {}).get("seconds") or 0) * 1000)
+        face_detected = True
+    else:
+        portrait = renderer.render(
+            image,
+            sigma=params.sigma,
+            phi=params.phi,
+            epsilon=params.epsilon,
+            contrast=params.contrast,
+            threshold=params.threshold,
+            bg_threshold=params.bg_threshold,
+            beard_thresh=params.beard_thresh,
+            use_landmarks=params.use_landmarks,
+            use_lineart=params.use_lineart,
+            lineart_strong=params.lineart_strong,
+            lineart_weak=params.lineart_weak,
+            use_faceparse=params.use_faceparse,
+        )
+        mask = portrait["mask"]
+        crop = portrait["crop"]
+        crop_height, crop_width = crop.shape[:2]
+        strokes_px = vectorize_ops.strokes_from_mask(mask, min_length_px=params.min_stroke_px)
+        portrait_ms = portrait["total_ms"]
+        face_detected = portrait["face"] is not None
+
+    simplified = [vectorize_ops.simplify_and_smooth(s, params.simplify_px, params.smooth_iters) for s in strokes_px]
     ordered = [stroke for stroke, _ in vectorize_ops.order_strokes(simplified)]
     # Tope de tiempo: si el retrato sale muy largo se van los trazos mas
     # cortos (textura) antes de mandar al robot.
@@ -151,6 +198,17 @@ def build_sketch(image, params: SketchParams) -> dict:
     preview = vectorize_ops.render_black_strokes(ordered, crop_width, crop_height, thickness=2)
     svg = vectorize_ops.strokes_to_svg(ordered, crop_width, crop_height)
 
+    stats = {
+        **trajectory.stats,
+        "width": crop_width,
+        "height": crop_height,
+        "portrait_ms": portrait_ms,
+        "face_detected": face_detected,
+        **portrait.get("lab", {}),
+    }
+    if ai_meta:
+        stats["ai"] = ai_meta
+
     return {
         "preview": encode_data_url(preview),
         "svg": svg,
@@ -158,14 +216,7 @@ def build_sketch(image, params: SketchParams) -> dict:
             {"points": [[float(x), float(y)] for x, y in stroke]} for stroke in ordered
         ],
         "segments": trajectory.segments,
-        "stats": {
-            **trajectory.stats,
-            "width": crop_width,
-            "height": crop_height,
-            "portrait_ms": portrait["total_ms"],
-            "face_detected": portrait["face"] is not None,
-            **portrait.get("lab", {}),
-        },
+        "stats": stats,
     }
 
 

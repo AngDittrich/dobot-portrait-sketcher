@@ -31,6 +31,8 @@ import numpy as np
 
 from . import sketch as sketch_ops
 from . import vectorize as vectorize_ops
+from .faceparse import MODEL_NAME as FaceParserModelName
+from .faceparse import FaceParser
 from .landmarks import FaceLandmarks
 from .lineart import LineArtModel
 from .segmentation import FaceDetector, U2NetHuman
@@ -92,7 +94,7 @@ def head_region(
     - arriba: el pelo, leído en la columna del centro de la cara (donde solo
       puede estar el pelo; si el modelo se comió un mueble del fondo, no
       afecta);
-    - abajo: un poco más allá del mentón (así no entran los hombros);
+    - abajo: ~1 cara bajo el mentón (cuello + hombros, la ropa sí entra);
     - lados: la cara más un margen fijo para el pelo (la silueta completa
       serviría: a veces el modelo incluye la silla y la caja se iba de lado).
     """
@@ -110,7 +112,8 @@ def head_region(
 
     if chin_y is None:
         chin_y = y + h * 1.05
-    bottom = int(min(height, chin_y + 0.08 * h))
+    # Cuello + hombros: ~1 cara bajo el mentón para que la ropa entre.
+    bottom = int(min(height, chin_y + 1.0 * h))
 
     left = int(max(0, x - 0.40 * w))
     right = int(min(width, x + 1.40 * w))
@@ -210,9 +213,10 @@ class PortraitRenderer:
 
     def __init__(self, models_dir: Path) -> None:
         self.face = FaceDetector(models_dir / "face_detection_yunet_2023mar.onnx")
-        self.u2net = U2NetHuman(models_dir / "u2net_human_seg.onnx")
+        self.u2net = U2NetHuman(models_dir / "u2netp.onnx")
         self.landmarks = FaceLandmarks(models_dir / "face_landmarker.task")
         self.lineart = LineArtModel(models_dir)
+        self.faceparse = FaceParser(models_dir / FaceParserModelName)
 
     def health(self) -> dict:
         return {
@@ -220,16 +224,19 @@ class PortraitRenderer:
             "u2net": self.u2net.available,
             "landmarks": self.landmarks.available,
             "lineart": self.lineart.available,
+            "faceparse": self.faceparse.available,
         }
 
     def render(
         self,
         image: np.ndarray,
-        sigma: float = 0.9,
-        phi: float = 32.0,
+        sigma: float = 1.2,
+        phi: float = 40.0,
         epsilon: float = 0.0,
         contrast: float = 0.7,
         threshold: float = 0.12,
+        bg_threshold: float = 0.28,
+        beard_thresh: float = 0.45,
         use_landmarks: bool = True,
         use_ellipse: bool = True,
         target_px: int = TARGET_PX,
@@ -244,6 +251,7 @@ class PortraitRenderer:
         ink_span: float | None = None,
         speck_area: int | None = None,
         stages: dict | None = None,
+        use_faceparse: bool = False,
     ) -> dict:
         started = time.perf_counter()
         height, width = image.shape[:2]
@@ -337,6 +345,15 @@ class PortraitRenderer:
                 crop,
                 scaled,
                 self.landmarks if scaled is not None else None,
+                sigma=sigma,
+                phi=phi,
+                epsilon=epsilon,
+                bg_thresh=bg_threshold,
+                face_thresh=threshold,
+                beard_thresh=beard_thresh,
+                faceparse=self.faceparse
+                if use_faceparse and self.faceparse.available
+                else None,
                 stages=sketch_stages,
                 **tune,
             )
