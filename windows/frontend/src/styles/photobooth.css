@@ -945,9 +945,9 @@
   inset: 0;
   z-index: 4;
   display: grid;
-  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
-  gap: 0.75rem;
-  padding: 0.85rem 0.85rem 7.6rem;
+  grid-template-columns: minmax(0, 0.58fr) minmax(0, 1.42fr);
+  gap: 0.7rem;
+  padding: 0.7rem 0.7rem 6.6rem;
   background: #050b18;
 }
 
@@ -963,38 +963,108 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 0.7rem;
+  gap: 0.85rem;
 }
 
-.booth-style-group {
+.booth-style-group h2 {
+  margin: 0 0 0.4rem;
+  font-size: 0.98rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #f8fafc;
+}
+
+.booth-style-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.booth-style-group:last-child .booth-style-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.booth-style-grid button {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-}
-
-.booth-style-group button {
-  flex: 1 1 42%;
-  min-height: 3rem;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
-  color: #e2e8f0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.22rem;
+  min-height: 4.35rem;
+  padding: 0.4rem 0.2rem 0.45rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: #e8eef7;
   font: inherit;
   font-weight: 700;
-  font-size: 1.02rem;
+  font-size: 0.82rem;
+  line-height: 1.1;
   cursor: pointer;
 }
 
-.booth-style-group button.is-on {
+.booth-style-grid button svg {
+  width: 1.65rem;
+  height: 1.65rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.booth-style-grid button svg circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+.booth-style-grid button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.booth-style-grid button.is-on {
   background: #efece4;
   color: #141820;
   border-color: transparent;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.booth-style-grid button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(157, 184, 220, 0.85);
+}
+
+@media (max-height: 720px) {
+  .booth-style {
+    padding-bottom: 5.6rem;
+    gap: 0.45rem;
+  }
+
+  .booth-style-options {
+    gap: 0.45rem;
+  }
+
+  .booth-style-group h2 {
+    margin-bottom: 0.25rem;
+    font-size: 0.86rem;
+  }
+
+  .booth-style-grid button {
+    min-height: 3.35rem;
+    font-size: 0.72rem;
+    border-radius: 12px;
+  }
+
+  .booth-style-grid button svg {
+    width: 1.3rem;
+    height: 1.3rem;
+  }
 }
 
 @media (max-width: 800px) {
   .booth-style {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 0.72fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 0.42fr) minmax(0, 1fr);
   }
 }
 

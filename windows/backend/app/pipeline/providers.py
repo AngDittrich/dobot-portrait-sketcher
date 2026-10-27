@@ -72,9 +72,16 @@ TRAIT_LINES = {
     "medico": "Dress them as a doctor: a plain coat and a simple stethoscope, few outlines.",
     "astronauta": "Dress them as an astronaut: a simple round helmet outline that does not hide the face.",
     "musico": "Dress them as a musician: simple headphones, few outlines, face still clear.",
+    "piloto": "Dress them as a pilot: a simple peaked cap, face still clear, few outlines.",
+    "bombero": "Dress them as a firefighter: a simple helmet that leaves the face clear, few outlines.",
+    "cientifico": "Dress them as a scientist: a plain lab coat, few outlines, face still clear.",
+    "artista": "Dress them as an artist: a simple beret, few outlines, face still clear.",
     "sombrero": "Add one simple wide-brim hat.",
     "gorra": "Add one simple baseball cap.",
     "corona": "Add one simple three-point crown.",
+    "lentes": "Add one pair of simple round glasses.",
+    "mono": "Add one simple bow tie.",
+    "flor": "Add one simple five-petal flower beside the ear.",
 }
 
 

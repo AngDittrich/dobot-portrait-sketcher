@@ -19,3 +19,10 @@ def test_rasgo_conocido_se_agrega_y_el_desconocido_no():
     assert "three-point crown" in prompt
     assert "inventado" not in prompt
     assert "NO hatching" in prompt
+
+
+def test_oficio_y_accesorio_nuevos():
+    prompt = build_prompt(["piloto", "lentes", "no-existe"])
+    assert "peaked cap" in prompt
+    assert "round glasses" in prompt
+    assert "no-existe" not in prompt

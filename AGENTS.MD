@@ -76,7 +76,7 @@ Wizard de una sola pantalla, sin scroll. Estados en `src/hooks/usePhotobooth.ts`
 1. `attract` — el robot saluda (`assets/robot/dobotsayinghello.webp`) y el botón COMENZAR.
 2. `camera` → `countdown` → `capture` — visor y cuenta regresiva.
 3. `review` — se muestra la foto. TOMAR OTRA vuelve a `camera`. ME GUSTA sigue. Todavía no se llama a la IA.
-4. `style` — botones de profesión y de cabeza. Cada uno inyecta un id al prompt. CONTINUAR es el único momento de `POST /api/sketch`.
+4. `style` — dos grupos, Profesión y Accesorios, un id por grupo. Cada botón lleva icono. CONTINUAR es el único momento de `POST /api/sketch`.
 5. `reveal` — la foto entra en iris y se transforma a sketch.
 6. `confirm` — "¿Listo para ser dibujado?" con TOMAR OTRA (vuelve a `camera`) a la izquierda y ¡SÍ! a la derecha.
 7. `drawing` (3 s, `assets/robot/dobotidlemarker.webp`) → `thanks`: "LISTO. TOMA TU DIBUJO." y "SYSCOM agradece tu visita." Vuelve solo a `attract`.
