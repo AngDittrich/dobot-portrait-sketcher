@@ -8,6 +8,8 @@ import { CountdownOverlay } from './CountdownOverlay'
 import { FlashOverlay } from './FlashOverlay'
 import { FramingGuide } from './FramingGuide'
 import { ProcessingOverlay } from './ProcessingOverlay'
+import { StylePicker } from './StylePicker'
+import type { TraitGroup, TraitSelection } from '../../lib/traits'
 
 interface CameraStageProps {
   webcamRef: RefObject<Webcam | null>
@@ -16,6 +18,8 @@ interface CameraStageProps {
   status: PhotoboothStatus
   countdown: number
   photo: string | null
+  traits: TraitSelection
+  onToggleTrait: (group: TraitGroup, id: string) => void
   sketch: string | null
   progress: number
   cameraError: boolean
@@ -42,6 +46,8 @@ export function CameraStage({
   status,
   countdown,
   photo,
+  traits,
+  onToggleTrait,
   sketch,
   progress,
   cameraError,
@@ -54,7 +60,12 @@ export function CameraStage({
 }: CameraStageProps) {
   const liveVisible = status === 'camera' || status === 'countdown'
   const showFrame = !cameraError && (status === 'camera' || status === 'countdown' || status === 'capture')
-  const showVideo = status === 'camera' || status === 'countdown' || status === 'capture'
+  const showVideo =
+    status === 'camera' ||
+    status === 'countdown' ||
+    status === 'capture' ||
+    status === 'review' ||
+    status === 'style'
 
   return (
     <div className={`booth-stage is-${status}`}>
@@ -77,7 +88,7 @@ export function CameraStage({
 
       {/* Frame congelado bajo el flash */}
       <AnimatePresence>
-        {status === 'capture' && photo && (
+        {(status === 'capture' || status === 'review') && photo && (
           <motion.img
             key="frozen"
             src={photo}
@@ -91,6 +102,10 @@ export function CameraStage({
           />
         )}
       </AnimatePresence>
+
+      {status === 'style' && photo && (
+        <StylePicker photo={photo} traits={traits} onToggle={onToggleTrait} />
+      )}
 
       {status === 'reveal' && photo && (
         <ProcessingOverlay photo={photo} sketch={sketch} progress={progress} />
