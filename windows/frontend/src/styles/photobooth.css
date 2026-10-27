@@ -906,6 +906,36 @@
   pointer-events: none;
 }
 
+/* Mientras la IA dibuja: una banda de grafito recorre la foto sin prisa, en
+   lugar de dejar la imagen congelada esperando. Es movimiento, no una etiqueta. */
+.booth-diagonal-glow.is-waiting {
+  background-image: linear-gradient(
+    135deg,
+    transparent 44%,
+    rgba(191, 219, 254, 0.55) 50%,
+    transparent 56%
+  );
+  background-size: 260% 260%;
+  animation: booth-wait-sweep 3.2s linear infinite;
+}
+
+@keyframes booth-wait-sweep {
+  from {
+    background-position: 150% 0%;
+  }
+
+  to {
+    background-position: -50% 0%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .booth-diagonal-glow.is-waiting {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
 .booth-stage.is-confirm .booth-print {
   padding-bottom: 12%;
 }
