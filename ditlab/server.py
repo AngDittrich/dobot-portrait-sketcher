@@ -70,9 +70,9 @@ class TuneIn(BaseModel):
 def _require_models() -> None:
     missing = []
     if not renderer.u2net.available:
-        missing.append("u2net_human_seg.onnx")
+        missing.append(Path(renderer.u2net.model_path).name)
     if not renderer.face.available:
-        missing.append("face_detection_yunet_2023mar.onnx")
+        missing.append(Path(renderer.face.model_path).name)
     if missing:
         raise HTTPException(
             status_code=503,
@@ -247,6 +247,7 @@ def capture(payload: CaptureIn) -> dict:
     params = _defaults()
     stages: dict = {}
     try:
+        # lab_sigma pisa a sigma dentro de render; no se mandan los dos.
         portrait = renderer.render(
             fitted,
             stages=stages,
