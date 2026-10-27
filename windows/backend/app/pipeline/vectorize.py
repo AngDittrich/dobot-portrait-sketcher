@@ -291,6 +291,158 @@ def _polyline_length(points: np.ndarray) -> float:
     return float(np.sum(np.hypot(deltas[:, 0], deltas[:, 1])))
 
 
+def _centerline_paths(
+    skeleton: np.ndarray,
+    max_turn_deg: float = 75.0,
+) -> list[list[tuple[int, int]]]:
+    """Recorre el esqueleto siguiendo la dirección del trazo a través de los cruces.
+
+    El trazador anterior quitaba los píxeles de bifurcación para quedarse con
+    tramos simples, de modo que cada trazo moría en el primer cruce y el dibujo
+    salía punteado. Aquí el cruce se atraviesa: en cada paso se elige el vecino
+    que mejor continúa la dirección que traía la pluma, así una ceja que cruza
+    el párpado se dibuja de una sola tirada.
+
+    Los píxeles de grado 2 se consumen una sola vez (no se repasan); los de
+    cruce quedan libres para que los use más de un trazo.
+    """
+    binary = (skeleton > 0).astype(np.uint8)
+    if not binary.any():
+        return []
+
+    ys, xs = np.nonzero(binary)
+    pixels = set(zip(ys.tolist(), xs.tolist()))
+    counts = _neighbour_count(binary)
+    # Los escalones del esqueleto de 8 conexiones dan 3 vecinos sin ser un
+    # cruce; `_crossing_number` cuenta las transiciones alrededor del píxel y
+    # solo marca las bifurcaciones de verdad.
+    junctions = (binary > 0) & (_crossing_number(binary) >= 3)
+    limit = math.cos(math.radians(max(0.0, min(180.0, max_turn_deg))))
+    offsets = NEIGHBORS_8
+
+    used: set[tuple[int, int]] = set()
+
+    def neighbours(point: tuple[int, int]) -> list[tuple[int, int]]:
+        y, x = point
+        return [(y + dy, x + dx) for dy, dx in offsets if (y + dy, x + dx) in pixels]
+
+    def choose(end: tuple[int, int], previous, heading, best_score: float):
+        best = None
+        for candidate in neighbours(end):
+            if candidate == previous or candidate in used:
+                continue
+            dy, dx = candidate[0] - end[0], candidate[1] - end[1]
+            length = math.hypot(dy, dx) or 1.0
+            score = 1.0 if heading is None else (heading[0] * dy + heading[1] * dx) / length
+            if heading is not None and score < limit:
+                continue
+            if score > best_score:
+                best_score, best = score, candidate
+        return best
+
+    # Primero desde extremos y cruces; después desde lo que quedara suelto.
+    starts = sorted(
+        pixels,
+        key=lambda point: (counts[point] != 1, bool(junctions[point]), point),
+    )
+    paths: list[list[tuple[int, int]]] = []
+    for start in starts:
+        if start in used:
+            continue
+        tail: list[tuple[int, int]] = [start]
+        head: list[tuple[int, int]] = []
+        tail_prev: tuple[int, int] | None = None
+        head_prev: tuple[int, int] | None = None
+        tail_heading: tuple[float, float] | None = None
+        head_heading: tuple[float, float] | None = None
+        # Cada arista dirigida se recorre una sola vez: así un cruce se puede
+        # atravesar varias veces sin que la pluma entre en círculos.
+        steps: set[tuple[int, int, int, int]] = set()
+        if not junctions[start]:
+            used.add(start)
+
+        while len(tail) + len(head) < 20000:
+            moved = False
+            for side in (0, 1):
+                if side == 0:
+                    end, previous, heading = tail[-1], tail_prev, tail_heading
+                elif head:
+                    end, previous, heading = head[-1], head_prev, head_heading
+                else:
+                    end = tail[0]
+                    previous = tail[1] if len(tail) > 1 else None
+                    heading = None if tail_heading is None else (-tail_heading[0], -tail_heading[1])
+                nxt = choose(end, previous, heading, limit)
+                if nxt is None:
+                    continue
+                key = (end[0], end[1], nxt[0], nxt[1])
+                if key in steps:
+                    continue
+                steps.add(key)
+                if not junctions[nxt]:
+                    used.add(nxt)
+                dy, dx = nxt[0] - end[0], nxt[1] - end[1]
+                length = math.hypot(dy, dx) or 1.0
+                if side == 0:
+                    tail.append(nxt)
+                    tail_prev, tail_heading = end, (dy / length, dx / length)
+                else:
+                    head.append(nxt)
+                    head_prev, head_heading = end, (dy / length, dx / length)
+                moved = True
+            if not moved:
+                break
+
+        path = list(reversed(head)) + tail
+        if len(path) > 1:
+            paths.append(path)
+    return paths
+
+
+def strokes_from_centerline(
+    mask: np.ndarray,
+    min_length_px: float = 8.0,
+    spur_length_px: int = 0,
+    bridge_gap_px: float = 16.0,
+    bridge_angle_deg: float = 60.0,
+    max_turn_deg: float = 70.0,
+    close_px: int = 3,
+) -> list[np.ndarray]:
+    """Un solo trazo por línea dibujada, siguiéndola por el centro.
+
+    Recorrer el contorno de la tinta devuelve los dos bordes de cada trazo: el
+    robot va y vuelve sobre la misma línea y en papel se ve doble, sobre todo en
+    los tramos donde el modelo aprieta la pluma (pelo, cuello, audífonos). Este
+    trazador adelgaza la tinta a 1 px y la recorre por el medio, así que cada
+    línea del modelo produce exactamente una pasada.
+
+    `close_px` une los huecos de la binarización antes de adelgazar: sin eso el
+    esqueleto se corta donde la línea se aclaró y el dibujo sale a guiones.
+    """
+    binary = mask if mask.dtype == np.uint8 else np.clip(mask, 0, 255).astype(np.uint8)
+    if binary.size == 0 or binary.max() <= 1:
+        binary = (binary > 0).astype(np.uint8) * 255
+    if close_px and close_px > 1:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close_px, close_px))
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+
+    skeleton = skeletonize(binary)
+    if not (skeleton > 0).any():
+        return []
+    if spur_length_px > 0:
+        skeleton = _prune_spurs((skeleton > 0).astype(np.uint8), spur_length_px)
+
+    strokes: list[np.ndarray] = []
+    for path in _centerline_paths(skeleton, max_turn_deg):
+        points = np.array([(x, y) for y, x in path], dtype=np.float32)
+        if _polyline_length(points) < min_length_px:
+            continue
+        strokes.append(points)
+    if bridge_gap_px > 0 and len(strokes) > 1:
+        strokes = bridge_aligned_strokes(strokes, bridge_gap_px, bridge_angle_deg)
+    return strokes
+
+
 # ---------------------------------------------------------------------------
 # 3. Simplificación (RDP) y orden de dibujo
 # ---------------------------------------------------------------------------

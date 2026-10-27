@@ -105,6 +105,10 @@ class SketchParams(BaseModel):
     ai_min_stroke_px: float = Field(
         10.0, ge=1.0, le=40.0, description="Trazos mínimos que sobreviven al trazar la tinta"
     )
+    # Unión de los huecos de la binarización antes de adelgazar. Sin esto la
+    # línea se corta donde el modelo aclaró la pluma y el dibujo sale a guiones.
+    ai_bridge_gap_px: float = Field(16.0, ge=0.0, le=40.0)
+    ai_bridge_angle_deg: float = Field(60.0, ge=0.0, le=180.0)
 
 
 class SketchRequest(BaseModel):
@@ -137,13 +141,14 @@ def build_sketch(image, params: SketchParams) -> dict:
     if mask is not None:
         mask = vectorize_ops.trim_to_ink(mask)
         crop_height, crop_width = mask.shape[:2]
-        # Se traza el contorno de la tinta, no su esqueleto. El modelo dibuja
-        # líneas de 2-3 px y continuas: el contorno las recorre enteras (un
-        # trazo sólo, que el lápiz repasa con el mismo ancho), mientras que el
-        # esqueleto borra el píxel de cada cruce y deja el dibujo en guiones.
-        strokes_px = vectorize_ops.strokes_from_mask(
+        # Línea central: cada trazo que dibuja el modelo se recorre una sola vez.
+        # Trazarlo por contorno recorría los dos bordes y en papel se veía doble,
+        # sobre todo donde el modelo aprieta la pluma (pelo, cuello, audífonos).
+        strokes_px = vectorize_ops.strokes_from_centerline(
             mask,
             min_length_px=params.ai_min_stroke_px,
+            bridge_gap_px=params.ai_bridge_gap_px,
+            bridge_angle_deg=params.ai_bridge_angle_deg,
         )
         portrait_ms = int(float((ai_meta or {}).get("seconds") or 0) * 1000)
         face_detected = True
