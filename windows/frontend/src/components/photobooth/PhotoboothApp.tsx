@@ -11,6 +11,17 @@ import { DrawingScreen } from './DrawingScreen'
 import { ThanksScreen } from './ThanksScreen'
 import { Toast } from './Toast'
 import { WelcomeScreen } from './WelcomeScreen'
+import {
+  actualCaptureSize,
+  decideStepUp,
+} from '../../lib/cameraResolution'
+import { calibrateExposure } from '../../lib/exposure'
+
+const BASE_CONSTRAINTS: MediaTrackConstraints = {
+  width: { ideal: 2560 },
+  height: { ideal: 1440 },
+  facingMode: 'user',
+}
 
 const HEADINGS: Partial<Record<PhotoboothStatus, string>> = {
   camera: 'Encuadre tu retrato',
@@ -62,8 +73,41 @@ export function PhotoboothApp() {
     }
   }, [status, pose, start, release])
   const [webcamKey, setWebcamKey] = useState(0)
+  const [videoConstraints, setVideoConstraints] =
+    useState<MediaTrackConstraints>(BASE_CONSTRAINTS)
+  /** El step-up de resolución se intenta una sola vez por montaje. */
+  const steppedUp = useRef(false)
+  /** La calibración de exposición se intenta una sola vez por montaje. */
+  const exposureTuned = useRef(false)
 
-  const handleCameraReady = useCallback(() => setCameraError(false), [])
+  const handleCameraReady = useCallback(() => {
+    setCameraError(false)
+    const video = webcamRef.current?.video ?? null
+    const track = (video?.srcObject as MediaStream | null)
+      ?.getVideoTracks?.()
+      ?.[0] ?? null
+    if (!video || !track) return
+    if (!steppedUp.current) {
+      const actual = actualCaptureSize(video)
+      const caps = (
+        track.getCapabilities as (() => { width?: { max?: number } }) | undefined
+      )?.call(track)
+      const next = decideStepUp(actual, caps)
+      if (next !== null) {
+        steppedUp.current = true
+        setVideoConstraints(next)
+        setWebcamKey((key) => key + 1)
+        // El remonte dispara onCameraReady de nuevo: ahí se calibra.
+        return
+      }
+    }
+    if (exposureTuned.current) return
+    exposureTuned.current = true
+    // Deja que el auto-exposure se asiente antes de muestrear la luz.
+    window.setTimeout(() => {
+      void calibrateExposure(video, track)
+    }, 600)
+  }, [webcamRef])
   const handleCameraError = useCallback(() => setCameraError(true), [])
   const retryCamera = useCallback(() => {
     setCameraError(false)
@@ -127,6 +171,7 @@ export function PhotoboothApp() {
                   sketch={booth.sketch}
                   progress={booth.progress}
                   cameraError={cameraError}
+                  videoConstraints={videoConstraints}
                   pose={pose ?? 'off'}
                   onCameraReady={handleCameraReady}
                   onCameraError={handleCameraError}
