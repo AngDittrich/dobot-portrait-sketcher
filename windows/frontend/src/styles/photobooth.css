@@ -1094,6 +1094,16 @@
   box-shadow: 0 0 0 3px rgba(157, 184, 220, 0.85);
 }
 
+/* Ocupado por el otro grupo: se apaga en vez de apilar dos sombreros. */
+.booth-style-grid button:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.booth-style-grid button:disabled:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
 @media (max-height: 720px) {
   .booth-style {
     padding-bottom: 5.6rem;

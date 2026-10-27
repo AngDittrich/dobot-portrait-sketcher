@@ -3,7 +3,7 @@ import type { RefObject } from 'react'
 import type Webcam from 'react-webcam'
 import { getJob, getLastSketchId, postJob } from '../lib/api'
 import { generateSketch } from '../lib/sketch'
-import { EMPTY_TRAITS, selectedTraitIds } from '../lib/traits'
+import { EMPTY_TRAITS, selectedTraitIds, toggleTrait } from '../lib/traits'
 import type { TraitGroup, TraitSelection } from '../lib/traits'
 import { DEFAULT_STYLE, isDrawingStyle } from '../lib/drawingStyles'
 import type { DrawingStyleId } from '../lib/drawingStyles'
@@ -160,14 +160,8 @@ function reducer(state: PhotoboothState, action: Action): PhotoboothState {
       return { ...state, status: 'style' }
     case 'TOGGLE': {
       if (state.status !== 'style') return state
-      const current = state.traits[action.group]
-      return {
-        ...state,
-        traits: {
-          ...state.traits,
-          [action.group]: current === action.id ? null : action.id,
-        },
-      }
+      // toggleTrait retira lo que se encimaría: bombero ya lleva casco.
+      return { ...state, traits: toggleTrait(state.traits, action.group, action.id) }
     }
     case 'STYLE':
       if (state.status !== 'style' || !isDrawingStyle(action.id)) return state
