@@ -1,0 +1,77 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: #101114;
+  color: #eceae4;
+}
+header, main { width: min(880px, calc(100% - 32px)); margin: 0 auto; }
+header { padding: 28px 0 8px; }
+header h1 { margin: 0; font-size: 28px; font-weight: 560; letter-spacing: -0.02em; }
+header p { margin: 6px 0 0; color: #a7a49c; }
+.capture, .controls, figure {
+  background: #181a1f;
+  border-radius: 18px;
+  padding: 16px;
+}
+.capture { margin-top: 18px; }
+video {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 12px;
+  background: #07080a;
+}
+.row { display: flex; gap: 10px; margin-top: 12px; }
+button {
+  flex: 1;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: #efece4;
+  color: #16171b;
+  font: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.35; cursor: default; }
+button:not(:disabled):hover { background: #fff; }
+#status { margin: 12px 0 0; color: #a7a49c; min-height: 1.3em; }
+.stack { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+.stack:empty { display: none; }
+figure { margin: 0; }
+figure img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 12px;
+  background: #f3f0e8;
+  cursor: zoom-in;
+}
+figcaption { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; }
+figcaption strong { font-size: 17px; font-weight: 560; }
+figcaption span { color: #a7a49c; line-height: 1.4; }
+.controls { margin-top: 14px; display: flex; flex-direction: column; gap: 14px; }
+.controls[hidden] { display: none; }
+.controls h2 { margin: 0; font-size: 17px; font-weight: 560; }
+.controls label { display: flex; flex-direction: column; gap: 6px; }
+.controls span { display: flex; justify-content: space-between; gap: 12px; color: #d9d6ce; }
+.controls output { color: #fff; font-variant-numeric: tabular-nums; }
+.controls input[type="range"] { width: 100%; accent-color: #efece4; }
+dialog {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  max-width: 96vw;
+  color: #eceae4;
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.86); }
+dialog img {
+  display: block;
+  max-width: 96vw;
+  max-height: 86vh;
+  background: #f3f0e8;
+}
+dialog p { margin: 10px 0 0; max-width: 96vw; }
+body.busy .capture { outline: 1px solid #3a3d46; }
