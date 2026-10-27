@@ -969,11 +969,63 @@
 }
 
 .booth-style-group h2 {
-  margin: 0 0 0.4rem;
-  font-size: 0.98rem;
+  margin: 0 0 0.35rem;
+  font-size: 0.92rem;
   font-weight: 800;
   letter-spacing: -0.01em;
   color: #f8fafc;
+}
+
+.booth-style-samples {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.booth-style-samples button {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.28rem;
+  min-width: 0;
+  padding: 0.28rem 0.28rem 0.4rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: #e8eef7;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.78rem;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.booth-style-samples button img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.booth-style-samples button span {
+  text-align: center;
+}
+
+.booth-style-samples button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.booth-style-samples button.is-on {
+  background: #efece4;
+  color: #141820;
+  border-color: transparent;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.booth-style-samples button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(157, 184, 220, 0.85);
 }
 
 .booth-style-grid {
@@ -992,8 +1044,8 @@
   align-items: center;
   justify-content: center;
   gap: 0.22rem;
-  min-height: 4.35rem;
-  padding: 0.4rem 0.2rem 0.45rem;
+  min-height: 3.55rem;
+  padding: 0.28rem 0.15rem 0.32rem;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.05);
@@ -1049,6 +1101,11 @@
   .booth-style-group h2 {
     margin-bottom: 0.25rem;
     font-size: 0.86rem;
+  }
+
+  .booth-style-samples button {
+    font-size: 0.68rem;
+    padding: 0.18rem 0.18rem 0.28rem;
   }
 
   .booth-style-grid button {

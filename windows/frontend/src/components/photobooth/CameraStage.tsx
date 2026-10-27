@@ -10,6 +10,7 @@ import { FramingGuide } from './FramingGuide'
 import { ProcessingOverlay } from './ProcessingOverlay'
 import { StylePicker } from './StylePicker'
 import type { TraitGroup, TraitSelection } from '../../lib/traits'
+import type { DrawingStyleId } from '../../lib/drawingStyles'
 
 interface CameraStageProps {
   webcamRef: RefObject<Webcam | null>
@@ -19,7 +20,9 @@ interface CameraStageProps {
   countdown: number
   photo: string | null
   traits: TraitSelection
+  styleId: DrawingStyleId
   onToggleTrait: (group: TraitGroup, id: string) => void
+  onStyle: (id: DrawingStyleId) => void
   sketch: string | null
   progress: number
   cameraError: boolean
@@ -47,7 +50,9 @@ export function CameraStage({
   countdown,
   photo,
   traits,
+  styleId,
   onToggleTrait,
+  onStyle,
   sketch,
   progress,
   cameraError,
@@ -104,7 +109,13 @@ export function CameraStage({
       </AnimatePresence>
 
       {status === 'style' && photo && (
-        <StylePicker photo={photo} traits={traits} onToggle={onToggleTrait} />
+        <StylePicker
+          photo={photo}
+          traits={traits}
+          styleId={styleId}
+          onToggle={onToggleTrait}
+          onStyle={onStyle}
+        />
       )}
 
       {status === 'reveal' && photo && (

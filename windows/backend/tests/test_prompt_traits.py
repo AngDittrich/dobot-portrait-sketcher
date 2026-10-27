@@ -26,3 +26,16 @@ def test_oficio_y_accesorio_nuevos():
     assert "peaked cap" in prompt
     assert "round glasses" in prompt
     assert "no-existe" not in prompt
+
+
+def test_estilo_conocido_cambia_el_inicio():
+    anime = build_prompt([], "anime")
+    assert "anime line art" in anime
+    assert "NO hatching" in anime
+    assert "Slightly exaggerate" not in anime
+
+
+def test_estilo_desconocido_sigue_siendo_caricatura():
+    assert build_prompt(None, "oleo") == PROMPT
+    assert build_prompt(["chef"], "caricatura") != PROMPT
+    assert "plain toque" in build_prompt(["chef"], "retrato")

@@ -40,7 +40,7 @@ const STATUS_MESSAGES: Record<PhotoboothStatus, string> = {
   countdown: 'Cuenta regresiva en curso.',
   capture: 'Foto capturada.',
   review: 'Foto lista. Elige TOMAR OTRA o ME GUSTA.',
-  style: 'Elige una profesión y un accesorio, o continúa sin ellos.',
+  style: 'Elige un estilo, y si quieres una profesión o un accesorio.',
   reveal: 'Convirtiendo tu foto en un dibujo.',
   confirm: 'Retrato listo. Elige TOMAR OTRA o SÍ.',
   drawing: 'El robot está dibujando tu imagen ahora.',
@@ -174,7 +174,9 @@ export function PhotoboothApp() {
                   countdown={booth.countdown}
                   photo={booth.photo}
                   traits={booth.traits}
+                  styleId={booth.styleId}
                   onToggleTrait={booth.toggleTrait}
+                  onStyle={booth.chooseStyle}
                   sketch={booth.sketch}
                   progress={booth.progress}
                   cameraError={cameraError}

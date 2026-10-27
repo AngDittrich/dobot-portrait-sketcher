@@ -57,10 +57,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /** Foto (data URL) y rasgos elegidos -> boceto en el servidor. */
-export async function postSketch(image: string, traits: string[] = []): Promise<SketchResponse> {
+export async function postSketch(
+  image: string,
+  traits: string[] = [],
+  style = 'caricatura',
+): Promise<SketchResponse> {
   const data = await request<SketchResponse>('/api/sketch', {
     method: 'POST',
-    body: JSON.stringify({ image, traits }),
+    body: JSON.stringify({ image, traits, style }),
   })
   lastSketchId = data.id
   return data

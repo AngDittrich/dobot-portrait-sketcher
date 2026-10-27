@@ -5,6 +5,8 @@ import { getJob, getLastSketchId, postJob } from '../lib/api'
 import { generateSketch } from '../lib/sketch'
 import { EMPTY_TRAITS, selectedTraitIds } from '../lib/traits'
 import type { TraitGroup, TraitSelection } from '../lib/traits'
+import { DEFAULT_STYLE, isDrawingStyle } from '../lib/drawingStyles'
+import type { DrawingStyleId } from '../lib/drawingStyles'
 
 /**
  * Wizard de la cabina, conectado al backend de main.
@@ -47,6 +49,7 @@ interface PhotoboothState {
   countdown: number
   photo: string | null
   traits: TraitSelection
+  styleId: DrawingStyleId
   sketch: string | null
   /** Progreso 0..1 del reveal (iris + transformación a sketch). */
   progress: number
@@ -63,6 +66,7 @@ type Action =
   | { type: 'REVIEW' }
   | { type: 'LIKE' }
   | { type: 'TOGGLE'; group: TraitGroup; id: string }
+  | { type: 'STYLE'; id: DrawingStyleId }
   | { type: 'CONTINUE' }
   | { type: 'PROGRESS'; value: number }
   | { type: 'REVEALED'; sketch: string }
@@ -112,6 +116,7 @@ const initialState: PhotoboothState = {
   countdown: COUNTDOWN_FROM,
   photo: null,
   traits: EMPTY_TRAITS,
+  styleId: DEFAULT_STYLE,
   sketch: null,
   progress: 0,
   toast: null,
@@ -144,6 +149,7 @@ function reducer(state: PhotoboothState, action: Action): PhotoboothState {
         status: 'capture',
         photo: action.photo,
         traits: EMPTY_TRAITS,
+        styleId: DEFAULT_STYLE,
         sketch: null,
         progress: 0,
       }
@@ -163,6 +169,9 @@ function reducer(state: PhotoboothState, action: Action): PhotoboothState {
         },
       }
     }
+    case 'STYLE':
+      if (state.status !== 'style' || !isDrawingStyle(action.id)) return state
+      return { ...state, styleId: action.id }
     case 'CONTINUE':
       if (state.status !== 'style') return state
       return { ...state, status: 'reveal', sketch: null, progress: 0 }
@@ -251,7 +260,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
 
     // La IA corre aquí, ya con la foto aceptada y los rasgos. Si el backend
     // no está, generateSketch dibuja en local.
-    generateSketch(state.photo, selectedTraitIds(state.traits))
+    generateSketch(state.photo, selectedTraitIds(state.traits), state.styleId)
       .then((sketch) => {
         sketchResult = sketch
         sketchReady = true
@@ -304,7 +313,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
       cancelled = true
       cancelAnimationFrame(raf)
     }
-  }, [state.status, state.photo, state.traits])
+  }, [state.status, state.photo, state.traits, state.styleId])
 
   /**
    * Pantalla de dibujo: si hay un trabajo del robot, espera a que termine.
@@ -435,6 +444,10 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     dispatch({ type: 'TOGGLE', group, id })
   }, [])
 
+  const chooseStyle = useCallback((id: DrawingStyleId) => {
+    dispatch({ type: 'STYLE', id })
+  }, [])
+
   const proceed = useCallback(() => dispatch({ type: 'CONTINUE' }), [])
 
   const resetIdle = useCallback(() => {
@@ -463,6 +476,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     retake,
     like,
     toggleTrait,
+    chooseStyle,
     proceed,
     resetIdle,
     dismissToast,

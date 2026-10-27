@@ -66,6 +66,33 @@ DRAWING RULES:
 - Any added costume or hat is a few simple outlines, never a detailed illustration.
 """
 
+# El visitante elige uno. Un id desconocido vuelve a la caricatura.
+DEFAULT_STYLE = "caricatura"
+STYLE_OPENINGS = {
+    "retrato": (
+        "Redraw this photograph as a faithful minimal black ink portrait "
+        "on plain white paper.\n\n"
+        "The person must stay recognizable. Do not exaggerate. Match their real "
+        "proportions, age, hair and expression. Draw facial hair only if it is "
+        "visible in the photo. Never invent a beard, mustache or goatee. Do not shade."
+    ),
+    "anime": (
+        "Redraw this photograph as minimal black ink anime line art "
+        "on plain white paper.\n\n"
+        "The person must stay recognizable. Draw larger expressive eyes, a smaller "
+        "nose and mouth, and the hair as a few clean locks. Keep their real age. "
+        "Draw facial hair only if it is visible in the photo. Never invent a beard, "
+        "mustache or goatee. Do not shade. No screentones."
+    ),
+    "cartoon": (
+        "Redraw this photograph as a simple black ink cartoon "
+        "on plain white paper.\n\n"
+        "The person must stay recognizable. Use rounder shapes, a bigger smile and "
+        "fewer, bolder outlines. Keep their real age. Draw facial hair only if it "
+        "is visible in the photo. Never invent a beard, mustache or goatee. Do not shade."
+    ),
+}
+
 # Ids que manda la cabina. Texto libre del visitante no entra al prompt.
 TRAIT_LINES = {
     "chef": "Dress them as a chef: a plain toque and a simple jacket, few outlines.",
@@ -85,13 +112,26 @@ TRAIT_LINES = {
 }
 
 
-def build_prompt(traits: list[str] | None = None) -> str:
-    """Prompt base más los rasgos conocidos. Ids que no están en el mapa se ignoran."""
+def resolve_style(style: str | None) -> str:
+    """Caricatura si no eligieron, o si el id no existe."""
+    if style in STYLE_OPENINGS or style == DEFAULT_STYLE:
+        return style or DEFAULT_STYLE
+    return DEFAULT_STYLE
+
+
+def build_prompt(traits: list[str] | None = None, style: str | None = None) -> str:
+    """Estilo elegido más los rasgos conocidos. Ids que no están en el mapa se ignoran."""
+    chosen = resolve_style(style)
+    if chosen == DEFAULT_STYLE:
+        base = PROMPT
+    else:
+        rules = PROMPT.split("DRAWING RULES:", 1)[1]
+        base = STYLE_OPENINGS[chosen].rstrip() + "\n\nDRAWING RULES:" + rules
     extras = [TRAIT_LINES[trait] for trait in traits or [] if trait in TRAIT_LINES]
     if not extras:
-        return PROMPT
+        return base
     lines = "\n".join(f"- {line}" for line in extras)
-    return PROMPT.rstrip() + "\n\nADD ONLY THESE, in the same simple black line:\n" + lines + "\n"
+    return base.rstrip() + "\n\nADD ONLY THESE, in the same simple black line:\n" + lines + "\n"
 
 
 class SketchProviderError(RuntimeError):
@@ -323,10 +363,11 @@ def generate_mask(
     settings: Settings | None = None,
     models_dir: Path | None = None,
     traits: list[str] | None = None,
+    style: str | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Foto -> máscara de tinta entregada por el proveedor activo."""
     settings = settings or load_settings()
-    prompt = build_prompt(traits)
+    prompt = build_prompt(traits, style)
     providers = available_providers(settings)
 
     if settings.provider == "auto":
@@ -361,6 +402,7 @@ def generate_mask(
                 continue
             _dump_debug(png, mask, reference, meta)
             meta["traits"] = [trait for trait in traits or [] if trait in TRAIT_LINES]
+            meta["style"] = resolve_style(style)
             meta["reference_sha"] = hashlib.sha256(reference.tobytes()).hexdigest()[:12]
             meta["size"] = f"{reference.shape[1]}x{reference.shape[0]}"
             return mask, meta

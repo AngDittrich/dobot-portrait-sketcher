@@ -14,6 +14,8 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { TRAIT_CATEGORIES } from '../../lib/traits'
 import type { TraitGroup, TraitSelection } from '../../lib/traits'
+import { DRAWING_STYLES } from '../../lib/drawingStyles'
+import type { DrawingStyleId } from '../../lib/drawingStyles'
 
 const ICONS: Record<string, LucideIcon> = {
   chef: ChefHat,
@@ -32,18 +34,40 @@ const ICONS: Record<string, LucideIcon> = {
 interface StylePickerProps {
   photo: string
   traits: TraitSelection
+  styleId: DrawingStyleId
   onToggle: (group: TraitGroup, id: string) => void
+  onStyle: (id: DrawingStyleId) => void
 }
 
 /**
- * La foto ya elegida, en dos grupos: una profesión y un accesorio.
- * Un toque elige; otro toque en el mismo botón lo quita.
+ * La foto ya elegida, el estilo y dos grupos: una profesión y un accesorio.
+ * El estilo siempre tiene uno marcado. En los otros, un segundo toque lo quita.
  */
-export function StylePicker({ photo, traits, onToggle }: StylePickerProps) {
+export function StylePicker({ photo, traits, styleId, onToggle, onStyle }: StylePickerProps) {
   return (
     <div className="booth-style">
       <img src={photo} alt="Foto que se va a dibujar" className="booth-style-photo" draggable={false} />
       <div className="booth-style-options">
+        <section className="booth-style-group" aria-label="Estilo">
+          <h2>Estilo</h2>
+          <div className="booth-style-samples">
+            {DRAWING_STYLES.map((style) => {
+              const selected = styleId === style.id
+              return (
+                <button
+                  key={style.id}
+                  type="button"
+                  className={selected ? 'is-on' : undefined}
+                  aria-pressed={selected}
+                  onClick={() => onStyle(style.id)}
+                >
+                  <img src={style.sample} alt="" draggable={false} />
+                  <span>{style.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        </section>
         {TRAIT_CATEGORIES.map((category) => (
           <section key={category.id} className="booth-style-group" aria-label={category.title}>
             <h2>{category.title}</h2>
