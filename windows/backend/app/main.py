@@ -114,6 +114,8 @@ class SketchParams(BaseModel):
 class SketchRequest(BaseModel):
     image: str = Field(..., description="Foto capturada en base64 (data URL)")
     params: SketchParams = Field(default_factory=SketchParams)
+    # Ids de rasgo (chef, sombrero…). El texto libre no se reenvía al modelo.
+    traits: list[str] = Field(default_factory=list)
 
 
 class JobRequest(BaseModel):
@@ -121,7 +123,7 @@ class JobRequest(BaseModel):
     image: str | None = Field(default=None, description="Alternativa a sketch_id")
 
 
-def build_sketch(image, params: SketchParams) -> dict:
+def build_sketch(image, params: SketchParams, traits: list[str] | None = None) -> dict:
     """Foto -> líneas -> trazos -> SVG + trayectoria en mm.
 
     Las líneas las pone el proveedor de IA (`providers.py`). Si no hay red, no
@@ -133,7 +135,9 @@ def build_sketch(image, params: SketchParams) -> dict:
     mask = None
     if params.use_ai:
         try:
-            mask, ai_meta = providers.generate_mask(image, models_dir=MODELS_DIR)
+            mask, ai_meta = providers.generate_mask(
+                image, models_dir=MODELS_DIR, traits=traits
+            )
         except providers.SketchProviderError as exc:
             ai_meta = {"provider": "xdog", "fallback_reason": str(exc)}
 
@@ -240,7 +244,7 @@ async def create_sketch(payload: SketchRequest) -> dict:
     save_raw_capture(image)
     image = fit_max_side(image)
     try:
-        result = await run_in_threadpool(build_sketch, image, payload.params)
+        result = await run_in_threadpool(build_sketch, image, payload.params, payload.traits)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Error generando el boceto: {exc}") from exc
 

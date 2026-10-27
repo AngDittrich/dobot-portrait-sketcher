@@ -43,23 +43,14 @@ GAP_CLOSE_PX = 3
 OUTPUT_WIDTH = 768
 OUTPUT_HEIGHT = 1024
 
-# Prompt validado contra la API: con estas reglas el modelo deja de inventar
-# barba, respeta el peinado y no dibuja el texto de la camiseta (que llenaba el
-# dibujo de trazos basura). No cambiar sin volver a comparar contra una foto
-# real: las tres reglas existen por un defecto concreto que ya se vio en papel.
-PROMPT = """Redraw this photograph as a minimal black ink line drawing on plain white paper,
-in the style of a confident pen portrait by a fashion illustrator.
+# Caricatura de pocos trazos. Las reglas de tinta existen por defectos ya vistos
+# en papel: tramado, texto de la camiseta y barba inventada. No se sueltan.
+PROMPT = """Redraw this photograph as a minimal black ink caricature on plain white paper.
 
-FIDELITY RULES, most important:
-- The drawing must be recognizable as the exact same person in the photo.
-- Copy their real face: same face shape, same jaw, same eye size and spacing,
-  same eyebrows, same nose, same lips.
-- Same age, same hairstyle and same hair length as in the photo. Do not restyle,
-  lengthen, curl or thicken the hair.
-- Draw ONLY the facial hair that is actually visible in the photo. If the person
-  has light stubble or no beard, do not add a beard, mustache or goatee.
-  Never invent facial hair.
-- Do not beautify, slim, age or idealize the face.
+The person must stay recognizable. Slightly exaggerate the two or three features
+that already stand out: the smile, the glasses, the jaw, the nose, the hair.
+Keep their real age. Draw facial hair only if it is visible in the photo.
+Never invent a beard, mustache or goatee. Do not shade.
 
 DRAWING RULES:
 - Single-weight pure black lines on pure white paper. No gray, no gradient,
@@ -69,10 +60,31 @@ DRAWING RULES:
 - Draw hair and facial hair with a handful of long confident strokes, not
   hundreds of short ones.
 - Do not draw anything on the clothing: no text, no letters, no logos, no prints,
-  no graphics. Keep the shirt blank.
+  no graphics. Keep the shirt blank, unless an added costume is listed below.
 - Plain white background, nothing else in the frame.
 - The whole head and shoulders must fit inside the frame.
+- Any added costume or hat is a few simple outlines, never a detailed illustration.
 """
+
+# Ids que manda la cabina. Texto libre del visitante no entra al prompt.
+TRAIT_LINES = {
+    "chef": "Dress them as a chef: a plain toque and a simple jacket, few outlines.",
+    "medico": "Dress them as a doctor: a plain coat and a simple stethoscope, few outlines.",
+    "astronauta": "Dress them as an astronaut: a simple round helmet outline that does not hide the face.",
+    "musico": "Dress them as a musician: simple headphones, few outlines, face still clear.",
+    "sombrero": "Add one simple wide-brim hat.",
+    "gorra": "Add one simple baseball cap.",
+    "corona": "Add one simple three-point crown.",
+}
+
+
+def build_prompt(traits: list[str] | None = None) -> str:
+    """Prompt base más los rasgos conocidos. Ids que no están en el mapa se ignoran."""
+    extras = [TRAIT_LINES[trait] for trait in traits or [] if trait in TRAIT_LINES]
+    if not extras:
+        return PROMPT
+    lines = "\n".join(f"- {line}" for line in extras)
+    return PROMPT.rstrip() + "\n\nADD ONLY THESE, in the same simple black line:\n" + lines + "\n"
 
 
 class SketchProviderError(RuntimeError):
@@ -178,10 +190,15 @@ def _to_data_url(image: np.ndarray) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _request_image(settings: Settings, model: str, reference: np.ndarray) -> tuple[bytes, dict]:
+def _request_image(
+    settings: Settings,
+    model: str,
+    reference: np.ndarray,
+    prompt: str,
+) -> tuple[bytes, dict]:
     payload = {
         "model": model,
-        "prompt": PROMPT,
+        "prompt": prompt,
         "input_references": [{"type": "image_url", "image_url": {"url": _to_data_url(reference)}}],
         "resolution": "1K",
         "aspect_ratio": "3:4",
@@ -298,9 +315,11 @@ def generate_mask(
     image: np.ndarray,
     settings: Settings | None = None,
     models_dir: Path | None = None,
+    traits: list[str] | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Foto -> máscara de tinta entregada por el proveedor activo."""
     settings = settings or load_settings()
+    prompt = build_prompt(traits)
     providers = available_providers(settings)
 
     if settings.provider == "auto":
@@ -328,12 +347,13 @@ def generate_mask(
             if not model:
                 continue
             try:
-                png, meta = _request_image(settings, model, reference)
+                png, meta = _request_image(settings, model, reference, prompt)
                 mask = mask_from_png(png)
             except SketchProviderError as exc:
                 errors.append(str(exc))
                 continue
             _dump_debug(png, mask, reference, meta)
+            meta["traits"] = [trait for trait in traits or [] if trait in TRAIT_LINES]
             meta["reference_sha"] = hashlib.sha256(reference.tobytes()).hexdigest()[:12]
             meta["size"] = f"{reference.shape[1]}x{reference.shape[0]}"
             return mask, meta
