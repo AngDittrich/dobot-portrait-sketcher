@@ -325,11 +325,20 @@ class PortraitRenderer:
             # U2Net no se redibuja: el borde duro contra el blanco ya entra
             # en el XDoG.
             scaled = self._scaled_landmarks(landmarks, box, crop, image.shape)
-            tune: dict = {}
-            if lab_sigma is not None:
-                tune["sigma"] = lab_sigma
-            if lab_phi is not None:
-                tune["phi"] = lab_phi
+            sketch_stages: dict | None = {} if stages is not None else None
+            # Un solo diccionario: lab_sigma y sigma no pueden llegar los dos.
+            tune = {
+                "sigma": sigma if lab_sigma is None else lab_sigma,
+                "phi": phi if lab_phi is None else lab_phi,
+                "epsilon": epsilon,
+                "bg_thresh": bg_threshold,
+                "face_thresh": threshold,
+                "beard_thresh": beard_thresh,
+                "stages": sketch_stages,
+                "faceparse": (
+                    self.faceparse if use_faceparse and self.faceparse.available else None
+                ),
+            }
             if lab_contrast is not None:
                 tune["contrast"] = lab_contrast
             if lab_bilateral is not None:
@@ -340,21 +349,10 @@ class PortraitRenderer:
                 tune["ink_span"] = ink_span
             if speck_area is not None:
                 tune["speck_area"] = speck_area
-            sketch_stages: dict | None = {} if stages is not None else None
             lines, mask, lab_meta = sketch_ops.lab_portrait_lines(
                 crop,
                 scaled,
                 self.landmarks if scaled is not None else None,
-                sigma=sigma,
-                phi=phi,
-                epsilon=epsilon,
-                bg_thresh=bg_threshold,
-                face_thresh=threshold,
-                beard_thresh=beard_thresh,
-                faceparse=self.faceparse
-                if use_faceparse and self.faceparse.available
-                else None,
-                stages=sketch_stages,
                 **tune,
             )
             if stages is not None and sketch_stages:
