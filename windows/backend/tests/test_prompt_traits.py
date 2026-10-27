@@ -14,9 +14,11 @@ def test_sin_rasgos_es_el_prompt_base():
 
 
 def test_rasgo_conocido_se_agrega_y_el_desconocido_no():
-    prompt = build_prompt(["chef", "inventado", "corona"])
+    # Antes llevaba una corona, pero el chef ya ocupa la cabeza: dos sombreros
+    # sobre el mismo cráneo es justo lo que ahora se descarta.
+    prompt = build_prompt(["chef", "inventado", "lentes"])
     assert "plain toque" in prompt
-    assert "three-point crown" in prompt
+    assert "round glasses" in prompt
     assert "inventado" not in prompt
     assert "NO hatching" in prompt
 

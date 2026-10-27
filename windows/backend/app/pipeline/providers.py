@@ -86,12 +86,23 @@ DRAWING_RULES = """DRAWING RULES:
 
 RULES = "\n\n" + FIDELITY_RULES + "\n\n" + DRAWING_RULES
 
-CARICATURE_OPENING = """Redraw this photograph as a minimal black ink caricature on plain white paper.
+CARICATURE_OPENING = """Redraw this photograph as a bold, playful black ink caricature on plain
+white paper.
 
-Take the one feature that already stands out most in the photo, such as a wide
-smile, a big nose or a round chin, and make it slightly bigger. Exaggerate size
-only: the eyes keep their exact position and distance, and nothing is added that
-is not already in the photo."""
+Make the character bigger than life. Pick the two features that already stand
+out in the photo, such as a wide smile, a big nose, a round chin or strong
+eyebrows, and draw them clearly oversized. Give the face an expression with
+life: a broad open smile and raised eyebrows. Use loose, confident hand-drawn
+outlines, a touch imperfect on purpose, with one bold weight instead of many
+thin lines.
+
+The exaggeration is only the size of those features. The eyes keep their exact
+position, size and distance so the person is still recognizable, and nothing is
+added that is not already in the photo.
+
+The character can be whimsical, but the paper stays a drawing: black lines on
+white, no color, no shading, no scenery, no sky, no clouds and no background of
+any kind."""
 
 PROMPT = CARICATURE_OPENING + RULES
 
@@ -137,6 +148,27 @@ TRAIT_LINES = {
     "flor": "Add one simple five-petal flower beside the ear.",
 }
 
+# Qué parte del cuerpo ocupa cada rasgo. Dos rasgos que comparten espacio se
+# dibujan uno encima del otro: "bombero" ya trae casco, y sumarle "gorra" son
+# dos sombreros sobre la misma cabeza. El filtro se hace también aquí porque el
+# pedido puede llegar armado desde fuera; el frontend ya apaga el botón.
+TRAIT_SLOTS = {
+    "chef": ("head", "body"),
+    "medico": ("body",),
+    "astronauta": ("head", "body"),
+    "musico": ("ears", "body"),
+    "piloto": ("head", "body"),
+    "bombero": ("head", "body"),
+    "cientifico": ("body",),
+    "artista": ("head", "body"),
+    "sombrero": ("head",),
+    "gorra": ("head",),
+    "corona": ("head",),
+    "lentes": ("eyes",),
+    "mono": ("neck",),
+    "flor": ("hair",),
+}
+
 
 def resolve_style(style: str | None) -> str:
     """Caricatura si no eligieron, o si el id no existe."""
@@ -145,12 +177,32 @@ def resolve_style(style: str | None) -> str:
     return DEFAULT_STYLE
 
 
+def filter_traits(traits: list[str] | None) -> list[str]:
+    """Deja un rasgo por espacio, y el disfraz manda sobre el accesorio.
+
+    Sin esto, elegir bombero y gorro le pide al modelo dos sombreros sobre la
+    misma cabeza. El disfraz (el que ocupa el cuerpo) se resuelve antes, así que
+    sobrevive al gorro aunque llegue después en la lista.
+    """
+    known = [trait for trait in traits or [] if trait in TRAIT_LINES]
+    ordered = sorted(known, key=lambda trait: "body" not in TRAIT_SLOTS.get(trait, ()))
+    kept: list[str] = []
+    taken: set[str] = set()
+    for trait in ordered:
+        slots = set(TRAIT_SLOTS.get(trait, ()))
+        if slots & taken:
+            continue
+        taken |= slots
+        kept.append(trait)
+    return kept
+
+
 def build_prompt(traits: list[str] | None = None, style: str | None = None) -> str:
     """Estilo elegido más los rasgos conocidos. Ids que no están en el mapa se ignoran."""
     chosen = resolve_style(style)
     opening = CARICATURE_OPENING if chosen == DEFAULT_STYLE else STYLE_OPENINGS[chosen]
     base = opening + RULES
-    extras = [TRAIT_LINES[trait] for trait in traits or [] if trait in TRAIT_LINES]
+    extras = [TRAIT_LINES[trait] for trait in filter_traits(traits)]
     if not extras:
         return base
     lines = "\n".join(f"- {line}" for line in extras)
