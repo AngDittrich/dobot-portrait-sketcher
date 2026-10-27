@@ -329,28 +329,23 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     return () => clearTimeout(timer)
   }, [state.status])
 
-  const [idleEndsAt, setIdleEndsAt] = useState<number | null>(null)
-  const [now, setNow] = useState(() => Date.now())
+  // Reloj de inactividad. La hora de arranque se toma dentro del efecto, que
+  // solo programa el tic; el estado se escribe desde el propio tic y no desde
+  // el cuerpo del efecto. Al cambiar de sección el plazo se recalcula.
+  const [idleBump, setIdleBump] = useState(0)
+  const [idleLeftMs, setIdleLeftMs] = useState(SECTION_TIMEOUT_MS)
+  const waiting = WAITING.includes(state.status)
 
   useEffect(() => {
-    if (!WAITING.includes(state.status)) {
-      setIdleEndsAt(null)
-      return
-    }
-    const started = Date.now()
-    setNow(started)
-    setIdleEndsAt(started + SECTION_TIMEOUT_MS)
-  }, [state.status])
-
-  useEffect(() => {
-    if (idleEndsAt === null) return
+    if (!waiting) return
+    const deadline = Date.now() + SECTION_TIMEOUT_MS
     const timer = window.setInterval(() => {
-      const tick = Date.now()
-      setNow(tick)
-      if (tick >= idleEndsAt) dispatch({ type: 'TIMEOUT' })
+      const left = deadline - Date.now()
+      setIdleLeftMs(Math.max(0, left))
+      if (left <= 0) dispatch({ type: 'TIMEOUT' })
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [idleEndsAt])
+  }, [waiting, state.status, idleBump])
 
   useEffect(() => {
     if (!state.toast) return
@@ -444,15 +439,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
 
   const proceed = useCallback(() => dispatch({ type: 'CONTINUE' }), [])
 
-  const resetIdle = useCallback(() => {
-    if (!WAITING.includes(state.status)) return
-    const started = Date.now()
-    setNow(started)
-    setIdleEndsAt(started + SECTION_TIMEOUT_MS)
-  }, [state.status])
-
-  const idleLeftMs =
-    idleEndsAt === null ? null : Math.min(SECTION_TIMEOUT_MS, Math.max(0, idleEndsAt - now))
+  const resetIdle = useCallback(() => setIdleBump((value) => value + 1), [])
 
   const dismissToast = useCallback(() => {
     dispatch({ type: 'DISMISS_TOAST', id: state.toast?.id ?? -1 })
@@ -461,7 +448,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
   return {
     ...state,
     inCameraFlow: CAMERA_FLOW.includes(state.status),
-    idleLeftMs,
+    idleLeftMs: waiting ? idleLeftMs : null,
     robotJob,
     begin,
     start,
