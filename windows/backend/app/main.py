@@ -71,15 +71,19 @@ jobs = JobStore()
 class SketchParams(BaseModel):
     """Ajustes del boceto (los mismos que se tocan en el laboratorio)."""
 
-    sigma: float = Field(0.9, ge=0.2, le=4.0)
-    phi: float = Field(32.0, ge=1.0, le=80.0)
+    sigma: float = Field(1.2, ge=0.2, le=4.0)
+    phi: float = Field(40.0, ge=1.0, le=80.0)
     epsilon: float = Field(0.0, ge=0.0, le=0.5)
     contrast: float = Field(0.7, ge=0.0, le=1.0)
     threshold: float = Field(0.12, ge=0.02, le=0.9)
+    bg_threshold: float = Field(0.28, ge=0.02, le=0.9)
+    beard_thresh: float = Field(0.45, ge=0.02, le=0.9)
+    use_faceparse: bool = Field(False, description="Base de regiones BiSeNet (experimental)")
     use_landmarks: bool = True
     target_width_mm: float = Field(140.0, ge=20.0, le=400.0)
     spacing_mm: float = Field(1.5, ge=0.2, le=10.0)
-    simplify_px: float = Field(1.2, ge=0.0, le=5.0)
+    simplify_px: float = Field(2.5, ge=0.0, le=5.0)
+    smooth_iters: int = Field(2, ge=0, le=4, description="Pasadas Chaikin antes de RDP (lineas mas rectas)")
     min_stroke_px: float = Field(12.0, ge=1.0, le=80.0)
     # Union de trazos: solo si el hueco es pequeño y la linea sigue recta.
     bridge_gap_px: float = Field(16.0, ge=0.0, le=40.0)
@@ -115,10 +119,13 @@ def build_sketch(image, params: SketchParams) -> dict:
         epsilon=params.epsilon,
         contrast=params.contrast,
         threshold=params.threshold,
+        bg_threshold=params.bg_threshold,
+        beard_thresh=params.beard_thresh,
         use_landmarks=params.use_landmarks,
         use_lineart=params.use_lineart,
         lineart_strong=params.lineart_strong,
         lineart_weak=params.lineart_weak,
+        use_faceparse=params.use_faceparse,
     )
 
     mask = portrait["mask"]
@@ -128,7 +135,7 @@ def build_sketch(image, params: SketchParams) -> dict:
     # Contorno de la tinta. El esqueleto (medial axis) borraba ojos, nariz y
     # pelo: eran manchas cortas y el robot se quedaba con el óvalo de la cara.
     strokes_px = vectorize_ops.strokes_from_mask(mask, min_length_px=params.min_stroke_px)
-    simplified = [vectorize_ops.simplify_stroke(s, params.simplify_px) for s in strokes_px]
+    simplified = [vectorize_ops.simplify_and_smooth(s, params.simplify_px, params.smooth_iters) for s in strokes_px]
     ordered = [stroke for stroke, _ in vectorize_ops.order_strokes(simplified)]
     # Tope de tiempo: si el retrato sale muy largo se van los trazos mas
     # cortos (textura) antes de mandar al robot.

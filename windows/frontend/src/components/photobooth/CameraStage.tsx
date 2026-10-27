@@ -19,6 +19,8 @@ interface CameraStageProps {
   sketch: string | null
   progress: number
   cameraError: boolean
+  /** Constraints negociados (suben una vez si la cámara ofrece más). */
+  videoConstraints: MediaTrackConstraints
   /** Verde cuando la cara está dentro de la silueta. */
   pose: FramingPose
   onCameraReady: () => void
@@ -43,6 +45,7 @@ export function CameraStage({
   sketch,
   progress,
   cameraError,
+  videoConstraints,
   pose,
   onCameraReady,
   onCameraError,
@@ -63,7 +66,7 @@ export function CameraStage({
           mirrored
           screenshotFormat="image/jpeg"
           screenshotQuality={0.92}
-          videoConstraints={{ width: { ideal: 2560 }, height: { ideal: 1440 }, facingMode: 'user' }}
+          videoConstraints={videoConstraints}
           onUserMedia={onCameraReady}
           onUserMediaError={onCameraError}
           className="booth-video"

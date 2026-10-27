@@ -25,6 +25,65 @@ UPPER_LIP = 13
 LOWER_LIP = 14
 RIGHT_IRIS_CENTER = 468
 LEFT_IRIS_CENTER = 473
+# Párpados para medir el alto del ojo (arriba/abajo de cada lado).
+RIGHT_EYE_TOP = 159
+RIGHT_EYE_BOTTOM = 145
+LEFT_EYE_TOP = 386
+LEFT_EYE_BOTTOM = 374
+# Ojo chico respecto a la cara: el contorno + iris + pupila se fusionan en
+# una mancha. Debajo de esta fracción se dibuja simplificado y simétrico.
+# 0.06 cubre ojos de ~9 px en recortes de ~550 px (caso real con lentes).
+SMALL_EYE_RATIO = 0.06
+
+
+def _eye_height(landmarks: np.ndarray, top: int, bottom: int) -> float:
+    if max(top, bottom) >= len(landmarks):
+        return 0.0
+    return abs(float(landmarks[bottom][1]) - float(landmarks[top][1]))
+
+
+def _small_eyes(landmarks: np.ndarray, face_height: float) -> bool:
+    """True si los ojos son chicos para dibujarles iris + pupila."""
+    if face_height <= 0 or landmarks is None or len(landmarks) == 0:
+        return False
+    tallest = max(
+        _eye_height(landmarks, RIGHT_EYE_TOP, RIGHT_EYE_BOTTOM),
+        _eye_height(landmarks, LEFT_EYE_TOP, LEFT_EYE_BOTTOM),
+    )
+    return tallest < SMALL_EYE_RATIO * face_height
+
+
+def _eye_disc_mask(shape: tuple[int, int], landmarks: np.ndarray) -> np.ndarray:
+    """Discos sobre cada ojo (1.0 adentro): ahí manda el landmark, no el XDoG."""
+    height, width = shape[:2]
+    mask = np.zeros((height, width), dtype=np.float32)
+    if landmarks is None or len(landmarks) == 0:
+        return mask
+    for outer, inner in ((RIGHT_EYE_OUTER, 133), (LEFT_EYE_OUTER, 362)):
+        if max(outer, inner) >= len(landmarks):
+            continue
+        cx = float((landmarks[outer][0] + landmarks[inner][0]) / 2.0)
+        cy = float((landmarks[outer][1] + landmarks[inner][1]) / 2.0)
+        radius = max(2, int(round(0.45 * abs(float(landmarks[inner][0] - landmarks[outer][0])))))
+        cv2.circle(mask, (int(round(cx)), int(round(cy))), radius, 1.0, -1, cv2.LINE_AA)
+    return mask
+
+
+def _simple_eyes(canvas: np.ndarray, landmarks: np.ndarray, thickness: float) -> None:
+    """Ojo simplificado y simétrico: línea de párpado + punto de pupila."""
+    # Mínimo 2 px: la apertura 2x2 del umbral (`_open_mask`) borra las
+    # líneas de 1 px, y con el XDoG de cada ojo distinto eso mata un ojo
+    # sí y el otro no (el origen real de los ojos "chuecos").
+    width = max(2, int(round(thickness)))
+    dot = max(1, int(round(thickness / 2)))
+    for outer, inner in ((RIGHT_EYE_OUTER, 133), (LEFT_EYE_OUTER, 362)):
+        if max(outer, inner) >= len(landmarks):
+            continue
+        p1 = (int(round(float(landmarks[outer][0]))), int(round(float(landmarks[outer][1]))))
+        p2 = (int(round(float(landmarks[inner][0]))), int(round(float(landmarks[inner][1]))))
+        cv2.line(canvas, p1, p2, 1.0, int(round(thickness)), cv2.LINE_AA)
+        centre = (int(round((p1[0] + p2[0]) / 2)), int(round((p1[1] + p2[1]) / 2)))
+        cv2.circle(canvas, centre, dot, 1.0, -1, cv2.LINE_AA)
 
 # La nariz se dibuja a mano: el juego de conexiones de MediaPipe cierra un
 # aro alrededor de la nariz y eso parece un hocico. Con estos segmentos sale
@@ -170,6 +229,8 @@ class FaceLandmarks:
         for name in ("brows", "eyes"):
             if name not in features:
                 continue
+            if name == "eyes" and _small_eyes(landmarks, face_height):
+                continue
             for connection in self._connections.get(name, []):
                 line(to_px(connection.start), to_px(connection.end))
 
@@ -211,21 +272,34 @@ class FaceLandmarks:
                     cv2.LINE_AA,
                 )
 
-        # Iris: círculo alrededor del centro + pupila.
+        # Iris: círculo alrededor del centro + pupila. Si el centro sale
+        # pegado a una esquina del ojo (reflejo del lente, mirada de lado),
+        # se omite: el círculo desplazado es lo que deja los ojos "chuecos".
+        # Quedan los párpados, que ya se dibujaron arriba.
         if "eyes" in features:
-            for center_index in (RIGHT_IRIS_CENTER, LEFT_IRIS_CENTER):
-                if center_index >= len(landmarks):
-                    continue
-                ring = landmarks[center_index : center_index + 5]
-                if len(ring) < 4:
-                    continue
-                centre = landmarks[center_index]
-                radius = float(np.mean(np.hypot(ring[:, 0] - centre[0], ring[:, 1] - centre[1])))
-                # Iris un poco menor que el real: con el tamaño completo el ojo
-                # queda de "muñeca" y el boceto parece un dibujo animado.
-                pixel_radius = max(2, int(round(radius * 0.8)))
-                center_px = to_px(center_index)
-                cv2.circle(canvas, center_px, pixel_radius, 1.0, int(round(thickness)), cv2.LINE_AA)
-                cv2.circle(canvas, center_px, max(1, int(round(pixel_radius * 0.4))), 1.0, -1, cv2.LINE_AA)
+            if _small_eyes(landmarks, face_height):
+                _simple_eyes(canvas, landmarks, thickness)
+            else:
+                for center_index, outer, inner in (
+                    (RIGHT_IRIS_CENTER, RIGHT_EYE_OUTER, 133),
+                    (LEFT_IRIS_CENTER, LEFT_EYE_OUTER, 362),
+                ):
+                    if center_index >= len(landmarks):
+                        continue
+                    ring = landmarks[center_index : center_index + 5]
+                    if len(ring) < 4:
+                        continue
+                    centre = landmarks[center_index]
+                    eye_centre = (landmarks[outer] + landmarks[inner]) / 2.0
+                    eye_width = float(abs(landmarks[inner][0] - landmarks[outer][0]))
+                    if eye_width > 0 and float(np.hypot(*(centre - eye_centre))) > 0.35 * eye_width:
+                        continue
+                    radius = float(np.mean(np.hypot(ring[:, 0] - centre[0], ring[:, 1] - centre[1])))
+                    # Iris un poco menor que el real: con el tamaño completo el ojo
+                    # queda de "muñeca" y el boceto parece un dibujo animado.
+                    pixel_radius = max(2, int(round(radius * 0.8)))
+                    center_px = to_px(center_index)
+                    cv2.circle(canvas, center_px, pixel_radius, 1.0, int(round(thickness)), cv2.LINE_AA)
+                    cv2.circle(canvas, center_px, max(1, int(round(pixel_radius * 0.4))), 1.0, -1, cv2.LINE_AA)
 
         return canvas

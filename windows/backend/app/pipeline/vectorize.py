@@ -82,16 +82,27 @@ def remove_specks(mask: np.ndarray, min_area: int = 12) -> np.ndarray:
     return cleaned
 
 
-def strokes_from_mask(mask: np.ndarray, min_length_px: float = 10.0) -> list[np.ndarray]:
+def strokes_from_mask(
+    mask: np.ndarray,
+    min_length_px: float = 10.0,
+    close_px: float = 0.0,
+) -> list[np.ndarray]:
     """Contorno de cada mancha de tinta, no su esqueleto.
 
     Adelgazar la máscara convierte un ojo o una ceja en unos píxeles sueltos
     y el filtro de trazos cortos los tira: la cara queda vacía. El contorno
     sigue la forma que ya se ve en el boceto (párpado, nariz, labios, pelo).
+
+    El cierre (`close_px`) une el doble contorno del XDoG (dos paralelas
+    con hueco) en una sola mancha antes de buscar contornos.
     """
     binary = (mask > 0).astype(np.uint8)
     if not binary.any():
         return []
+    k = int(round(close_px))
+    if k > 1:
+        kernel = np.ones((k, k), np.uint8)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
     contours, _ = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
     strokes: list[np.ndarray] = []
     for contour in contours:
@@ -271,6 +282,20 @@ def simplify_stroke(points: np.ndarray, epsilon_px: float = 0.8) -> np.ndarray:
     contour = points.reshape(-1, 1, 2).astype(np.float32)
     approx = cv2.approxPolyDP(contour, float(epsilon_px), False)
     return approx.reshape(-1, 2).astype(np.float32)
+
+
+def simplify_and_smooth(
+    points: np.ndarray, epsilon_px: float = 1.2, iterations: int = 1
+) -> np.ndarray:
+    """Chaikin primero, RDP despues (el orden importa).
+
+    Chaikin corta la escalera de pixel y deja curva suave; RDP la vuelve
+    a rectas largas. Al reves (RDP primero) el temblor sobrevive porque
+    RDP conserva los picos del zigzag.
+    """
+    if iterations <= 0:
+        return simplify_stroke(points, epsilon_px)
+    return simplify_stroke(smooth_stroke(points, iterations), epsilon_px)
 
 
 def smooth_stroke(points: np.ndarray, iterations: int = 2) -> np.ndarray:

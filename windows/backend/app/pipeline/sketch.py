@@ -97,13 +97,18 @@ LAB_CONTRAST = 0.4
 SPECK_AREA = 8
 
 
-def lab_to_gray(image: np.ndarray, contrast: float = LAB_CONTRAST) -> np.ndarray:
+def lab_to_gray(
+    image: np.ndarray,
+    contrast: float = LAB_CONTRAST,
+    clahe_clip: float = 2.0,
+    bilateral_color: float = 35,
+) -> np.ndarray:
     """Gris del laboratorio: bilateral 35 y CLAHE 8×8."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    gray = cv2.bilateralFilter(gray, d=7, sigmaColor=35, sigmaSpace=7)
+    gray = cv2.bilateralFilter(gray, d=7, sigmaColor=bilateral_color, sigmaSpace=7)
     contrast = float(np.clip(contrast, 0.0, 1.0))
     if contrast > 0:
-        equalized = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+        equalized = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(8, 8)).apply(gray)
         gray = cv2.addWeighted(gray, 1.0 - contrast, equalized, contrast, 0)
     return gray.astype(np.float32) / 255.0
 
@@ -157,26 +162,114 @@ def _drop_specks(mask: np.ndarray, min_area: int = SPECK_AREA) -> np.ndarray:
     return keep
 
 
+# Barba corta: el XDoG dibuja cada pelo como puntito abierto y el robot lo
+# deja como grumo. En la banda labio->mentón (+medio largo hacia el cuello)
+# solo sobrevive tinta fuerte (boca, contorno); la boca se conserva porque
+# los landmarks la protegen.
+BEARD_THRESH = 0.45
+# Puntito aislado (sin tocar ningun rasgo) hasta este area se borra en la
+# banda: los puntos de barba son fuertes (>=0.45) y el umbral no los mata.
+BEARD_BLOB = 80
+
+
+def beard_band_mask(
+    shape: tuple[int, int], landmarks_px: np.ndarray | None
+) -> np.ndarray:
+    """Booleano por fila: banda labio->mentón + medio largo al cuello."""
+    mask = np.zeros(shape, dtype=bool)
+    if landmarks_px is None:
+        return mask
+    try:
+        from .landmarks import CHIN, UPPER_LIP
+
+        lip_y = float(landmarks_px[UPPER_LIP][1])
+        chin_y = float(landmarks_px[CHIN][1])
+        if not (np.isfinite(lip_y) and np.isfinite(chin_y)) or chin_y <= lip_y:
+            return mask
+        top = int(max(0, lip_y))
+        bottom = int(min(shape[0], chin_y + 0.5 * (chin_y - lip_y)))
+        mask[top:bottom, :] = True
+        return mask
+    except Exception:
+        return mask
+
+
+def drop_isolated_blobs(
+    ink: np.ndarray, band: np.ndarray, touch: np.ndarray, max_area: int = BEARD_BLOB
+) -> np.ndarray:
+    """Borra manchas chicas dentro de la banda que no tocan ningun rasgo."""
+    cand = ((ink == 255) & band & ~touch).astype(np.uint8) * 255
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(cand, connectivity=8)
+    kill = np.zeros_like(ink)
+    for index in range(1, count):
+        if stats[index, cv2.CC_STAT_AREA] <= max_area:
+            kill[labels == index] = 255
+    return np.where(kill == 255, 0, ink).astype(np.uint8)
+
+
+def beard_threshold_map(
+    zone: np.ndarray,
+    landmarks_px: np.ndarray | None,
+    bg: float = 0.28,
+    face: float = 0.12,
+    beard: float = BEARD_THRESH,
+) -> np.ndarray:
+    """Mapa de umbral: base fondo/cara + banda de barba estricta."""
+    base = bg - (bg - face) * zone
+    band = beard_band_mask(zone.shape, landmarks_px)
+    out = base.copy()
+    out[band] = beard
+    return out
+
+
 def lab_portrait_lines(
     crop: np.ndarray,
     landmarks_px: np.ndarray | None,
     landmarker,
+    sigma: float = LAB_SIGMA,
+    phi: float = LAB_PHI,
+    epsilon: float = 0.0,
+    bg_thresh: float = 0.28,
+    face_thresh: float = 0.12,
+    flat_thresh: float = 0.20,
+    beard_thresh: float = BEARD_THRESH,
+    clahe_clip: float = 2.0,
+    bilateral_color: float = 35,
+    faceparse=None,
 ) -> tuple[np.ndarray, np.ndarray, dict]:
     """Boceto del laboratorio sobre el recorte ya puesto en blanco.
 
     XDoG + rasgos de MediaPipe (cejas un poco más gruesas, sin ojos si hay
     lentes oscuros) + fundido del torso + umbral más suave dentro de la cara.
+    Los parámetros llegan de SketchParams (punto 4: sin reiniciar para
+    probar); los defaults son los afinados en la cabina.
     Devuelve (intensidad 0..1, máscara con 255 en la tinta, metadatos).
     """
-    gray = lab_to_gray(crop)
-    lines = xdog(gray, sigma=LAB_SIGMA, phi=LAB_PHI)
+    gray = lab_to_gray(crop, clahe_clip=clahe_clip, bilateral_color=bilateral_color)
+    lines = xdog(gray, sigma=sigma, epsilon=epsilon, phi=phi)
     glasses, ratio = "clear", 1.0
     landmark_map = None
     faded = False
     zoned = False
+    parsed = False
 
     if landmarks_px is not None and landmarker is not None:
         try:
+            from .landmarks import (
+                CHIN,
+                LEFT_EYE_OUTER,
+                RIGHT_EYE_OUTER,
+                _eye_disc_mask,
+                _simple_eyes,
+                _small_eyes,
+            )
+
+            eye_y = 0.5 * (
+                float(landmarks_px[RIGHT_EYE_OUTER][1])
+                + float(landmarks_px[LEFT_EYE_OUTER][1])
+            )
+            chin_y = float(landmarks_px[CHIN][1])
+            small_eyes = bool(_small_eyes(landmarks_px, chin_y - eye_y))
             raw = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
             dark, ratio = _dark_glasses(raw, landmarks_px)
             glasses = "dark" if dark else "clear"
@@ -186,6 +279,10 @@ def lab_portrait_lines(
                 if dark
                 else ("jaw", "brows", "eyes", "lips", "nose")
             )
+            if small_eyes:
+                # Ojo chico: no entra al mapa (la limpieza lo mata disparejo);
+                # se estampa simétrico sobre la máscara final.
+                features = tuple(name for name in features if name != "eyes")
             base = tuple(name for name in features if name != "brows")
             drawn_base = landmarker.draw_lines(
                 landmarks_px, (width, height), thickness=1.2, features=base
@@ -195,8 +292,36 @@ def lab_portrait_lines(
             )
             landmark_map = np.maximum(drawn_base, drawn_brows)
             lines = np.maximum(lines, landmark_map)
+            try:
+                if small_eyes:
+                    # Ojo chico (lentes): el XDoG adentro del ojo es reflejo
+                    # asimétrico; se apaga y el ojo se estampa al final.
+                    discs = _eye_disc_mask((height, width), landmarks_px)
+                    lines = lines * (1.0 - discs) + landmark_map * discs
+            except Exception:
+                pass
         except Exception:
             landmark_map = None
+
+        if faceparse is not None:
+            # Base estilo mariposa: bordes ENTRE regiones (0/1, ya limpios).
+            # El XDoG solo sobrevive adentro del pelo (hebras); los rasgos
+            # MediaPipe se conservan (pupilas, parpados). El bloque de
+            # zonificado de abajo respeta las lineas fuertes tal cual.
+            try:
+                from .faceparse import HAIR_GROUP, boundaries
+
+                grouped = faceparse.parse(crop)
+                if grouped is not None:
+                    base = 1.0 - boundaries(grouped).astype(np.float32) / 255.0
+                    hair = (grouped == HAIR_GROUP).astype(np.float32)
+                    hair = cv2.dilate(hair, np.ones((5, 5), np.uint8))
+                    strand = lines * hair
+                    keep = landmark_map if landmark_map is not None else 0.0
+                    lines = np.maximum(np.maximum(base, strand), keep)
+                    parsed = True
+            except Exception:
+                parsed = False
 
         try:
             from .landmarks import CHIN, LEFT_EYE_OUTER, RIGHT_EYE_OUTER
@@ -222,7 +347,14 @@ def lab_portrait_lines(
             outside = 1.0 - zone
             weak = (lines < 0.5).astype(np.float32)
             lines = lines * (1.0 - outside * weak * 0.8)
-            ink = _drop_specks(_open_mask(lines, 0.28 - 0.16 * zone))
+            ink = _drop_specks(
+                _open_mask(
+                    lines,
+                    beard_threshold_map(
+                        zone, landmarks_px, bg_thresh, face_thresh, beard_thresh
+                    ),
+                )
+            )
             if landmark_map is not None:
                 # Tinta débil y aislada dentro de la cara que no toca un rasgo:
                 # se borra. Lo fuerte y los rasgos (dilatados) se quedan.
@@ -233,18 +365,37 @@ def lab_portrait_lines(
                 weak_skin = ((ink == 255) & inside & (lines < 0.5) & ~protect).astype(np.uint8) * 255
                 kept = _drop_specks(weak_skin, 16)
                 ink = np.where((weak_skin == 255) & (kept == 0), 0, ink).astype(np.uint8)
+                # Barba: los puntos son fuertes y el umbral no los mata; se
+                # borran por area si flotan sin tocar ningun rasgo.
+                band = beard_band_mask(ink.shape, landmarks_px)
+                if band.any():
+                    ink = drop_isolated_blobs(ink, band, protect)
             zoned = True
         except Exception:
             zoned = False
 
     if not zoned:
-        ink = _drop_specks(_open_mask(lines, 0.20))
+        ink = _drop_specks(_open_mask(lines, flat_thresh))
+
+    try:
+        if small_eyes and landmarks_px is not None:
+            # Ojo chico: párpado + punto estampados tal cual, simétricos.
+            # Van DESPUÉS de la limpieza porque la apertura 2x2 borra las
+            # líneas de 1-2 px de un ojo sí y del otro no.
+            from .landmarks import _simple_eyes as _stamp_eyes
+
+            stamp = np.zeros((ink.shape[0], ink.shape[1]), dtype=np.float32)
+            _stamp_eyes(stamp, landmarks_px, 2.0)
+            ink = np.where(stamp > 0.5, 255, ink).astype(np.uint8)
+    except Exception:
+        pass
 
     return lines, ink, {
         "glasses": glasses,
         "glasses_ratio": round(float(ratio), 3),
         "fade": faded,
         "zoned": zoned,
+        "parsed": parsed,
     }
 
 
