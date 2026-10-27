@@ -33,6 +33,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 API_URL = "https://openrouter.ai/api/v1/images"
+# Catálogo: dice qué parámetros acepta cada modelo. Se consulta una vez.
+API_MODELS_URL = "https://openrouter.ai/api/v1/images/models"
 DEFAULT_TIMEOUT_S = 25.0
 # Todo lo que no sea papel cuenta como tinta. El modelo no siempre dibuja con el
 # mismo grosor: con umbral por cuantil, las caras que dibujaba con línea fina se
@@ -45,26 +47,46 @@ OUTPUT_HEIGHT = 1024
 
 # Caricatura de pocos trazos. Las reglas de tinta existen por defectos ya vistos
 # en papel: tramado, texto de la camiseta y barba inventada. No se sueltan.
-PROMPT = """Redraw this photograph as a minimal black ink caricature on plain white paper.
+# La lista de identidad no es decorativa. Sin ella el modelo entrega a un
+# pariente más guapo: le puso barba a quien tenía tres días de vello y le alargó
+# el pelo a quien lo tenía corto. Son datos que se comparan en el papel.
+FIDELITY_RULES = """FIDELITY RULES, most important:
+- The drawing must be recognizable as the exact same person in the photo.
+- Keep the same face shape and jaw, the same eye size and the distance between
+  the eyes, the same eyebrows, nose and lips.
+- Keep their real age. Do not beautify, slim, widen or age the face.
+- Keep the same hairstyle and hair length. Never restyle, shorten or lengthen it.
+- Draw facial hair only if it is visible in the photo. Never invent a beard,
+  mustache or goatee.
+- The eyes stay open with a visible pupil. Never draw them closed or as arcs."""
 
-The person must stay recognizable. Slightly exaggerate the two or three features
-that already stand out: the smile, the glasses, the jaw, the nose, the hair.
-Keep their real age. Draw facial hair only if it is visible in the photo.
-Never invent a beard, mustache or goatee. Do not shade.
-
-DRAWING RULES:
+# Reglas que valen para los cuatro estilos; antes solo las llevaba el prompt
+# por defecto. El pelo se perdió una vez por pedir "menos líneas": salió un
+# calvo con tres pelos y el visitante no se reconoció.
+DRAWING_RULES = """DRAWING RULES:
 - Single-weight pure black lines on pure white paper. No gray, no gradient,
   no color.
 - NO hatching, NO cross-hatching, NO stippling, NO dots, NO tone, NO shading of
   any kind. Fewer lines is better.
-- Draw hair and facial hair with a handful of long confident strokes, not
-  hundreds of short ones.
-- Do not draw anything on the clothing: no text, no letters, no logos, no prints,
-  no graphics. Keep the shirt blank, unless an added costume is listed below.
-- Plain white background, nothing else in the frame.
+- Hair and facial hair keep their real silhouette and volume, drawn with a few
+  long confident strokes. Never leave the head bald or with a few stray hairs.
+- No words, letters, numbers, logos, signatures or watermarks anywhere.
+- Plain white background, nothing else in the frame: no border, no vignette.
+- Clothing stays blank unless a costume is added below.
 - The whole head and shoulders must fit inside the frame.
-- Any added costume or hat is a few simple outlines, never a detailed illustration.
-"""
+- An added costume or hat is a few simple outlines, never a detailed drawing,
+  and it never covers the face or the eyes."""
+
+RULES = "\n\n" + FIDELITY_RULES + "\n\n" + DRAWING_RULES
+
+CARICATURE_OPENING = """Redraw this photograph as a minimal black ink caricature on plain white paper.
+
+Take the one feature that already stands out most in the photo, such as a wide
+smile, a big nose or a round chin, and make it slightly bigger. Exaggerate size
+only: the eyes keep their exact position and distance, and nothing is added that
+is not already in the photo."""
+
+PROMPT = CARICATURE_OPENING + RULES
 
 # El visitante elige uno. Un id desconocido vuelve a la caricatura.
 DEFAULT_STYLE = "caricatura"
@@ -72,24 +94,21 @@ STYLE_OPENINGS = {
     "retrato": (
         "Redraw this photograph as a faithful minimal black ink portrait "
         "on plain white paper.\n\n"
-        "The person must stay recognizable. Do not exaggerate. Match their real "
-        "proportions, age, hair and expression. Draw facial hair only if it is "
-        "visible in the photo. Never invent a beard, mustache or goatee. Do not shade."
+        "Do not exaggerate anything: same proportions, same expression and the "
+        "same pose as in the photo."
     ),
     "anime": (
         "Redraw this photograph as minimal black ink anime line art "
         "on plain white paper.\n\n"
-        "The person must stay recognizable. Draw larger expressive eyes, a smaller "
-        "nose and mouth, and the hair as a few clean locks. Keep their real age. "
-        "Draw facial hair only if it is visible in the photo. Never invent a beard, "
-        "mustache or goatee. Do not shade. No screentones."
+        "Larger expressive eyes with a visible pupil, a smaller nose and mouth, "
+        "and the hair as a few clean locks that keep its real shape. No screentones."
     ),
     "cartoon": (
         "Redraw this photograph as a simple black ink cartoon "
         "on plain white paper.\n\n"
-        "The person must stay recognizable. Use rounder shapes, a bigger smile and "
-        "fewer, bolder outlines. Keep their real age. Draw facial hair only if it "
-        "is visible in the photo. Never invent a beard, mustache or goatee. Do not shade."
+        "Rounder shapes, a bigger smile and fewer, bolder outlines, but the hair "
+        "keeps its real shape and volume and the eyes stay open with a visible "
+        "pupil."
     ),
 }
 
@@ -122,16 +141,18 @@ def resolve_style(style: str | None) -> str:
 def build_prompt(traits: list[str] | None = None, style: str | None = None) -> str:
     """Estilo elegido más los rasgos conocidos. Ids que no están en el mapa se ignoran."""
     chosen = resolve_style(style)
-    if chosen == DEFAULT_STYLE:
-        base = PROMPT
-    else:
-        rules = PROMPT.split("DRAWING RULES:", 1)[1]
-        base = STYLE_OPENINGS[chosen].rstrip() + "\n\nDRAWING RULES:" + rules
+    opening = CARICATURE_OPENING if chosen == DEFAULT_STYLE else STYLE_OPENINGS[chosen]
+    base = opening + RULES
     extras = [TRAIT_LINES[trait] for trait in traits or [] if trait in TRAIT_LINES]
     if not extras:
         return base
     lines = "\n".join(f"- {line}" for line in extras)
-    return base.rstrip() + "\n\nADD ONLY THESE, in the same simple black line:\n" + lines + "\n"
+    return (
+        base.rstrip()
+        + "\n\nADD ONLY THESE, in the same simple black line, and change nothing else:\n"
+        + lines
+        + "\n"
+    )
 
 
 class SketchProviderError(RuntimeError):
@@ -236,6 +257,76 @@ def _to_data_url(image: np.ndarray) -> str:
 # Proveedor remoto
 # ---------------------------------------------------------------------------
 
+_CAPABILITIES: dict[str, dict] | None = None
+
+
+def _capabilities() -> dict[str, dict]:
+    """Parámetros que acepta cada modelo, según el catálogo de OpenRouter.
+
+    Se consulta una vez y se guarda. Sin esto hay que mandar el pedido completo
+    y el modelo que no admite un parámetro contesta 400, cobra el intento y se
+    pierde la visita. Medido en el catálogo: gpt-image-1-mini solo acepta 1:1,
+    3:2, 2:3 y auto; flux.2-klein, mai-image y recraft no aceptan `resolution`.
+
+    Si el catálogo no responde devuelve vacío, y entonces se manda el pedido de
+    siempre: es preferible arriesgar un 400 a no dibujar nada.
+    """
+    global _CAPABILITIES
+    if _CAPABILITIES is not None:
+        return _CAPABILITIES
+    try:
+        with urllib.request.urlopen(API_MODELS_URL, timeout=10) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        _CAPABILITIES = {}
+        return _CAPABILITIES
+    entries = body.get("data") if isinstance(body, dict) else body
+    table: dict[str, dict] = {}
+    for entry in entries or []:
+        model_id = entry.get("id")
+        if model_id:
+            table[model_id] = entry.get("supported_parameters") or {}
+    _CAPABILITIES = table
+    return _CAPABILITIES
+
+
+def _accepts(supported: dict | None, name: str, value: object = None) -> bool:
+    """Si el modelo declara el parámetro, y el valor cuando es una lista cerrada."""
+    if supported is None:
+        return True  # catálogo desconocido: se manda como siempre
+    spec = supported.get(name)
+    if spec is None:
+        return False
+    values = spec.get("values")
+    return values is None or value is None or value in values
+
+
+def build_payload(
+    model: str,
+    supported: dict | None,
+    prompt: str,
+    reference_url: str,
+) -> dict:
+    """Pedido a la API con solo los parámetros que ese modelo acepta.
+
+    Así cambiar de modelo es cambiar una variable de entorno y no reescribir el
+    pedido: `supported` sale tal cual del catálogo de OpenRouter.
+    """
+    payload: dict = {
+        "model": model,
+        "prompt": prompt,
+        "input_references": [{"type": "image_url", "image_url": {"url": reference_url}}],
+    }
+    if _accepts(supported, "resolution", "1K"):
+        payload["resolution"] = "1K"
+    if _accepts(supported, "aspect_ratio", "3:4"):
+        payload["aspect_ratio"] = "3:4"
+    if _accepts(supported, "output_format", "png"):
+        payload["output_format"] = "png"
+    if _accepts(supported, "n", 1):
+        payload["n"] = 1
+    return payload
+
 
 def _request_image(
     settings: Settings,
@@ -243,15 +334,12 @@ def _request_image(
     reference: np.ndarray,
     prompt: str,
 ) -> tuple[bytes, dict]:
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "input_references": [{"type": "image_url", "image_url": {"url": _to_data_url(reference)}}],
-        "resolution": "1K",
-        "aspect_ratio": "3:4",
-        "output_format": "png",
-        "n": 1,
-    }
+    payload = build_payload(
+        model,
+        _capabilities().get(model),
+        prompt,
+        _to_data_url(reference),
+    )
     request = urllib.request.Request(
         API_URL,
         data=json.dumps(payload).encode("utf-8"),
