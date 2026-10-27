@@ -400,6 +400,45 @@ def bridge_aligned_strokes(
     return pieces
 
 
+def strokes_from_skeleton(
+    mask: np.ndarray,
+    min_length_px: float = 6.0,
+    spur_length_px: int = 4,
+    bridge_gap_px: float = 12.0,
+    bridge_angle_deg: float = 40.0,
+) -> list[np.ndarray]:
+    """Máscara de tinta -> polilíneas recorriendo el esqueleto una sola vez.
+
+    Es el trazador que necesita una salida de IA. Con `strokes_from_mask` una
+    línea de 1 px se recorre como contorno: un solo trazo que sube por un borde
+    y vuelve por el otro, o sea una doble línea sobre el papel. El esqueleto la
+    deja en un píxel de ancho y se recorre una vez.
+
+    `min_length_px` conviene más bajo que en el contorno: aquí un tramo corto
+    suele ser el iris, la comisura o una ceja, no ruido.
+    """
+    binary = mask if mask.dtype == np.uint8 else np.asarray(mask, dtype=np.uint8)
+    if binary.size == 0:
+        return []
+    if binary.max() <= 1:
+        binary = binary * 255
+
+    skeleton = skeletonize(binary)
+    if not np.any(skeleton):
+        return []
+
+    strokes = extract_strokes(
+        skeleton, min_length_px=min_length_px, spur_length_px=spur_length_px
+    )
+    if not strokes:
+        return []
+    if bridge_gap_px <= 0 or len(strokes) < 2:
+        return strokes
+    return bridge_aligned_strokes(
+        strokes, max_gap_px=bridge_gap_px, max_angle_deg=bridge_angle_deg
+    )
+
+
 def estimate_seconds(
     strokes: list[np.ndarray],
     width: int,
