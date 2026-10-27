@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ditlab</title>
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+<header>
+  <h1>Ditlab</h1>
+  <p>La misma cadena que dibuja la cabina, capa por capa.</p>
+</header>
+<main>
+  <section class="capture">
+    <video id="cam" autoplay playsinline muted></video>
+    <div class="row">
+      <button id="start" type="button">Comenzar</button>
+      <button id="shot" type="button" disabled>Tomar foto</button>
+    </div>
+    <p id="status">La cámara sigue apagada.</p>
+  </section>
+  <section id="early" class="stack"></section>
+  <form id="controls" class="controls" hidden>
+    <h2>Ajustes del boceto</h2>
+    <label>
+      <span>Sigma del XDoG <output id="val-sigma">1.2</output></span>
+      <input id="sigma" name="sigma" type="range" min="0.2" max="4" step="0.1" value="1.2" />
+    </label>
+    <label>
+      <span>Phi del XDoG <output id="val-phi">40</output></span>
+      <input id="phi" name="phi" type="range" min="1" max="80" step="1" value="40" />
+    </label>
+    <label>
+      <span>Contraste local <output id="val-contrast">0.4</output></span>
+      <input id="contrast" name="contrast" type="range" min="0" max="1" step="0.05" value="0.4" />
+    </label>
+    <label>
+      <span>Bilateral <output id="val-bilateral">35</output></span>
+      <input id="bilateral" name="bilateral" type="range" min="1" max="80" step="1" value="35" />
+    </label>
+    <label>
+      <span>Umbral fuera de la cara <output id="val-ink_high">0.28</output></span>
+      <input id="ink_high" name="ink_high" type="range" min="0.02" max="0.9" step="0.01" value="0.28" />
+    </label>
+    <label>
+      <span>Alivio dentro de la cara <output id="val-ink_span">0.16</output></span>
+      <input id="ink_span" name="ink_span" type="range" min="0" max="0.5" step="0.01" value="0.16" />
+    </label>
+    <label>
+      <span>Mota mínima <output id="val-speck_area">8</output></span>
+      <input id="speck_area" name="speck_area" type="range" min="1" max="80" step="1" value="8" />
+    </label>
+    <label>
+      <span>Largo mínimo del trazo <output id="val-min_stroke_px">12</output></span>
+      <input id="min_stroke_px" name="min_stroke_px" type="range" min="1" max="80" step="1" value="12" />
+    </label>
+    <label>
+      <span>Simplificación <output id="val-simplify_px">1.2</output></span>
+      <input id="simplify_px" name="simplify_px" type="range" min="0" max="5" step="0.1" value="1.2" />
+    </label>
+    <label>
+      <span>Tope de dibujo, segundos <output id="val-max_draw_seconds">150</output></span>
+      <input id="max_draw_seconds" name="max_draw_seconds" type="range" min="5" max="600" step="5" value="150" />
+    </label>
+  </form>
+  <section id="late" class="stack"></section>
+</main>
+<dialog id="zoom">
+  <img id="zoom-img" alt="" />
+  <p id="zoom-caption"></p>
+</dialog>
+<script src="/static/app.js"></script>
+</body>
+</html>

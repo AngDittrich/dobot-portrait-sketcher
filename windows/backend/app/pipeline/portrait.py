@@ -243,6 +243,14 @@ class PortraitRenderer:
         use_lineart: bool = False,
         lineart_strong: float = LINEART_STRONG,
         lineart_weak: float = LINEART_WEAK,
+        lab_sigma: float | None = None,
+        lab_phi: float | None = None,
+        lab_contrast: float | None = None,
+        lab_bilateral: float | None = None,
+        ink_high: float | None = None,
+        ink_span: float | None = None,
+        speck_area: int | None = None,
+        stages: dict | None = None,
         use_faceparse: bool = False,
     ) -> dict:
         started = time.perf_counter()
@@ -255,11 +263,15 @@ class PortraitRenderer:
             landmarks = self.landmarks.detect(image)
 
         # Máscara de persona del laboratorio: U2Net + GrabCut en el borde.
+        # ``stages`` solo se llena para el laboratorio; la máscara no cambia.
+        seg_stages: dict | None = {} if stages is not None else None
         alpha = (
-            self.u2net.segment(image, face["bbox"] if face else None)
+            self.u2net.segment(image, face["bbox"] if face else None, stages=seg_stages)
             if self.u2net.available
             else None
         )
+        if stages is not None and seg_stages:
+            stages.update(seg_stages)
         if alpha is None:
             # Respaldo: sin U2Net se usa una elipse alrededor de la cara.
             alpha = (
@@ -313,20 +325,39 @@ class PortraitRenderer:
             # U2Net no se redibuja: el borde duro contra el blanco ya entra
             # en el XDoG.
             scaled = self._scaled_landmarks(landmarks, box, crop, image.shape)
+            sketch_stages: dict | None = {} if stages is not None else None
+            # Un solo diccionario: lab_sigma y sigma no pueden llegar los dos.
+            tune = {
+                "sigma": sigma if lab_sigma is None else lab_sigma,
+                "phi": phi if lab_phi is None else lab_phi,
+                "epsilon": epsilon,
+                "bg_thresh": bg_threshold,
+                "face_thresh": threshold,
+                "beard_thresh": beard_thresh,
+                "stages": sketch_stages,
+                "faceparse": (
+                    self.faceparse if use_faceparse and self.faceparse.available else None
+                ),
+            }
+            if lab_contrast is not None:
+                tune["contrast"] = lab_contrast
+            if lab_bilateral is not None:
+                tune["bilateral"] = lab_bilateral
+            if ink_high is not None:
+                tune["ink_high"] = ink_high
+            if ink_span is not None:
+                tune["ink_span"] = ink_span
+            if speck_area is not None:
+                tune["speck_area"] = speck_area
             lines, mask, lab_meta = sketch_ops.lab_portrait_lines(
                 crop,
                 scaled,
                 self.landmarks if scaled is not None else None,
-                sigma=sigma,
-                phi=phi,
-                epsilon=epsilon,
-                bg_thresh=bg_threshold,
-                face_thresh=threshold,
-                beard_thresh=beard_thresh,
-                faceparse=self.faceparse
-                if use_faceparse and self.faceparse.available
-                else None,
+                **tune,
             )
+            if stages is not None and sketch_stages:
+                stages.update(sketch_stages)
+                stages["scaled_landmarks"] = scaled
 
         return {
             "face": face,

@@ -30,6 +30,8 @@ from starlette.concurrency import run_in_threadpool  # noqa: E402
 from app.imaging import decode_data_url, encode_data_url, fit_max_side  # noqa: E402
 from app.pipeline import providers  # noqa: E402
 from app.pipeline import vectorize as vectorize_ops  # noqa: E402
+from app.pipeline.caption import CAPTION_BUDGET_S, append_caption  # noqa: E402
+from app.pipeline.providers import DEFAULT_STYLE  # noqa: E402
 from app.pipeline.portrait import PortraitRenderer  # noqa: E402
 from app.robot.client import MockRobotClient, Segment, Trajectory  # noqa: E402
 from app.store import Job, JobStore, Sketch, SketchStore  # noqa: E402
@@ -114,6 +116,10 @@ class SketchParams(BaseModel):
 class SketchRequest(BaseModel):
     image: str = Field(..., description="Foto capturada en base64 (data URL)")
     params: SketchParams = Field(default_factory=SketchParams)
+    # Ids de rasgo (chef, sombrero…). El texto libre no se reenvía al modelo.
+    traits: list[str] = Field(default_factory=list)
+    # retrato, caricatura, anime o cartoon. Otro valor cae en caricatura.
+    style: str = DEFAULT_STYLE
 
 
 class JobRequest(BaseModel):
@@ -121,7 +127,12 @@ class JobRequest(BaseModel):
     image: str | None = Field(default=None, description="Alternativa a sketch_id")
 
 
-def build_sketch(image, params: SketchParams) -> dict:
+def build_sketch(
+    image,
+    params: SketchParams,
+    traits: list[str] | None = None,
+    style: str | None = None,
+) -> dict:
     """Foto -> líneas -> trazos -> SVG + trayectoria en mm.
 
     Las líneas las pone el proveedor de IA (`providers.py`). Si no hay red, no
@@ -133,7 +144,9 @@ def build_sketch(image, params: SketchParams) -> dict:
     mask = None
     if params.use_ai:
         try:
-            mask, ai_meta = providers.generate_mask(image, models_dir=MODELS_DIR)
+            mask, ai_meta = providers.generate_mask(
+                image, models_dir=MODELS_DIR, traits=traits, style=style
+            )
         except providers.SketchProviderError as exc:
             ai_meta = {"provider": "xdog", "fallback_reason": str(exc)}
 
@@ -182,9 +195,12 @@ def build_sketch(image, params: SketchParams) -> dict:
     ordered = vectorize_ops.prune_to_budget(
         ordered,
         crop_width,
-        max_seconds=params.max_draw_seconds,
+        max_seconds=max(12.0, params.max_draw_seconds - CAPTION_BUDGET_S),
         target_width_mm=params.target_width_mm,
     )
+    # El rótulo va después de podar: si entrara antes, el recorte de tiempo
+    # se lo comería por ser de los trazos más cortos.
+    ordered, crop_height = append_caption(ordered, crop_width, crop_height)
 
     trajectory = vectorize_ops.build_trajectory(
         ordered,
@@ -240,7 +256,9 @@ async def create_sketch(payload: SketchRequest) -> dict:
     save_raw_capture(image)
     image = fit_max_side(image)
     try:
-        result = await run_in_threadpool(build_sketch, image, payload.params)
+        result = await run_in_threadpool(
+            build_sketch, image, payload.params, payload.traits, payload.style
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Error generando el boceto: {exc}") from exc
 

@@ -55,7 +55,7 @@ Frontend (`windows/frontend/`): `pnpm install`, `pnpm dev`, `pnpm build` (`tsc -
 ## Pipeline del boceto (`windows/backend/app/pipeline/`)
 
 1. **Proveedor de IA** (`providers.py`): recorta cabeza y hombros con YuNet, manda la referencia a OpenRouter y devuelve una **máscara de tinta** (255 = línea). Binariza con umbral fijo 200 y cierra huecos de 3 px, porque el modelo no dibuja con el mismo grosor en todas las caras. Si el proveedor falla se cae al respaldo XDoG sin romper la pantalla.
-2. **Trazador de línea central** (`vectorize.py`): `trim_to_ink` (recorta el aire del lienzo 3:4 para que la cara llene los 140 mm) → `strokes_from_centerline` (`MORPH_CLOSE` → `skeletonize` → `_centerline_paths` → `bridge_aligned_strokes`) → `simplify_and_smooth` (Chaikin + RDP) → `order_strokes` (vecino + 2-opt) → `prune_to_budget` (150 s) → `build_trajectory` (mm, 140 mm de ancho).
+2. **Trazador de línea central** (`vectorize.py`): `trim_to_ink` (recorta el aire del lienzo 3:4 para que la cara llene los 140 mm) → `strokes_from_centerline` (`MORPH_CLOSE` → `skeletonize` → `_centerline_paths` → `bridge_aligned_strokes`) → `simplify_and_smooth` (Chaikin + RDP) → `order_strokes` (vecino + 2-opt) → `prune_to_budget` (150 s, reservando el rótulo) → `append_caption` (`caption.py`, escribe SYSCOM ROBOTICS debajo, en trazo simple, y alarga el lienzo sin achicar la cara) → `build_trajectory` (mm, 140 mm de ancho).
 3. `robot/client.py` es `MockRobotClient`, sin hardware; `ROBOT_TIME_SCALE=0.2` acelera la demo.
 4. **Respaldo sin red** (congelado, no mejorar): `portrait.py` (`PortraitRenderer.render`) → `sketch.lab_portrait_lines` (XDoG + landmarks) → `strokes_from_mask` (contornos).
 
@@ -75,8 +75,10 @@ Wizard de una sola pantalla, sin scroll. Estados en `src/hooks/usePhotobooth.ts`
 
 1. `attract` — el robot saluda (`assets/robot/dobotsayinghello.webp`) y el botón COMENZAR.
 2. `camera` → `countdown` → `capture` — visor y cuenta regresiva.
-3. `reveal` — la foto entra en iris y se transforma a sketch.
-4. `confirm` — "¿Listo para ser dibujado?" con TOMAR OTRA (vuelve a `camera`) a la izquierda y ¡SÍ! a la derecha.
-5. `drawing` (3 s, `assets/robot/dobotidlemarker.webp`) → `thanks`: "LISTO. TOMA TU DIBUJO." y "SYSCOM agradece tu visita." Vuelve solo a `attract`.
+3. `review` — se muestra la foto. TOMAR OTRA vuelve a `camera`. ME GUSTA sigue. Todavía no se llama a la IA.
+4. `style` — estilo de dibujo (retrato, caricatura, anime o cartoon; caricatura viene marcado), más Profesión y Accesorios, un id por grupo. CONTINUAR es el único momento de `POST /api/sketch`.
+5. `reveal` — la foto entra en iris y se transforma a sketch.
+6. `confirm` — "¿Listo para ser dibujado?" con TOMAR OTRA (vuelve a `camera`) a la izquierda y ¡SÍ! a la derecha.
+7. `drawing` (3 s, `assets/robot/dobotidlemarker.webp`) → `thanks`: "LISTO. TOMA TU DIBUJO." y "SYSCOM agradece tu visita." Vuelve solo a `attract`.
 
-Si una pantalla que espera al usuario no cambia en 3 minutos, todo se reinicia a `attract`.
+En `camera`, `review`, `style` y `confirm` se ve un anillo de 3 minutos. Pulsarlo vuelve a llenar el tiempo. Al llegar a cero, todo se reinicia a `attract`.

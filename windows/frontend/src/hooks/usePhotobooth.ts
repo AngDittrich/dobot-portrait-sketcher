@@ -3,16 +3,19 @@ import type { RefObject } from 'react'
 import type Webcam from 'react-webcam'
 import { getJob, getLastSketchId, postJob } from '../lib/api'
 import { generateSketch } from '../lib/sketch'
+import { EMPTY_TRAITS, selectedTraitIds } from '../lib/traits'
+import type { TraitGroup, TraitSelection } from '../lib/traits'
+import { DEFAULT_STYLE, isDrawingStyle } from '../lib/drawingStyles'
+import type { DrawingStyleId } from '../lib/drawingStyles'
 
 /**
  * Wizard de la cabina, conectado al backend de main.
  *
- *   attract → camera → countdown → capture → reveal → confirm
- *        → drawing → thanks → attract
+ *   attract → camera → countdown → capture → review → style
+ *        → reveal → confirm → drawing → thanks → attract
  *
- * El boceto sale de POST /api/sketch (con respaldo local). Al pulsar ¡SÍ!
- * se crea el trabajo del robot y la pantalla de dibujo sigue su progreso.
- * Si el backend no responde, el dibujo dura 3 s y sigue el cierre.
+ * La foto se muestra antes de gastar un token. La IA corre al salir de
+ * style, con los rasgos elegidos. Al pulsar ¡SÍ! se crea el trabajo del robot.
  */
 
 export type PhotoboothStatus =
@@ -20,6 +23,8 @@ export type PhotoboothStatus =
   | 'camera'
   | 'countdown'
   | 'capture'
+  | 'review'
+  | 'style'
   | 'reveal'
   | 'confirm'
   | 'drawing'
@@ -43,6 +48,8 @@ interface PhotoboothState {
   status: PhotoboothStatus
   countdown: number
   photo: string | null
+  traits: TraitSelection
+  styleId: DrawingStyleId
   sketch: string | null
   /** Progreso 0..1 del reveal (iris + transformación a sketch). */
   progress: number
@@ -56,7 +63,11 @@ type Action =
   | { type: 'RELEASE' }
   | { type: 'TICK' }
   | { type: 'CAPTURED'; photo: string }
-  | { type: 'REVEAL' }
+  | { type: 'REVIEW' }
+  | { type: 'LIKE' }
+  | { type: 'TOGGLE'; group: TraitGroup; id: string }
+  | { type: 'STYLE'; id: DrawingStyleId }
+  | { type: 'CONTINUE' }
   | { type: 'PROGRESS'; value: number }
   | { type: 'REVEALED'; sketch: string }
   | { type: 'DRAW' }
@@ -87,12 +98,25 @@ export const THANKS_MS = 8000
 export const SECTION_TIMEOUT_MS = 3 * 60 * 1000
 export const TOAST_MS = 3200
 
-const CAMERA_FLOW: PhotoboothStatus[] = ['camera', 'countdown', 'capture', 'reveal', 'confirm']
+const CAMERA_FLOW: PhotoboothStatus[] = [
+  'camera',
+  'countdown',
+  'capture',
+  'review',
+  'style',
+  'reveal',
+  'confirm',
+]
+
+/** Pantallas que esperan una decisión. Ahí se ve el anillo. */
+const WAITING: PhotoboothStatus[] = ['camera', 'review', 'style', 'confirm']
 
 const initialState: PhotoboothState = {
   status: 'attract',
   countdown: COUNTDOWN_FROM,
   photo: null,
+  traits: EMPTY_TRAITS,
+  styleId: DEFAULT_STYLE,
   sketch: null,
   progress: 0,
   toast: null,
@@ -120,9 +144,37 @@ function reducer(state: PhotoboothState, action: Action): PhotoboothState {
     case 'TICK':
       return { ...state, countdown: state.countdown - 1 }
     case 'CAPTURED':
-      return { ...state, status: 'capture', photo: action.photo, sketch: null, progress: 0 }
-    case 'REVEAL':
-      return { ...state, status: 'reveal', progress: 0 }
+      return {
+        ...state,
+        status: 'capture',
+        photo: action.photo,
+        traits: EMPTY_TRAITS,
+        styleId: DEFAULT_STYLE,
+        sketch: null,
+        progress: 0,
+      }
+    case 'REVIEW':
+      return { ...state, status: 'review' }
+    case 'LIKE':
+      if (state.status !== 'review') return state
+      return { ...state, status: 'style' }
+    case 'TOGGLE': {
+      if (state.status !== 'style') return state
+      const current = state.traits[action.group]
+      return {
+        ...state,
+        traits: {
+          ...state.traits,
+          [action.group]: current === action.id ? null : action.id,
+        },
+      }
+    }
+    case 'STYLE':
+      if (state.status !== 'style' || !isDrawingStyle(action.id)) return state
+      return { ...state, styleId: action.id }
+    case 'CONTINUE':
+      if (state.status !== 'style') return state
+      return { ...state, status: 'reveal', sketch: null, progress: 0 }
     case 'PROGRESS':
       return { ...state, progress: action.value }
     case 'REVEALED':
@@ -188,7 +240,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
 
   useEffect(() => {
     if (state.status !== 'capture') return
-    const timer = setTimeout(() => dispatch({ type: 'REVEAL' }), FLASH_MS)
+    const timer = setTimeout(() => dispatch({ type: 'REVIEW' }), FLASH_MS)
     return () => clearTimeout(timer)
   }, [state.status])
 
@@ -206,8 +258,9 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
       }
     }
 
-    // generateSketch llama a POST /api/sketch y, si el backend no está, dibuja en local.
-    generateSketch(state.photo)
+    // La IA corre aquí, ya con la foto aceptada y los rasgos. Si el backend
+    // no está, generateSketch dibuja en local.
+    generateSketch(state.photo, selectedTraitIds(state.traits), state.styleId)
       .then((sketch) => {
         sketchResult = sketch
         sketchReady = true
@@ -260,7 +313,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
       cancelled = true
       cancelAnimationFrame(raf)
     }
-  }, [state.status, state.photo])
+  }, [state.status, state.photo, state.traits, state.styleId])
 
   /**
    * Pantalla de dibujo: si hay un trabajo del robot, espera a que termine.
@@ -282,11 +335,28 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     return () => clearTimeout(timer)
   }, [state.status])
 
+  const [idleEndsAt, setIdleEndsAt] = useState<number | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+
   useEffect(() => {
-    if (state.status === 'drawing' || state.status === 'thanks') return
-    const timer = setTimeout(() => dispatch({ type: 'TIMEOUT' }), SECTION_TIMEOUT_MS)
-    return () => clearTimeout(timer)
+    if (!WAITING.includes(state.status)) {
+      setIdleEndsAt(null)
+      return
+    }
+    const started = Date.now()
+    setNow(started)
+    setIdleEndsAt(started + SECTION_TIMEOUT_MS)
   }, [state.status])
+
+  useEffect(() => {
+    if (idleEndsAt === null) return
+    const timer = window.setInterval(() => {
+      const tick = Date.now()
+      setNow(tick)
+      if (tick >= idleEndsAt) dispatch({ type: 'TIMEOUT' })
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [idleEndsAt])
 
   useEffect(() => {
     if (!state.toast) return
@@ -368,6 +438,28 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     dispatch({ type: 'RETAKE' })
   }, [stopRobotPolling])
 
+  const like = useCallback(() => dispatch({ type: 'LIKE' }), [])
+
+  const toggleTrait = useCallback((group: TraitGroup, id: string) => {
+    dispatch({ type: 'TOGGLE', group, id })
+  }, [])
+
+  const chooseStyle = useCallback((id: DrawingStyleId) => {
+    dispatch({ type: 'STYLE', id })
+  }, [])
+
+  const proceed = useCallback(() => dispatch({ type: 'CONTINUE' }), [])
+
+  const resetIdle = useCallback(() => {
+    if (!WAITING.includes(state.status)) return
+    const started = Date.now()
+    setNow(started)
+    setIdleEndsAt(started + SECTION_TIMEOUT_MS)
+  }, [state.status])
+
+  const idleLeftMs =
+    idleEndsAt === null ? null : Math.min(SECTION_TIMEOUT_MS, Math.max(0, idleEndsAt - now))
+
   const dismissToast = useCallback(() => {
     dispatch({ type: 'DISMISS_TOAST', id: state.toast?.id ?? -1 })
   }, [state.toast])
@@ -375,12 +467,18 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
   return {
     ...state,
     inCameraFlow: CAMERA_FLOW.includes(state.status),
+    idleLeftMs,
     robotJob,
     begin,
     start,
     release,
     accept,
     retake,
+    like,
+    toggleTrait,
+    chooseStyle,
+    proceed,
+    resetIdle,
     dismissToast,
   }
 }

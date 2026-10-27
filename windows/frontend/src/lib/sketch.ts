@@ -24,9 +24,13 @@ const PAPER = { r: 250, g: 250, b: 249 }
  * Boceto del backend. Si el backend no responde se cae al sketch local,
  * para que la demo siga viva sin el servidor levantado.
  */
-export async function generateSketch(photoDataUrl: string): Promise<string> {
+export async function generateSketch(
+  photoDataUrl: string,
+  traits: string[] = [],
+  style = 'caricatura',
+): Promise<string> {
   try {
-    const result = await postSketch(photoDataUrl)
+    const result = await postSketch(photoDataUrl, traits, style)
     return result.image
   } catch (error) {
     console.warn('El backend no respondió; se usa el sketch local.', error)

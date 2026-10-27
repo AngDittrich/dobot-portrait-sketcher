@@ -28,7 +28,7 @@ export function BoothControls({
   cameraError,
   onStart,
 }: BoothControlsProps) {
-  if (cameraError || status === 'confirm') return null
+  if (cameraError || status === 'review' || status === 'style' || status === 'confirm') return null
 
   return (
     <AnimatePresence mode="wait">

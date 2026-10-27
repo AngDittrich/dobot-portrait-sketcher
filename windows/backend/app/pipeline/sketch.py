@@ -94,6 +94,10 @@ def binarize(lines: np.ndarray, threshold: float = 0.20) -> np.ndarray:
 LAB_SIGMA = 1.2
 LAB_PHI = 40.0
 LAB_CONTRAST = 0.4
+LAB_BILATERAL = 35.0
+# Dentro de la cara el umbral es INK_HIGH - INK_SPAN (más tinta). Afuera, INK_HIGH.
+INK_HIGH = 0.28
+INK_SPAN = 0.16
 SPECK_AREA = 8
 
 
@@ -101,11 +105,11 @@ def lab_to_gray(
     image: np.ndarray,
     contrast: float = LAB_CONTRAST,
     clahe_clip: float = 2.0,
-    bilateral_color: float = 35,
+    bilateral: float = LAB_BILATERAL,
 ) -> np.ndarray:
     """Gris del laboratorio: bilateral 35 y CLAHE 8×8."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    gray = cv2.bilateralFilter(gray, d=7, sigmaColor=bilateral_color, sigmaSpace=7)
+    gray = cv2.bilateralFilter(gray, d=7, sigmaColor=float(bilateral), sigmaSpace=7)
     contrast = float(np.clip(contrast, 0.0, 1.0))
     if contrast > 0:
         equalized = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(8, 8)).apply(gray)
@@ -229,12 +233,17 @@ def lab_portrait_lines(
     sigma: float = LAB_SIGMA,
     phi: float = LAB_PHI,
     epsilon: float = 0.0,
+    contrast: float = LAB_CONTRAST,
+    bilateral: float = LAB_BILATERAL,
+    clahe_clip: float = 2.0,
     bg_thresh: float = 0.28,
     face_thresh: float = 0.12,
     flat_thresh: float = 0.20,
     beard_thresh: float = BEARD_THRESH,
-    clahe_clip: float = 2.0,
-    bilateral_color: float = 35,
+    ink_high: float | None = None,
+    ink_span: float | None = None,
+    speck_area: int = SPECK_AREA,
+    stages: dict | None = None,
     faceparse=None,
 ) -> tuple[np.ndarray, np.ndarray, dict]:
     """Boceto del laboratorio sobre el recorte ya puesto en blanco.
@@ -244,14 +253,20 @@ def lab_portrait_lines(
     Los parámetros llegan de SketchParams (punto 4: sin reiniciar para
     probar); los defaults son los afinados en la cabina.
     Devuelve (intensidad 0..1, máscara con 255 en la tinta, metadatos).
+
+    Los argumentos extra repiten las constantes de la cabina. Si no se
+    pasan, el dibujo es el de siempre. Con ``stages`` se guardan las
+    imágenes intermedias para el laboratorio, sin alterar la tinta.
     """
-    gray = lab_to_gray(crop, clahe_clip=clahe_clip, bilateral_color=bilateral_color)
+    gray = lab_to_gray(crop, contrast=contrast, clahe_clip=clahe_clip, bilateral=bilateral)
     lines = xdog(gray, sigma=sigma, epsilon=epsilon, phi=phi)
+    xdog_only = lines.copy() if stages is not None else None
     glasses, ratio = "clear", 1.0
     landmark_map = None
     faded = False
     zoned = False
     parsed = False
+    small_eyes = False
 
     if landmarks_px is not None and landmarker is not None:
         try:
@@ -347,14 +362,13 @@ def lab_portrait_lines(
             outside = 1.0 - zone
             weak = (lines < 0.5).astype(np.float32)
             lines = lines * (1.0 - outside * weak * 0.8)
-            ink = _drop_specks(
-                _open_mask(
-                    lines,
-                    beard_threshold_map(
-                        zone, landmarks_px, bg_thresh, face_thresh, beard_thresh
-                    ),
+            if ink_high is not None and ink_span is not None:
+                threshold = ink_high - ink_span * zone
+            else:
+                threshold = beard_threshold_map(
+                    zone, landmarks_px, bg_thresh, face_thresh, beard_thresh
                 )
-            )
+            ink = _drop_specks(_open_mask(lines, threshold), speck_area)
             if landmark_map is not None:
                 # Tinta débil y aislada dentro de la cara que no toca un rasgo:
                 # se borra. Lo fuerte y los rasgos (dilatados) se quedan.
@@ -375,7 +389,7 @@ def lab_portrait_lines(
             zoned = False
 
     if not zoned:
-        ink = _drop_specks(_open_mask(lines, flat_thresh))
+        ink = _drop_specks(_open_mask(lines, flat_thresh), speck_area)
 
     try:
         if small_eyes and landmarks_px is not None:
@@ -389,6 +403,13 @@ def lab_portrait_lines(
             ink = np.where(stamp > 0.5, 255, ink).astype(np.uint8)
     except Exception:
         pass
+
+    if stages is not None:
+        stages["gray"] = gray
+        stages["xdog"] = xdog_only
+        stages["landmarks"] = None if landmark_map is None else landmark_map.copy()
+        stages["fused"] = lines.copy()
+        stages["ink"] = ink.copy()
 
     return lines, ink, {
         "glasses": glasses,

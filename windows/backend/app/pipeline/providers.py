@@ -43,23 +43,14 @@ GAP_CLOSE_PX = 3
 OUTPUT_WIDTH = 768
 OUTPUT_HEIGHT = 1024
 
-# Prompt validado contra la API: con estas reglas el modelo deja de inventar
-# barba, respeta el peinado y no dibuja el texto de la camiseta (que llenaba el
-# dibujo de trazos basura). No cambiar sin volver a comparar contra una foto
-# real: las tres reglas existen por un defecto concreto que ya se vio en papel.
-PROMPT = """Redraw this photograph as a minimal black ink line drawing on plain white paper,
-in the style of a confident pen portrait by a fashion illustrator.
+# Caricatura de pocos trazos. Las reglas de tinta existen por defectos ya vistos
+# en papel: tramado, texto de la camiseta y barba inventada. No se sueltan.
+PROMPT = """Redraw this photograph as a minimal black ink caricature on plain white paper.
 
-FIDELITY RULES, most important:
-- The drawing must be recognizable as the exact same person in the photo.
-- Copy their real face: same face shape, same jaw, same eye size and spacing,
-  same eyebrows, same nose, same lips.
-- Same age, same hairstyle and same hair length as in the photo. Do not restyle,
-  lengthen, curl or thicken the hair.
-- Draw ONLY the facial hair that is actually visible in the photo. If the person
-  has light stubble or no beard, do not add a beard, mustache or goatee.
-  Never invent facial hair.
-- Do not beautify, slim, age or idealize the face.
+The person must stay recognizable. Slightly exaggerate the two or three features
+that already stand out: the smile, the glasses, the jaw, the nose, the hair.
+Keep their real age. Draw facial hair only if it is visible in the photo.
+Never invent a beard, mustache or goatee. Do not shade.
 
 DRAWING RULES:
 - Single-weight pure black lines on pure white paper. No gray, no gradient,
@@ -69,10 +60,78 @@ DRAWING RULES:
 - Draw hair and facial hair with a handful of long confident strokes, not
   hundreds of short ones.
 - Do not draw anything on the clothing: no text, no letters, no logos, no prints,
-  no graphics. Keep the shirt blank.
+  no graphics. Keep the shirt blank, unless an added costume is listed below.
 - Plain white background, nothing else in the frame.
 - The whole head and shoulders must fit inside the frame.
+- Any added costume or hat is a few simple outlines, never a detailed illustration.
 """
+
+# El visitante elige uno. Un id desconocido vuelve a la caricatura.
+DEFAULT_STYLE = "caricatura"
+STYLE_OPENINGS = {
+    "retrato": (
+        "Redraw this photograph as a faithful minimal black ink portrait "
+        "on plain white paper.\n\n"
+        "The person must stay recognizable. Do not exaggerate. Match their real "
+        "proportions, age, hair and expression. Draw facial hair only if it is "
+        "visible in the photo. Never invent a beard, mustache or goatee. Do not shade."
+    ),
+    "anime": (
+        "Redraw this photograph as minimal black ink anime line art "
+        "on plain white paper.\n\n"
+        "The person must stay recognizable. Draw larger expressive eyes, a smaller "
+        "nose and mouth, and the hair as a few clean locks. Keep their real age. "
+        "Draw facial hair only if it is visible in the photo. Never invent a beard, "
+        "mustache or goatee. Do not shade. No screentones."
+    ),
+    "cartoon": (
+        "Redraw this photograph as a simple black ink cartoon "
+        "on plain white paper.\n\n"
+        "The person must stay recognizable. Use rounder shapes, a bigger smile and "
+        "fewer, bolder outlines. Keep their real age. Draw facial hair only if it "
+        "is visible in the photo. Never invent a beard, mustache or goatee. Do not shade."
+    ),
+}
+
+# Ids que manda la cabina. Texto libre del visitante no entra al prompt.
+TRAIT_LINES = {
+    "chef": "Dress them as a chef: a plain toque and a simple jacket, few outlines.",
+    "medico": "Dress them as a doctor: a plain coat and a simple stethoscope, few outlines.",
+    "astronauta": "Dress them as an astronaut: a simple round helmet outline that does not hide the face.",
+    "musico": "Dress them as a musician: simple headphones, few outlines, face still clear.",
+    "piloto": "Dress them as a pilot: a simple peaked cap, face still clear, few outlines.",
+    "bombero": "Dress them as a firefighter: a simple helmet that leaves the face clear, few outlines.",
+    "cientifico": "Dress them as a scientist: a plain lab coat, few outlines, face still clear.",
+    "artista": "Dress them as an artist: a simple beret, few outlines, face still clear.",
+    "sombrero": "Add one simple wide-brim hat.",
+    "gorra": "Add one simple baseball cap.",
+    "corona": "Add one simple three-point crown.",
+    "lentes": "Add one pair of simple round glasses.",
+    "mono": "Add one simple bow tie.",
+    "flor": "Add one simple five-petal flower beside the ear.",
+}
+
+
+def resolve_style(style: str | None) -> str:
+    """Caricatura si no eligieron, o si el id no existe."""
+    if style in STYLE_OPENINGS or style == DEFAULT_STYLE:
+        return style or DEFAULT_STYLE
+    return DEFAULT_STYLE
+
+
+def build_prompt(traits: list[str] | None = None, style: str | None = None) -> str:
+    """Estilo elegido más los rasgos conocidos. Ids que no están en el mapa se ignoran."""
+    chosen = resolve_style(style)
+    if chosen == DEFAULT_STYLE:
+        base = PROMPT
+    else:
+        rules = PROMPT.split("DRAWING RULES:", 1)[1]
+        base = STYLE_OPENINGS[chosen].rstrip() + "\n\nDRAWING RULES:" + rules
+    extras = [TRAIT_LINES[trait] for trait in traits or [] if trait in TRAIT_LINES]
+    if not extras:
+        return base
+    lines = "\n".join(f"- {line}" for line in extras)
+    return base.rstrip() + "\n\nADD ONLY THESE, in the same simple black line:\n" + lines + "\n"
 
 
 class SketchProviderError(RuntimeError):
@@ -178,10 +237,15 @@ def _to_data_url(image: np.ndarray) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _request_image(settings: Settings, model: str, reference: np.ndarray) -> tuple[bytes, dict]:
+def _request_image(
+    settings: Settings,
+    model: str,
+    reference: np.ndarray,
+    prompt: str,
+) -> tuple[bytes, dict]:
     payload = {
         "model": model,
-        "prompt": PROMPT,
+        "prompt": prompt,
         "input_references": [{"type": "image_url", "image_url": {"url": _to_data_url(reference)}}],
         "resolution": "1K",
         "aspect_ratio": "3:4",
@@ -298,9 +362,12 @@ def generate_mask(
     image: np.ndarray,
     settings: Settings | None = None,
     models_dir: Path | None = None,
+    traits: list[str] | None = None,
+    style: str | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Foto -> máscara de tinta entregada por el proveedor activo."""
     settings = settings or load_settings()
+    prompt = build_prompt(traits, style)
     providers = available_providers(settings)
 
     if settings.provider == "auto":
@@ -328,12 +395,14 @@ def generate_mask(
             if not model:
                 continue
             try:
-                png, meta = _request_image(settings, model, reference)
+                png, meta = _request_image(settings, model, reference, prompt)
                 mask = mask_from_png(png)
             except SketchProviderError as exc:
                 errors.append(str(exc))
                 continue
             _dump_debug(png, mask, reference, meta)
+            meta["traits"] = [trait for trait in traits or [] if trait in TRAIT_LINES]
+            meta["style"] = resolve_style(style)
             meta["reference_sha"] = hashlib.sha256(reference.tobytes()).hexdigest()[:12]
             meta["size"] = f"{reference.shape[1]}x{reference.shape[0]}"
             return mask, meta

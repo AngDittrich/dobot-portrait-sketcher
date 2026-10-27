@@ -6,6 +6,7 @@ import { usePhotobooth } from '../../hooks/usePhotobooth'
 import type { PhotoboothStatus } from '../../hooks/usePhotobooth'
 import { BoothControls } from './BoothControls'
 import { CameraStage } from './CameraStage'
+import { IdleRing } from './IdleRing'
 import { ConfettiCanvas } from './ConfettiCanvas'
 import { DrawingScreen } from './DrawingScreen'
 import { ThanksScreen } from './ThanksScreen'
@@ -27,6 +28,8 @@ const HEADINGS: Partial<Record<PhotoboothStatus, string>> = {
   camera: 'Encuadre tu retrato',
   countdown: 'Mantén la pose…',
   capture: '¡Perfecta!',
+  review: '¿Así te quedó?',
+  style: 'Elige tu dibujo',
   reveal: 'De foto a lápiz',
   confirm: '¿Listo para ser dibujado?',
 }
@@ -36,6 +39,8 @@ const STATUS_MESSAGES: Record<PhotoboothStatus, string> = {
   camera: 'Cámara lista. Pulsa Tomar Foto.',
   countdown: 'Cuenta regresiva en curso.',
   capture: 'Foto capturada.',
+  review: 'Foto lista. Elige TOMAR OTRA o ME GUSTA.',
+  style: 'Elige un estilo, y si quieres una profesión o un accesorio.',
   reveal: 'Convirtiendo tu foto en un dibujo.',
   confirm: 'Retrato listo. Elige TOMAR OTRA o SÍ.',
   drawing: 'El robot está dibujando tu imagen ahora.',
@@ -168,6 +173,10 @@ export function PhotoboothApp() {
                   status={booth.status}
                   countdown={booth.countdown}
                   photo={booth.photo}
+                  traits={booth.traits}
+                  styleId={booth.styleId}
+                  onToggleTrait={booth.toggleTrait}
+                  onStyle={booth.chooseStyle}
                   sketch={booth.sketch}
                   progress={booth.progress}
                   cameraError={cameraError}
@@ -198,9 +207,9 @@ export function PhotoboothApp() {
       </main>
 
       <AnimatePresence>
-        {booth.status === 'confirm' && (
+        {(booth.status === 'review' || booth.status === 'style' || booth.status === 'confirm') && (
           <motion.div
-            key="choices"
+            key={booth.status}
             className="booth-choices"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -210,12 +219,28 @@ export function PhotoboothApp() {
             <button type="button" className="btn booth-choice booth-choice--no" onClick={booth.retake}>
               TOMAR OTRA
             </button>
-            <button type="button" className="btn booth-choice booth-choice--yes" onClick={booth.accept}>
-              ¡SÍ!
-            </button>
+            {booth.status === 'review' && (
+              <button type="button" className="btn booth-choice booth-choice--yes" onClick={booth.like}>
+                ME GUSTA
+              </button>
+            )}
+            {booth.status === 'style' && (
+              <button type="button" className="btn booth-choice booth-choice--yes" onClick={booth.proceed}>
+                CONTINUAR
+              </button>
+            )}
+            {booth.status === 'confirm' && (
+              <button type="button" className="btn booth-choice booth-choice--yes" onClick={booth.accept}>
+                ¡SÍ!
+              </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
+
+      {booth.idleLeftMs !== null && (
+        <IdleRing leftMs={booth.idleLeftMs} onReset={booth.resetIdle} />
+      )}
 
       <Toast toast={booth.toast} onDismiss={booth.dismissToast} />
       <ConfettiCanvas trigger={booth.celebrationId} />
