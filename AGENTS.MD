@@ -55,7 +55,7 @@ Frontend (`windows/frontend/`): `pnpm install`, `pnpm dev`, `pnpm build` (`tsc -
 ## Pipeline del boceto (`windows/backend/app/pipeline/`)
 
 1. **Proveedor de IA** (`providers.py`): recorta cabeza y hombros con YuNet, manda la referencia a OpenRouter y devuelve una **máscara de tinta** (255 = línea). Binariza con umbral fijo 200 y cierra huecos de 3 px, porque el modelo no dibuja con el mismo grosor en todas las caras. Si el proveedor falla se cae al respaldo XDoG sin romper la pantalla.
-2. **Trazador de línea central** (`vectorize.py`): `trim_to_ink` (recorta el aire del lienzo 3:4 para que la cara llene los 140 mm) → `strokes_from_centerline` (`MORPH_CLOSE` → `skeletonize` → `_centerline_paths` → `bridge_aligned_strokes`) → `simplify_and_smooth` (Chaikin + RDP) → `order_strokes` (vecino + 2-opt) → `prune_to_budget` (150 s) → `build_trajectory` (mm, 140 mm de ancho).
+2. **Trazador de línea central** (`vectorize.py`): `trim_to_ink` (recorta el aire del lienzo 3:4 para que la cara llene los 140 mm) → `strokes_from_centerline` (`MORPH_CLOSE` → `skeletonize` → `_centerline_paths` → `bridge_aligned_strokes`) → `simplify_and_smooth` (Chaikin + RDP) → `order_strokes` (vecino + 2-opt) → `prune_to_budget` (150 s, reservando el rótulo) → `append_caption` (`caption.py`, escribe SYSCOM ROBOTICS debajo, en trazo simple, y alarga el lienzo sin achicar la cara) → `build_trajectory` (mm, 140 mm de ancho).
 3. `robot/client.py` es `MockRobotClient`, sin hardware; `ROBOT_TIME_SCALE=0.2` acelera la demo.
 4. **Respaldo sin red** (congelado, no mejorar): `portrait.py` (`PortraitRenderer.render`) → `sketch.lab_portrait_lines` (XDoG + landmarks) → `strokes_from_mask` (contornos).
 

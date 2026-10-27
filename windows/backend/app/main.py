@@ -30,6 +30,7 @@ from starlette.concurrency import run_in_threadpool  # noqa: E402
 from app.imaging import decode_data_url, encode_data_url, fit_max_side  # noqa: E402
 from app.pipeline import providers  # noqa: E402
 from app.pipeline import vectorize as vectorize_ops  # noqa: E402
+from app.pipeline.caption import CAPTION_BUDGET_S, append_caption  # noqa: E402
 from app.pipeline.portrait import PortraitRenderer  # noqa: E402
 from app.robot.client import MockRobotClient, Segment, Trajectory  # noqa: E402
 from app.store import Job, JobStore, Sketch, SketchStore  # noqa: E402
@@ -186,9 +187,12 @@ def build_sketch(image, params: SketchParams, traits: list[str] | None = None) -
     ordered = vectorize_ops.prune_to_budget(
         ordered,
         crop_width,
-        max_seconds=params.max_draw_seconds,
+        max_seconds=max(12.0, params.max_draw_seconds - CAPTION_BUDGET_S),
         target_width_mm=params.target_width_mm,
     )
+    # El rótulo va después de podar: si entrara antes, el recorte de tiempo
+    # se lo comería por ser de los trazos más cortos.
+    ordered, crop_height = append_caption(ordered, crop_width, crop_height)
 
     trajectory = vectorize_ops.build_trajectory(
         ordered,

@@ -217,6 +217,8 @@
 
 .booth-result-sketch {
   z-index: 2;
+  object-fit: contain;
+  background: #fff;
 }
 
 /* ---------- Esquinas viewfinder con glow ---------- */
