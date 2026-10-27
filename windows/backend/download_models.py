@@ -21,10 +21,16 @@ MODELS = {
         "models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
         "face_detection_yunet_2023mar.onnx",
     ),
-    # Segmentación de persona (U2Net) para quitar el fondo (~176 MB)
+    # Segmentación de persona (U2Net) para quitar el fondo (~176 MB).
+    # El pipeline ya no lo carga: queda por si se quiere comparar.
     "u2net_human": (
         "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx",
         "u2net_human_seg.onnx",
+    ),
+    # El que sí usa la cabina y ditlab: U2Net retrato, 320 px (~4.7 MB).
+    "u2netp": (
+        "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx",
+        "u2netp.onnx",
     ),
     # Landmarks faciales de MediaPipe (~3.7 MB)
     "face_landmarker": (
