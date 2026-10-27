@@ -117,6 +117,27 @@ def strokes_from_mask(
     return strokes
 
 
+def trim_to_ink(mask: np.ndarray, margin_ratio: float = 0.05) -> np.ndarray:
+    """Recorta el papel sobrante alrededor de la tinta.
+
+    La IA devuelve un lienzo 3:4 con aire arriba y abajo. Si eso se manda tal
+    cual al robot, media hoja queda en blanco y la cara sale chica: el ancho se
+    escala a 140 mm, así que el aire se come el dibujo. Se recorta al
+    rectángulo de la tinta dejando un margen proporcional a su lado mayor.
+    """
+    ys, xs = np.nonzero(mask)
+    if ys.size == 0:
+        return mask
+    height, width = mask.shape[:2]
+    top, bottom = int(ys.min()), int(ys.max()) + 1
+    left, right = int(xs.min()), int(xs.max()) + 1
+    margin = int(round(max(bottom - top, right - left) * max(0.0, margin_ratio)))
+    return mask[
+        max(0, top - margin) : min(height, bottom + margin),
+        max(0, left - margin) : min(width, right + margin),
+    ]
+
+
 def skeletonize(mask: np.ndarray) -> np.ndarray:
     """Adelgaza la máscara de líneas a un esqueleto de 1 px.
 

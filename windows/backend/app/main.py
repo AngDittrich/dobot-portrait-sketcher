@@ -103,9 +103,8 @@ class SketchParams(BaseModel):
     # use_ai=False obliga al XDoG de siempre, que queda como respaldo sin red.
     use_ai: bool = True
     ai_min_stroke_px: float = Field(
-        7.0, ge=1.0, le=40.0, description="Tramos mínimos del esqueleto (iris, comisuras)"
+        10.0, ge=1.0, le=40.0, description="Trazos mínimos que sobreviven al trazar la tinta"
     )
-    ai_spur_px: int = Field(4, ge=0, le=20, description="Largo de espolón que se poda")
 
 
 class SketchRequest(BaseModel):
@@ -136,15 +135,15 @@ def build_sketch(image, params: SketchParams) -> dict:
 
     portrait: dict = {}
     if mask is not None:
+        mask = vectorize_ops.trim_to_ink(mask)
         crop_height, crop_width = mask.shape[:2]
-        # El modelo entrega líneas de 1 px: trazarlas como contorno las
-        # convertiría en un trazo que va y vuelve, o sea doble línea.
-        strokes_px = vectorize_ops.strokes_from_skeleton(
+        # Se traza el contorno de la tinta, no su esqueleto. El modelo dibuja
+        # líneas de 2-3 px y continuas: el contorno las recorre enteras (un
+        # trazo sólo, que el lápiz repasa con el mismo ancho), mientras que el
+        # esqueleto borra el píxel de cada cruce y deja el dibujo en guiones.
+        strokes_px = vectorize_ops.strokes_from_mask(
             mask,
             min_length_px=params.ai_min_stroke_px,
-            spur_length_px=params.ai_spur_px,
-            bridge_gap_px=params.bridge_gap_px,
-            bridge_angle_deg=params.bridge_angle_deg,
         )
         portrait_ms = int(float((ai_meta or {}).get("seconds") or 0) * 1000)
         face_detected = True
