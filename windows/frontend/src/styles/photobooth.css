@@ -15,6 +15,12 @@
   display: flex;
   flex-direction: column;
   color: #e2e8f0;
+  /* Acostado, el agujero de la camara frontal queda en un borde de la pantalla.
+     Con viewport-fit=cover el escenario llega hasta el borde, pero el contenido
+     no puede meterse debajo: este relleno lo devuelve a la zona visible sin
+     dejar una franja muerta, porque el fondo se pinta tambien bajo el relleno. */
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
   background:
     radial-gradient(1100px 640px at 50% -18%, #12294f 0%, transparent 62%),
     radial-gradient(900px 620px at 112% 112%, rgba(26, 58, 107, 0.4), transparent 58%),
@@ -1429,5 +1435,31 @@
 
   .idle-ring-time {
     font-size: 0.72rem;
+  }
+}
+
+/* En una pantalla de bolsillo el escenario se quedaba con demasiada luz: el
+   halo azul del botón y la aurora de 90 px ocupan una porción grande de un
+   teléfono y leen como un reflejo, no como una luz de escenario. Se atenúan
+   solo aquí; en el monitor de la cabina el diseño queda como estaba. */
+@media (max-height: 480px), (orientation: portrait) and (max-width: 560px) {
+  .booth-shell {
+    background:
+      radial-gradient(620px 340px at 50% -20%, #102344 0%, transparent 62%),
+      radial-gradient(680px 460px at 112% 112%, rgba(26, 58, 107, 0.26), transparent 58%),
+      linear-gradient(180deg, #070f20 0%, #04091a 100%);
+  }
+
+  .booth-aurora {
+    filter: blur(64px);
+    opacity: 0.5;
+  }
+
+  .booth-cta {
+    box-shadow: 0 10px 24px rgba(2, 8, 20, 0.5);
+  }
+
+  .booth-cta:hover:not(:disabled) {
+    box-shadow: 0 14px 30px rgba(2, 8, 20, 0.55);
   }
 }
