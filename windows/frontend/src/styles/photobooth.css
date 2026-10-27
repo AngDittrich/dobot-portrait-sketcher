@@ -1256,7 +1256,10 @@
     0 0 160px 48px rgba(42, 84, 148, 0.4);
 }
 
-@media (max-width: 860px) {
+/* Apilar sólo si además hay altura donde apilar. Un teléfono en horizontal
+   entra en «ancho chico» (851 px en el A55) pero sólo tiene ~390 px de alto:
+   ahí apilar el robot sobre el texto empujaba el botón fuera de la pantalla. */
+@media (max-width: 860px) and (min-height: 560px) {
   .booth-welcome,
   .booth-scene {
     flex-direction: column;
@@ -1292,5 +1295,139 @@
   .booth-choice {
     min-height: 88px;
     font-size: 1.25rem;
+  }
+}
+
+/* Pantalla de teléfono en horizontal: mucho ancho, poco alto. Se conserva la
+   fila y se comprime la escala, en vez de apilar y perder el botón. */
+@media (max-height: 480px) {
+  .booth-welcome,
+  .booth-scene {
+    gap: clamp(0.9rem, 3vw, 2.2rem);
+  }
+
+  .booth-robot {
+    max-height: 72vh;
+    max-width: min(44%, 300px);
+  }
+
+  .booth-welcome-copy,
+  .booth-scene-copy {
+    gap: 0.5rem;
+    max-width: 24rem;
+  }
+
+  .booth-kicker {
+    font-size: 0.62rem;
+  }
+
+  .booth-welcome-title {
+    font-size: clamp(2.1rem, 5.5vw, 2.8rem);
+  }
+
+  .booth-welcome-text {
+    font-size: 0.92rem;
+    line-height: 1.35;
+    /* Tres líneas de texto son las que caben; más y se come el botón. */
+    max-width: 22rem;
+  }
+
+  .booth-cta--xl {
+    min-height: 50px;
+    padding: 0.65rem 1.8rem;
+    font-size: 0.98rem;
+  }
+
+  .booth-scene-title {
+    font-size: clamp(1.35rem, 3.4vw, 1.9rem);
+  }
+
+  .booth-thanks-art {
+    max-height: 60vh;
+    width: min(240px, 42vw);
+  }
+
+  .booth-choice {
+    min-height: 62px;
+    font-size: 1.1rem;
+    padding: 0.4rem 1.4rem;
+  }
+}
+
+/* Teléfono en horizontal, etapa de decisión: sobra ancho y falta alto, así que
+   los botones se van a los costados de la foto. Antes iban abajo en fixed y se
+   comían 108 px del alto, dejando el visor en 288 px de ancho y tapándolo. */
+@media (max-height: 480px) {
+  .booth-heading {
+    display: none;
+  }
+
+  .booth-shell {
+    --booth-chrome: 5.5rem;
+  }
+
+  .booth-choices {
+    bottom: 50%;
+    transform: translateY(50%);
+    align-items: center;
+    padding: 0 0.9rem;
+  }
+
+  .booth-choice {
+    min-width: 0;
+    width: min(22vw, 190px);
+    min-height: 76px;
+    padding: 0.5rem 1rem;
+    font-size: 1rem;
+  }
+
+  /* El anillo de inactividad caía justo encima del botón derecho; abajo a la
+     izquierda hay sitio libre y sigue viéndose. */
+  .idle-ring {
+    top: auto;
+    bottom: 6px;
+    left: 8px;
+    right: auto;
+    width: 52px;
+    height: 52px;
+  }
+
+  .idle-ring-time {
+    font-size: 0.7rem;
+  }
+}
+
+/* Teléfono en vertical: la pantalla es alta y angosta. El visor pasa a 3:4 para
+   aprovechar el alto, y los dos botones se reparten el ancho en vez de quedar
+   uno encima del otro (sus mínimos de escritorio sumaban 418 px en 384). */
+@media (orientation: portrait) and (max-width: 560px) {
+  .booth-stage {
+    aspect-ratio: 3 / 4;
+    width: min(100%, calc((100dvh - var(--booth-chrome)) * 3 / 4));
+  }
+
+  .booth-choices {
+    bottom: 0.9rem;
+    gap: 0.7rem;
+    padding: 0 0.85rem;
+  }
+
+  .booth-choice {
+    min-width: 0;
+    flex: 1 1 0;
+    min-height: 78px;
+    padding: 0.6rem 0.9rem;
+    font-size: 1.05rem;
+  }
+
+  .idle-ring {
+    width: 56px;
+    height: 56px;
+    top: 68px;
+    right: 12px;
+  }
+
+  .idle-ring-time {
+    font-size: 0.72rem;
   }
 }
