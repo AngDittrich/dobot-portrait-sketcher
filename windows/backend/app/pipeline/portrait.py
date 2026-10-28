@@ -31,8 +31,6 @@ import numpy as np
 
 from . import sketch as sketch_ops
 from . import vectorize as vectorize_ops
-from .faceparse import MODEL_NAME as FaceParserModelName
-from .faceparse import FaceParser
 from .landmarks import FaceLandmarks
 from .lineart import LineArtModel
 from .segmentation import FaceDetector, U2NetHuman
@@ -216,7 +214,6 @@ class PortraitRenderer:
         self.u2net = U2NetHuman(models_dir / "u2netp.onnx")
         self.landmarks = FaceLandmarks(models_dir / "face_landmarker.task")
         self.lineart = LineArtModel(models_dir)
-        self.faceparse = FaceParser(models_dir / FaceParserModelName)
 
     def health(self) -> dict:
         return {
@@ -224,7 +221,6 @@ class PortraitRenderer:
             "u2net": self.u2net.available,
             "landmarks": self.landmarks.available,
             "lineart": self.lineart.available,
-            "faceparse": self.faceparse.available,
         }
 
     def render(
@@ -251,7 +247,6 @@ class PortraitRenderer:
         ink_span: float | None = None,
         speck_area: int | None = None,
         stages: dict | None = None,
-        use_faceparse: bool = False,
     ) -> dict:
         started = time.perf_counter()
         height, width = image.shape[:2]
@@ -335,9 +330,6 @@ class PortraitRenderer:
                 "face_thresh": threshold,
                 "beard_thresh": beard_thresh,
                 "stages": sketch_stages,
-                "faceparse": (
-                    self.faceparse if use_faceparse and self.faceparse.available else None
-                ),
             }
             if lab_contrast is not None:
                 tune["contrast"] = lab_contrast

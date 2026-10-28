@@ -21,6 +21,61 @@ logger = logging.getLogger("robot")
 SLOW_REPLY_S = 1.0
 # Cada cuántas órdenes se imprime el avance en nivel INFO.
 LOG_EVERY = 50
+# El firmware no llega a la velocidad pedida: con SpeedL=20 se midieron
+# 17.3 mm/s en tramos de 30 mm. Sirve para calcular cuánto tarda cada orden.
+PACE_EFFICIENCY = 0.865
+# Colchón de órdenes encoladas. Suficiente para que el brazo no se pare entre
+# puntos, y muy por debajo de las ~44-48 que caben antes del -30000.
+DEFAULT_PACE_LEAD_S = 1.0
+# Aceleración de la pluma. El cliente mandaba AccL = SpeedL (=20 mm/s²), tan
+# bajo que en pasos de 1.5 mm el brazo no pasaba de 4 mm/s. El techo del
+# firmware es 100: por encima responde -40005 (fuera de rango).
+DEFAULT_ACC_MM_S2 = 100.0
+MAX_ACC_MM_S2 = 100.0
+MIN_ACC_MM_S2 = 1.0
+# Paso mínimo entre órdenes. Con 1.18 mm hacían falta 1706 MovL y el
+# controlador cerraba el socket a los 2-3 s; con 6 mm quedan ~1/5 y el brazo
+# acelera (10.2 mm/s medidos contra 2.4 mm/s con pasos cortos).
+DEFAULT_MIN_STEP_MM = 6.0
+# Confirmación de llegada: se lee la pose hasta que el brazo está a 0.5 mm.
+ARRIVAL_TOLERANCE_MM = 0.5
+ARRIVAL_POLL_S = 0.1
+ARRIVAL_EXTRA_S = 6.0
+# Órdenes de dibujo en vuelo. Cada MovL cuesta ~0.51 s: esperar la llegada de
+# una antes de mandar la siguiente deja el brazo parado medio segundo por punto.
+# Con 3 en vuelo se solapa el envío con el movimiento. Nunca más: con flujo
+# continuo (decenas de órdenes por segundo) el controlador cierra el socket.
+DEFAULT_PIPELINE = 3
+
+
+def effective_speed_mm_s(
+    distance_mm: float,
+    speed_mm_s: float,
+    acc_mm_s2: float = DEFAULT_ACC_MM_S2,
+) -> float:
+    """Velocidad media real de una orden corta.
+
+    En un tramo corto el brazo no llega a la velocidad pedida: apenas acelera
+    y frena, así que manda la aceleración. El modelo v = sqrt(acc × paso)
+    cuadra con lo medido en el MG400 (AccL=100 y paso 1.5 mm ≈ 12 mm/s).
+    """
+    if speed_mm_s <= 0:
+        return 0.0
+    distance = max(0.0, float(distance_mm))
+    acc = max(MIN_ACC_MM_S2, float(acc_mm_s2))
+    return max(0.001, min(float(speed_mm_s), (acc * distance) ** 0.5))
+
+
+def pace_gap_s(
+    distance_mm: float,
+    speed_mm_s: float,
+    acc_mm_s2: float = DEFAULT_ACC_MM_S2,
+) -> float:
+    """Segundos que el brazo tarda en recorrer una orden."""
+    if speed_mm_s <= 0:
+        return 0.0
+    speed = effective_speed_mm_s(distance_mm, speed_mm_s, acc_mm_s2) * PACE_EFFICIENCY
+    return max(0.0, float(distance_mm)) / speed
 
 
 @dataclass
@@ -108,9 +163,17 @@ class MockRobotClient(RobotClient):
 class _DryLink:
     """Enlace de mentira para el modo seco: acepta órdenes y no abre sockets."""
 
-    def move(self, _command: str) -> object:
+    def __init__(self) -> None:
+        self._target: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+
+    def move(self, command: str) -> object:
         from app.robot.mg400 import Reply
 
+        parts = command[command.find("(") + 1 : command.find(")")].split(",")
+        try:
+            self._target = (float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3]))
+        except (IndexError, ValueError):
+            pass
         return Reply(code=0, value="")
 
     def dashboard(self, _command: str) -> object:
@@ -125,7 +188,8 @@ class _DryLink:
         return None
 
     def pose(self) -> tuple[float, float, float, float]:
-        return (0.0, 0.0, 0.0, 0.0)
+        """En modo seco no hay brazo que esperar: la pose es el último destino."""
+        return self._target
 
 
 class MG400Client(RobotClient):
@@ -149,14 +213,46 @@ class MG400Client(RobotClient):
         x_sign: int = -1,
         y_sign: int = -1,
         dry_run: bool = False,
-        cp_draw: int = 0,
+        cp_draw: int = 100,
         r_far: float | None = None,
         far_x: float | None = None,
         far_y: float | None = None,
         move_timeout_s: float = 60.0,
+        queue_retry_s: float = 0.2,
+        queue_retries: int = 200,
+        acc_mm_s2: float = DEFAULT_ACC_MM_S2,
+        pace_lead_s: float = DEFAULT_PACE_LEAD_S,
+        min_step_mm: float = DEFAULT_MIN_STEP_MM,
+        wait_arrival: bool = True,
+        arrival_tolerance_mm: float = ARRIVAL_TOLERANCE_MM,
+        arrival_poll_s: float = ARRIVAL_POLL_S,
+        arrival_extra_s: float = ARRIVAL_EXTRA_S,
+        reconnects: int = 30,
+        pipeline: int = DEFAULT_PIPELINE,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._link = link
+        self._stage_link = link
         self.move_timeout_s = move_timeout_s
+        self.queue_retry_s = queue_retry_s
+        self.queue_retries = queue_retries
+        self.acc_mm_s2 = min(MAX_ACC_MM_S2, max(MIN_ACC_MM_S2, float(acc_mm_s2)))
+        self.pace_lead_s = pace_lead_s
+        self.min_step_mm = max(0.0, float(min_step_mm))
+        self.wait_arrival = wait_arrival
+        self.pipeline = max(1, int(pipeline))
+        self._pending: list[tuple[float, float, float, int]] = []
+        self.arrival_tolerance_mm = arrival_tolerance_mm
+        self.arrival_poll_s = arrival_poll_s
+        self.arrival_extra_s = arrival_extra_s
+        self.reconnects = int(reconnects)
+        self._reconnects_left = self.reconnects
+        self._last_point: tuple[float, float, float] | None = None
+        self._clock = clock
+        self._sleep = sleep
+        self._pace_due: float | None = None
+        self._pace_target: tuple[float, float, float] | None = None
         self._sent = 0
         self._total = 0
         self.host = host
@@ -227,7 +323,10 @@ class MG400Client(RobotClient):
             x_sign=optional_int("ROBOT_X_SIGN", -1),
             y_sign=optional_int("ROBOT_Y_SIGN", -1),
             dry_run=dry_run,
-            cp_draw=optional_int("ROBOT_CP_DRAW", 0),
+            cp_draw=optional_int("ROBOT_CP_DRAW", 100),
+            acc_mm_s2=optional_float("ROBOT_ACC_MM_S2", DEFAULT_ACC_MM_S2),
+            pipeline=optional_int("ROBOT_PIPELINE", DEFAULT_PIPELINE),
+            min_step_mm=optional_float("ROBOT_STEP_MM", DEFAULT_MIN_STEP_MM),
             r_far=r_far,
             far_x=far_x,
             far_y=far_y,
@@ -242,7 +341,9 @@ class MG400Client(RobotClient):
                 return
             try:
                 if self._link is None:
-                    if self.dry_run:
+                    if self._stage_link is not None:
+                        self._link = self._stage_link
+                    elif self.dry_run:
                         logger.info("modo seco: no se abre socket")
                         self._link = _DryLink()
                     else:
@@ -264,6 +365,11 @@ class MG400Client(RobotClient):
         self._validate(trajectory)
         await self.connect()
         self._sent = 0
+        self._pace_due = None
+        self._pace_target = None
+        self._last_point = None
+        self._pending = []
+        self._reconnects_left = self.reconnects
         self._total = sum(len(segment.points) for segment in trajectory.segments)
         logger.info(
             "dibujo: %d segmentos, ~%d puntos, %.0f mm con lapiz abajo",
@@ -291,7 +397,7 @@ class MG400Client(RobotClient):
 
         if pen_down and held is not None:
             await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
-        await self._sync()
+        await self._drain()
         await on_progress(1.0, last)
 
     async def _draw_segment(
@@ -311,8 +417,16 @@ class MG400Client(RobotClient):
             await self._goto(start[0], start[1], self.z_draw,  self.speed_factor, 0)
             pen_down = True
         for point in points[1:]:
+            # Paso mínimo: 1706 comandos de 1.18 mm matan la conexión del
+            # MG400. Con 6 mm quedan ~1/5 de las órdenes y el brazo alcanza
+            # a acelerar (10 mm/s medidos contra 2.4 mm/s con pasos cortos).
+            if _distance(held, point) < self.min_step_mm and point is not points[-1]:
+                continue
             await self._goto(point[0], point[1], self.z_draw,  self.speed_factor, self.cp_draw)
             held = point
+        if held is not None and _distance(held, points[-1]) > 1e-6:
+            await self._goto(points[-1][0], points[-1][1], self.z_draw,  self.speed_factor, self.cp_draw)
+            held = points[-1]
         return pen_down, held if held is not None else start
 
     async def _travel(
@@ -344,9 +458,107 @@ class MG400Client(RobotClient):
         rotation = _nonzero(self._rotation(robot_x, robot_y))
         command = (
             f"MovL({robot_x:.3f},{robot_y:.3f},{_nonzero(z):.3f},{rotation:.3f},"
-            f"SpeedL={int(speed)},AccL={int(speed)},CP={_blend(cp)})"
+            f"SpeedL={int(speed)},AccL={int(self.acc_mm_s2)},CP={_blend(cp)})"
         )
+        target = (robot_x, robot_y, float(z))
+        distance = 0.0
+        if self._last_point is not None:
+            distance = (
+                (target[0] - self._last_point[0]) ** 2
+                + (target[1] - self._last_point[1]) ** 2
+                + (target[2] - self._last_point[2]) ** 2
+            ) ** 0.5
+        en_vuelo = self.pipeline > 1 and cp == self.cp_draw and z == self.z_draw
+        if not en_vuelo:
+            # Cambiar de altura o pasear con órdenes pendientes dejaría el
+            # lápiz abajo mientras el brazo todavía va en camino.
+            await self._drain()
+        await self._pace(target, speed)
         await self._move(command)
+        if en_vuelo:
+            self._pending.append((robot_x, robot_y, distance, speed))
+            while len(self._pending) >= self.pipeline:
+                await self._wait_pending()
+        else:
+            await self._wait_arrival(robot_x, robot_y, distance, speed)
+        self._last_point = target
+
+    async def _drain(self) -> None:
+        """Espera a que se ejecute todo lo que quedó en vuelo."""
+        while self._pending:
+            await self._wait_pending()
+
+    async def _wait_pending(self) -> None:
+        robot_x, robot_y, distance, speed = self._pending.pop(0)
+        await self._wait_arrival(robot_x, robot_y, distance, speed)
+
+    async def _wait_arrival(
+        self,
+        robot_x: float,
+        robot_y: float,
+        distance_mm: float,
+        speed: int,
+    ) -> None:
+        """Espera a que el brazo llegue antes de mandar la siguiente orden.
+
+        Medido: con flujo continuo de MovL el controlador cierra el socket a
+        los 2-3 s. Una orden a la vez, confirmando la pose, aguantó 40/40.
+        """
+        if not self.wait_arrival:
+            return
+        link = self._link
+        pose = getattr(link, "pose", None)
+        if pose is None:
+            return
+        presupuesto = distance_mm / effective_speed_mm_s(
+            distance_mm, speed, self.acc_mm_s2
+        ) + self.arrival_extra_s
+        limite = time.monotonic() + presupuesto
+        mejor = float("inf")
+        while time.monotonic() < limite:
+            try:
+                actual = await asyncio.to_thread(pose)
+            except Exception:  # noqa: BLE001 - sin lectura seguimos dibujando
+                return
+            distancia = (
+                (float(actual[0]) - robot_x) ** 2 + (float(actual[1]) - robot_y) ** 2
+            ) ** 0.5
+            if distancia <= self.arrival_tolerance_mm:
+                return
+            if ya_paso(mejor, distancia, self.arrival_tolerance_mm):
+                return
+            mejor = min(mejor, distancia)
+            await asyncio.sleep(self.arrival_poll_s)
+        logger.warning(
+            "el brazo no llego a %.1f,%.1f en %.1f s (sigo)", robot_x, robot_y, presupuesto
+        )
+
+    async def _pace(self, target: tuple[float, float, float], speed: int) -> None:
+        """Deja pasar el tiempo justo para no llenar la cola del controlador.
+
+        La cola llena es lo que provoca el -30000, y varios -30000 seguidos
+        tumban el servicio TCP del robot. Se mantiene un colchón: se envía
+        adelantado, pero nunca más de `pace_lead_s` segundos de movimiento.
+        """
+        if self.pace_lead_s <= 0 or self.wait_arrival:
+            return
+        now = self._clock()
+        previous = self._pace_target
+        if previous is None:
+            self._pace_due = now
+        else:
+            distancia = (
+                (target[0] - previous[0]) ** 2
+                + (target[1] - previous[1]) ** 2
+                + (target[2] - previous[2]) ** 2
+            ) ** 0.5
+            self._pace_due = max(self._pace_due or now, now) + pace_gap_s(
+                distancia, speed, self.acc_mm_s2
+            )
+            espera = self._pace_due - now - self.pace_lead_s
+            if espera > 0:
+                await self._sleep(espera)
+        self._pace_target = target
 
     def _rotation(self, robot_x: float, robot_y: float) -> float:
         """Gira entre el R del origen y el de la esquina lejana, si se midió."""
@@ -407,18 +619,41 @@ class MG400Client(RobotClient):
         await asyncio.to_thread(self._link.prepare, rate)  # type: ignore[attr-defined]
 
     async def _move(self, command: str) -> None:
-        from app.robot.mg400 import MG400Error
+        from app.robot.mg400 import MG400Error, QUEUE_FULL_CODE
 
         self.commands.append(command)
         self._sent += 1
         started = time.monotonic()
-        try:
-            reply = await asyncio.to_thread(self._link.move, command)  # type: ignore[attr-defined]
-        except Exception:
-            logger.exception("orden %d: %s no se pudo enviar", self._sent, command)
-            await self._diagnose()
-            self._drop()
-            raise
+        retries = 0
+        while True:
+            try:
+                reply = await asyncio.to_thread(self._link.move, command)  # type: ignore[attr-defined]
+            except Exception:
+                logger.exception("orden %d: %s no se pudo enviar", self._sent, command)
+                await self._diagnose()
+                self._drop()
+                raise
+            # Cola llena: el brazo está dibujando y no admite más órdenes por
+            # ahora. Se reenvía; cortar aquí dejaba el dibujo a medias con el
+            # robot todavía moviéndose.
+            if getattr(reply, "code", None) != QUEUE_FULL_CODE:
+                break
+            retries += 1
+            if retries > self.queue_retries:
+                logger.error("orden %d: la cola no se liberó en %d reintentos", self._sent, retries)
+                await self._diagnose()
+                self._drop()
+                raise MG400Error(f"{command} rechazada: cola llena tras {retries} reintentos")
+            if retries == 1 or retries % 50 == 0:
+                logger.warning(
+                    "orden %d/%d: cola llena, esperando (reintento %d)",
+                    self._sent,
+                    self._total,
+                    retries,
+                )
+            # Espera creciente: reenviar cada 50 ms mantenía la cola clavada en
+            # el límite y el controlador terminaba cerrando el puerto TCP.
+            await asyncio.sleep(min(self.queue_retry_s * retries, 1.0))
         elapsed = time.monotonic() - started
         code = getattr(reply, "code", "?")
         if getattr(reply, "ok", False):
@@ -444,6 +679,27 @@ class MG400Client(RobotClient):
             elapsed,
             getattr(self._link, "last_raw", b""),
         )
+        # Conexión caída (respuesta vacía). Medido: el controlador queda sano,
+        # así que se reconecta y se reenvía la misma orden en vez de abortar el
+        # dibujo a medias (pasó al 56.8 % tras 515 órdenes).
+        while code == -99999 and self._reconnects_left > 0:
+            self._reconnects_left -= 1
+            logger.warning(
+                "orden %d/%d: conexion cortada, reconectando (quedan %d)",
+                self._sent,
+                self._total,
+                self._reconnects_left,
+            )
+            self._drop()
+            try:
+                await self.connect()
+                reply = await asyncio.to_thread(self._link.move, command)  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001 - se reintenta el reenvío
+                logger.exception("orden %d: no se pudo reconectar", self._sent)
+                continue
+            code = getattr(reply, "code", "?")
+            if getattr(reply, "ok", False):
+                return
         await self._diagnose()
         alarm = await self._alarm()
         self._drop()
@@ -542,6 +798,25 @@ def _blend(value: int) -> int:
 
 def _near(left: list[float], right: list[float], tolerance: float = 0.05) -> bool:
     return ((left[0] - right[0]) ** 2 + (left[1] - right[1]) ** 2) ** 0.5 <= tolerance
+
+
+def _distance(left: list[float] | None, right: list[float]) -> float:
+    """Distancia en el plano entre dos puntos del dibujo (mm)."""
+    if left is None:
+        return float("inf")
+    return ((left[0] - right[0]) ** 2 + (left[1] - right[1]) ** 2) ** 0.5
+
+
+def ya_paso(mejor_mm: float, actual_mm: float, tolerancia_mm: float) -> bool:
+    """¿El brazo ya dejó atrás el punto?
+
+    Con varias órdenes en vuelo, el punto que se espera puede haber quedado
+    atrás antes de la primera lectura. Si la distancia vuelve a crecer después
+    de haberse acercado, seguir esperando la llegada exacta es tiempo perdido.
+    """
+    if mejor_mm == float("inf"):
+        return False
+    return actual_mm > mejor_mm + 2.0 * tolerancia_mm
 
 
 def _axis_sign(value: int, name: str) -> int:

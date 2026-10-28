@@ -55,4 +55,3 @@ def test_sketch_params_carry_lab_defaults():
     assert params.phi == 40.0
     assert params.threshold == 0.12
     assert params.bg_threshold == 0.28
-    assert params.use_faceparse is False

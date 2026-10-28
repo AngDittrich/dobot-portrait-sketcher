@@ -100,7 +100,6 @@ class SketchParams(BaseModel):
     threshold: float = Field(0.12, ge=0.02, le=0.9)
     bg_threshold: float = Field(0.28, ge=0.02, le=0.9)
     beard_thresh: float = Field(0.45, ge=0.02, le=0.9)
-    use_faceparse: bool = Field(False, description="Base de regiones BiSeNet (experimental)")
     use_landmarks: bool = True
     target_width_mm: float = Field(140.0, ge=20.0, le=400.0)
     spacing_mm: float = Field(1.5, ge=0.2, le=10.0)
@@ -198,7 +197,6 @@ def build_sketch(
             use_lineart=params.use_lineart,
             lineart_strong=params.lineart_strong,
             lineart_weak=params.lineart_weak,
-            use_faceparse=params.use_faceparse,
         )
         mask = portrait["mask"]
         crop = portrait["crop"]
