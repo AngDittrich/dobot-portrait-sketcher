@@ -1,0 +1,13 @@
+node_modules/
+package-lock.json
+
+# Gradle y salidas de compilación
+android/.gradle/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/
+android/local.properties
+
+# Android Studio
+.idea/
+*.iml

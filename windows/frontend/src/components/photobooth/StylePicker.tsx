@@ -12,7 +12,7 @@ import {
   Stethoscope,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { TRAIT_CATEGORIES } from '../../lib/traits'
+import { TRAIT_CATEGORIES, traitConflicts } from '../../lib/traits'
 import type { TraitGroup, TraitSelection } from '../../lib/traits'
 import { DRAWING_STYLES } from '../../lib/drawingStyles'
 import type { DrawingStyleId } from '../../lib/drawingStyles'
@@ -74,12 +74,16 @@ export function StylePicker({ photo, traits, styleId, onToggle, onStyle }: Style
             <div className="booth-style-grid">
               {category.options.map((option) => {
                 const selected = traits[category.id] === option.id
+                // Si el otro grupo ya ocupa ese espacio, el botón se apaga en
+                // vez de apilar dos sombreros sobre la misma cabeza.
+                const blocked = traitConflicts(traits, category.id, option.id)
                 return (
                   <button
                     key={option.id}
                     type="button"
                     className={selected ? 'is-on' : undefined}
                     aria-pressed={selected}
+                    disabled={blocked}
                     onClick={() => onToggle(category.id, option.id)}
                   >
                     <TraitGlyph id={option.id} />

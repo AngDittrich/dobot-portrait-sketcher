@@ -1,0 +1,21 @@
+{
+  "name": "cabina-android",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Envoltura Android de la cabina (Capacitor sobre windows/frontend)",
+  "scripts": {
+    "sync": "cap sync android",
+    "open": "cap open android",
+    "build:web": "pnpm --dir ../../windows/frontend build",
+    "apk": "cap sync android && cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/core": "^8.5.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
+    "typescript": "^7.0.2"
+  }
+}
