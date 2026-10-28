@@ -9,3 +9,8 @@ __pycache__/
 captures/
 # Volcados de depuracion del proveedor de IA (SKETCH_DEBUG_DIR)
 sketch_debug/
+debug_prompts/
+
+# Pruebas de comparacion de modelos (descartables)
+.tmp-*
+bakeoff/
