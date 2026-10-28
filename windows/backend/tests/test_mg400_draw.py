@@ -369,6 +369,38 @@ def test_el_movl_espera_lo_que_tarde_la_cola():
         movimiento.close()
 
 
+def test_dos_consultas_a_la_vez_abren_un_solo_socket(monkeypatch: pytest.MonkeyPatch):
+    """El controlador rechaza al segundo cliente. El panel no puede abrir dos."""
+    import time
+
+    abiertos = 0
+
+    class EnlaceLento:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            nonlocal abiertos
+            abiertos += 1
+            time.sleep(0.05)
+
+        def prepare(self, _percent: int = 20) -> None:
+            return None
+
+        def dashboard(self, _command: str) -> Reply:
+            return Reply(code=0, value="")
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.robot.mg400.MG400Link", EnlaceLento)
+    cliente = MG400Client(z_draw=-167.0, z_travel=-160.0, r=145.0, host="192.168.10.55")
+
+    async def correr() -> None:
+        await asyncio.gather(cliente.connect(), cliente.connect())
+
+    asyncio.run(correr())
+    assert abiertos == 1
+    assert cliente._ready is True
+
+
 def test_el_plazo_del_movl_sale_del_entorno(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ROBOT_DRY_RUN", "1")
     monkeypatch.setenv("ROBOT_MOVE_TIMEOUT_S", "12")

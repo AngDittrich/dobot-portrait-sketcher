@@ -79,7 +79,8 @@ Wizard de una sola pantalla, sin scroll. Estados en `src/hooks/usePhotobooth.ts`
 4. `style` — estilo de dibujo (retrato, caricatura, anime o cartoon; caricatura viene marcado), más Profesión y Accesorios, un id por grupo. CONTINUAR es el único momento de `POST /api/sketch`.
 5. `reveal` — la foto entra en iris y se transforma a sketch.
 6. `confirm` — "¿Listo para ser dibujado?" con TOMAR OTRA (vuelve a `camera`) a la izquierda y ¡SÍ! a la derecha.
-7. `drawing` (3 s, `assets/robot/dobotidlemarker.webp`) → `thanks`: "LISTO. TOMA TU DIBUJO." y "SYSCOM agradece tu visita." Vuelve solo a `attract`.
+7. `drawing` (3 s, `assets/robot/dobotidlemarker.webp`) → `thanks` (`assets/robot/dobot-giving-drawing-2-person.webp`): "LISTO. TOMA TU DIBUJO." y "SYSCOM agradece tu visita." Vuelve solo a `attract`.
    - Con trabajo del robot, `drawing` espera a que termine. Si termina en error va a `robotError` (`assets/robot/dobot-robot-error.webp`, "EL ROBOT SE DETUVO", botones INICIO y REINTENTAR), que no vuelve solo a `attract`. El detalle sale en la consola del navegador y en la de uvicorn (logger `robot`).
+   - El botón Admin de la barra abre un PIN de 4 dígitos (por defecto 2026) y el panel de depuración del MG400. No mueve el brazo mientras hay un dibujo.
 
 En `camera`, `review`, `style` y `confirm` se ve un anillo de 3 minutos. Pulsarlo vuelve a llenar el tiempo. Al llegar a cero, todo se reinicia a `attract`.

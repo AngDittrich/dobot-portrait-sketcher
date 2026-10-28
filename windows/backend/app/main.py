@@ -23,7 +23,7 @@ import cv2
 if str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import FastAPI, HTTPException  # noqa: E402
+from fastapi import FastAPI, Header, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 from starlette.concurrency import run_in_threadpool  # noqa: E402
@@ -34,6 +34,17 @@ from app.pipeline import vectorize as vectorize_ops  # noqa: E402
 from app.pipeline.caption import CAPTION_BUDGET_S, append_caption  # noqa: E402
 from app.pipeline.providers import DEFAULT_STYLE  # noqa: E402
 from app.pipeline.portrait import PortraitRenderer  # noqa: E402
+from app.admin_ops import (  # noqa: E402
+    AdminOpError,
+    describe_alarms,
+    issue_token,
+    mode_label,
+    pin_ok,
+    plan,
+    rate_for,
+    token_ok,
+)
+from app.robot import busy  # noqa: E402
 from app.robot.client import Segment, Trajectory, robot_from_env  # noqa: E402
 from app.store import Job, JobStore, Sketch, SketchStore  # noqa: E402
 
@@ -330,6 +341,7 @@ async def create_job(payload: JobRequest) -> dict:
             trajectory.height_mm,
         )
         try:
+            busy.enter()
             await robot.connect()
 
             async def on_progress(value: float, _segment: Segment) -> None:
@@ -350,6 +362,8 @@ async def create_job(payload: JobRequest) -> dict:
                 job.progress * 100,
                 time.monotonic() - started,
             )
+        finally:
+            busy.leave()
 
     asyncio.create_task(run())
     return {
@@ -359,6 +373,137 @@ async def create_job(payload: JobRequest) -> dict:
         "est_seconds": round(trajectory.draw_length / 80.0, 1),
         "stats": sketch.stats,
     }
+
+
+class PinRequest(BaseModel):
+    pin: str
+
+
+class AdminCommand(BaseModel):
+    action: str
+    axis: str | None = None
+    mm: float | None = None
+    value: int | None = None
+    on: bool | None = None
+    index: int | None = None
+    x: float | None = None
+    y: float | None = None
+    z: float | None = None
+    r: float | None = None
+    speed: int | None = None
+
+
+def _admin_pin() -> str:
+    raw = os.environ.get("ADMIN_PIN", "").strip()
+    if raw:
+        return raw
+    from app.robot.client import _setting
+
+    return _setting("ADMIN_PIN", "2026") or "2026"
+
+
+def _require_admin(x_admin_token: str | None) -> None:
+    if not token_ok(x_admin_token or ""):
+        raise HTTPException(status_code=401, detail="hace falta el pin")
+
+
+def _first_number(value: str) -> float | None:
+    cleaned = value.replace("{", " ").replace("}", " ").replace("[", " ").replace("]", " ")
+    for chunk in cleaned.replace(",", " ").split():
+        try:
+            return float(chunk)
+        except ValueError:
+            continue
+    return None
+
+
+@app.post("/api/admin/unlock")
+def admin_unlock(body: PinRequest) -> dict:
+    if not pin_ok(body.pin.strip(), _admin_pin()):
+        raise HTTPException(status_code=401, detail="pin incorrecto")
+    return {"token": issue_token()}
+
+
+@app.get("/api/admin/status")
+async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict:
+    _require_admin(x_admin_token)
+    snapshot: dict = {
+        "backend": robot.name,
+        "busy": busy.active(),
+        "connected": False,
+        "frame": {
+            "host": getattr(robot, "host", ""),
+            "origin_x": getattr(robot, "origin_x", None),
+            "origin_y": getattr(robot, "origin_y", None),
+            "z_draw": getattr(robot, "z_draw", None),
+            "z_travel": getattr(robot, "z_travel", None),
+            "r": getattr(robot, "r", None),
+            "r_far": getattr(robot, "r_far", None),
+            "far_x": getattr(robot, "far_x", None),
+            "far_y": getattr(robot, "far_y", None),
+        },
+    }
+    if robot.name != "mg400":
+        snapshot["detail"] = "el backend está en simulador"
+        return snapshot
+    try:
+        _, mode_value = await robot.ask("RobotMode()")  # type: ignore[attr-defined]
+        _, pose_value = await robot.ask("GetPose()")  # type: ignore[attr-defined]
+        _, angle_value = await robot.ask("GetAngle()")  # type: ignore[attr-defined]
+        _, error_value = await robot.ask("GetErrorID()")  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        snapshot["detail"] = str(exc)
+        return snapshot
+    mode = _first_number(mode_value)
+    pose = _numbers(pose_value)[:4]
+    snapshot.update(
+        {
+            "connected": True,
+            "mode": int(mode) if mode is not None else None,
+            "mode_label": mode_label(int(mode)) if mode is not None else "",
+            "pose": pose if len(pose) == 4 else [],
+            "angles": _numbers(angle_value)[:4],
+            "alarms": error_value,
+            "alarm_text": describe_alarms(error_value),
+        }
+    )
+    return snapshot
+
+
+@app.post("/api/admin/command")
+async def admin_command(
+    body: AdminCommand,
+    x_admin_token: str | None = Header(default=None),
+) -> dict:
+    _require_admin(x_admin_token)
+    if robot.name != "mg400":
+        raise HTTPException(status_code=409, detail="el backend está en simulador")
+    try:
+        payload = body.model_dump() if hasattr(body, "model_dump") else body.dict()
+        command, is_move, prepare = plan(body.action, payload, busy=busy.active())
+        rate = rate_for(body.action, payload) if prepare else None
+    except AdminOpError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        if prepare:
+            await robot.prepare_motion(rate)  # type: ignore[attr-defined]
+        code, value = await robot.ask(command, move=is_move)  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if code != 0:
+        raise HTTPException(status_code=502, detail=f"{command} devolvio {code} {value}".strip())
+    return {"command": command, "code": code, "value": value}
+
+
+def _numbers(value: str) -> list[float]:
+    numbers: list[float] = []
+    cleaned = value.replace("{", " ").replace("}", " ").replace("[", " ").replace("]", " ")
+    for chunk in cleaned.replace(",", " ").split():
+        try:
+            numbers.append(float(chunk))
+        except ValueError:
+            continue
+    return numbers
 
 
 @app.get("/api/jobs/{job_id}")

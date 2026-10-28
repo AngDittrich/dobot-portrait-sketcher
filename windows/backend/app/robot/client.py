@@ -274,6 +274,8 @@ class MG400Client(RobotClient):
         self.far_y = far_y
         self.commands: list[str] = []
         self._ready = False
+        # El MG400 acepta un solo cliente. Dos consultas a la vez no pueden abrir dos sockets.
+        self._io = asyncio.Lock()
 
     @classmethod
     def from_env(cls) -> MG400Client:
@@ -332,25 +334,32 @@ class MG400Client(RobotClient):
         )
 
     async def connect(self) -> None:
-        if self._ready:
+        if self._ready and self._link is not None:
             return
-        if self._link is None:
-            if self._stage_link is not None:
-                self._link = self._stage_link
-            elif self.dry_run:
-                logger.info("modo seco: no se abre socket")
-                self._link = _DryLink()
-            else:
-                from app.robot.mg400 import MG400Link
+        async with self._io:
+            if self._ready and self._link is not None:
+                return
+            try:
+                if self._link is None:
+                    if self._stage_link is not None:
+                        self._link = self._stage_link
+                    elif self.dry_run:
+                        logger.info("modo seco: no se abre socket")
+                        self._link = _DryLink()
+                    else:
+                        from app.robot.mg400 import MG400Link
 
-                self._link = await asyncio.to_thread(
-                    MG400Link, self.host, move_timeout_s=self.move_timeout_s
-                )
-        await asyncio.to_thread(self._link.prepare, self.speed_factor)  # type: ignore[attr-defined]
-        await self._dashboard(f"User({int(self.user)})")
-        await self._dashboard(f"Tool({int(self.tool)})")
-        await self._dashboard(f"CP({_blend(self.cp_draw)})")
-        self._ready = True
+                        self._link = await asyncio.to_thread(
+                            MG400Link, self.host, move_timeout_s=self.move_timeout_s
+                        )
+                await asyncio.to_thread(self._link.prepare, self.speed_factor)  # type: ignore[attr-defined]
+                await self._dashboard(f"User({int(self.user)})")
+                await self._dashboard(f"Tool({int(self.tool)})")
+                await self._dashboard(f"CP({_blend(self.cp_draw)})")
+                self._ready = True
+            except Exception:
+                self._close_link()
+                raise
 
     async def draw(self, trajectory: Trajectory, on_progress: ProgressCallback) -> None:
         self._validate(trajectory)
@@ -566,8 +575,7 @@ class MG400Client(RobotClient):
         traveled = min(1.0, max(0.0, traveled))
         return self.r + traveled * (self.r_far - self.r)
 
-    def _drop(self) -> None:
-        """Suelta el socket. Si se reutiliza después de un fallo, el siguiente dibujo no obtiene respuesta."""
+    def _close_link(self) -> None:
         link = self._link
         self._link = None
         self._ready = False
@@ -578,6 +586,37 @@ class MG400Client(RobotClient):
             close()
         except OSError:
             return
+
+    def _drop(self) -> None:
+        """Suelta el socket. Si se reutiliza después de un fallo, el siguiente dibujo no obtiene respuesta."""
+        self._close_link()
+
+    async def ask(self, command: str, *, move: bool = False) -> tuple[int, str]:
+        """Manda una orden ya armada y devuelve el código y el valor, sin cerrar el socket si el robot la rechaza."""
+        await self.connect()
+        link = self._link
+        method = link.move if move else link.dashboard  # type: ignore[attr-defined]
+        try:
+            reply = await asyncio.to_thread(method, command)
+        except Exception:
+            logger.exception("consola: %s no se pudo enviar", command)
+            async with self._io:
+                if self._link is link:
+                    self._close_link()
+            raise
+        code = int(getattr(reply, "code", -99999))
+        logger.info("consola %s -> %s", command, code)
+        return code, str(getattr(reply, "value", ""))
+
+    async def prepare_motion(self, percent: int | None = None) -> None:
+        """Reanuda la cola antes de un jog o un paso. Sin esto el brazo acepta la orden y no se mueve.
+
+        El porcentaje, si llega, es el del joystick. Si no, se queda el del dibujo.
+        No se guarda en el cliente: el siguiente retrato vuelve a su propia velocidad.
+        """
+        await self.connect()
+        rate = self.speed_factor if percent is None else int(percent)
+        await asyncio.to_thread(self._link.prepare, rate)  # type: ignore[attr-defined]
 
     async def _move(self, command: str) -> None:
         from app.robot.mg400 import MG400Error, QUEUE_FULL_CODE

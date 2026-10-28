@@ -11,9 +11,9 @@ export function ThanksScreen() {
       transition={{ duration: 0.4, ease: [0.22, 0.9, 0.28, 1] }}
     >
       <motion.img
-        src="/wizard/portrait-ready.jpg"
-        alt="Retrato a lápiz listo para llevar"
-        className="booth-thanks-art"
+        src="/robot/dobot-giving-drawing-2-person.webp"
+        alt="El robot entrega el dibujo"
+        className="booth-thanks-art booth-thanks-art--handoff"
         draggable={false}
         initial={{ rotate: -6, y: 40, opacity: 0 }}
         animate={{ rotate: -1.5, y: 0, opacity: 1 }}

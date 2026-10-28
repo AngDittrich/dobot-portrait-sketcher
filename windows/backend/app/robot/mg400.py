@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import re
 import socket
+import threading
 import time
 from dataclasses import dataclass
 
@@ -90,6 +91,8 @@ class MG400Link:
         # que hay espacio; cortar antes cierra el socket y detiene el brazo.
         self.move_timeout_s = move_timeout_s
         self.last_raw = b""
+        self._dashboard_lock = threading.Lock()
+        self._move_lock = threading.Lock()
         logger.info("conectando a %s (dashboard %s, movimiento %s)", host, dashboard_port, move_port)
         self._dashboard = self._open(dashboard_port)
         self._move = self._open(move_port)
@@ -122,10 +125,12 @@ class MG400Link:
         return _parse(data.decode("utf-8", errors="replace"))
 
     def dashboard(self, command: str) -> Reply:
-        return self._ask(self._dashboard, command)
+        with self._dashboard_lock:
+            return self._ask(self._dashboard, command)
 
     def move(self, command: str) -> Reply:
-        return self._ask(self._move, command, timeout_s=self.move_timeout_s)
+        with self._move_lock:
+            return self._ask(self._move, command, timeout_s=self.move_timeout_s)
 
     def _step(self, command: str) -> Reply:
         started = time.monotonic()
@@ -244,7 +249,8 @@ class MG400Link:
         de un MovL no alcanza: si se corta antes, el socket se desfasa y el
         siguiente dibujo ya no obtiene respuesta.
         """
-        reply = self._ask(self._move, "Sync()", timeout_s=180.0)
+        with self._move_lock:
+            reply = self._ask(self._move, "Sync()", timeout_s=180.0)
         if not reply.ok:
             raise MG400Error(f"Sync devolvio {reply.code}")
 
