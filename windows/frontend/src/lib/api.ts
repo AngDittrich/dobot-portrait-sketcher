@@ -94,7 +94,7 @@ export interface AdminStatus {
   angles?: number[]
   alarms?: string
   alarm_text?: string
-  frame?: Record<string, number | string | null>
+  frame?: Record<string, number | string | boolean | null>
 }
 
 export interface AdminCommand {
@@ -126,6 +126,34 @@ export async function unlockAdmin(pin: string): Promise<string> {
 
 export function adminStatus(token: string): Promise<AdminStatus> {
   return request<AdminStatus>('/api/admin/status', { headers: adminHeaders(token) })
+}
+
+export interface BoothSettings {
+  backend: string
+  host: string
+  dry_run: boolean
+  user: number
+  tool: number
+  z_draw: number
+  z_travel: number
+  r: number
+  r_far: number
+  far_x: number
+  far_y: number
+  speed_factor: number
+  origin_x: number
+  origin_y: number
+  x_sign: number
+  y_sign: number
+  cp_draw: number
+}
+
+export function saveAdminBooth(token: string, booth: BoothSettings): Promise<BoothSettings> {
+  return request<BoothSettings>('/api/admin/settings', {
+    method: 'POST',
+    headers: adminHeaders(token),
+    body: JSON.stringify(booth),
+  })
 }
 
 export function adminCommand(

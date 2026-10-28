@@ -23,7 +23,7 @@ import cv2
 if str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import FastAPI, Header, HTTPException  # noqa: E402
+from fastapi import Body, FastAPI, Header, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 from starlette.concurrency import run_in_threadpool  # noqa: E402
@@ -45,7 +45,16 @@ from app.admin_ops import (  # noqa: E402
     token_ok,
 )
 from app.robot import busy  # noqa: E402
-from app.robot.client import Segment, Trajectory, robot_from_env  # noqa: E402
+from app.robot.booth import (  # noqa: E402
+    BoothError,
+    apply_booth,
+    booth_from_client,
+    client_from_booth,
+    load_booth,
+    parse_booth,
+    write_booth,
+)
+from app.robot.client import MockRobotClient, Segment, Trajectory, configure_logging, robot_from_env  # noqa: E402
 from app.store import Job, JobStore, Sketch, SketchStore  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -84,7 +93,18 @@ app.add_middleware(
 )
 
 renderer = PortraitRenderer(MODELS_DIR)
+configure_logging()
 robot = robot_from_env()
+try:
+    _saved_booth = load_booth()
+except BoothError:
+    logging.getLogger("robot").exception("robot.json ignorado; sigo con .env")
+    _saved_booth = None
+if _saved_booth:
+    try:
+        robot = client_from_booth(_saved_booth)
+    except BoothError:
+        logging.getLogger("robot").exception("robot.json ignorado; sigo con .env")
 robot_log = logging.getLogger("robot")
 sketches = SketchStore()
 jobs = JobStore()
@@ -431,17 +451,7 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
         "backend": robot.name,
         "busy": busy.active(),
         "connected": False,
-        "frame": {
-            "host": getattr(robot, "host", ""),
-            "origin_x": getattr(robot, "origin_x", None),
-            "origin_y": getattr(robot, "origin_y", None),
-            "z_draw": getattr(robot, "z_draw", None),
-            "z_travel": getattr(robot, "z_travel", None),
-            "r": getattr(robot, "r", None),
-            "r_far": getattr(robot, "r_far", None),
-            "far_x": getattr(robot, "far_x", None),
-            "far_y": getattr(robot, "far_y", None),
-        },
+        "frame": booth_from_client(robot),
     }
     if robot.name != "mg400":
         snapshot["detail"] = "el backend está en simulador"
@@ -468,6 +478,33 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
         }
     )
     return snapshot
+
+
+@app.post("/api/admin/settings")
+def admin_settings(
+    body: dict = Body(...),
+    x_admin_token: str | None = Header(default=None),
+) -> dict:
+    """Guarda la hoja, las alturas y la IP. El `.env` deja de mandar en el próximo arranque."""
+    global robot
+    _require_admin(x_admin_token)
+    if busy.active():
+        raise HTTPException(status_code=409, detail="el robot está dibujando")
+    try:
+        booth = parse_booth(body)
+    except BoothError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if booth.backend == "mock":
+        robot = MockRobotClient()
+    elif getattr(robot, "name", "") == "mg400":
+        apply_booth(robot, booth)  # type: ignore[arg-type]
+    else:
+        robot = client_from_booth(booth.as_dict())
+    try:
+        write_booth(booth)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="no se pudo guardar la cabina") from exc
+    return booth.as_dict()
 
 
 @app.post("/api/admin/command")

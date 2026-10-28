@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { adminCommand, adminStatus, unlockAdmin } from '../../lib/api'
+import { adminCommand, adminStatus, saveAdminBooth, unlockAdmin } from '../../lib/api'
 import type { AdminCommand, AdminStatus } from '../../lib/api'
 
 /**
@@ -30,6 +30,53 @@ const JOINTS: Record<StickId, { title: string; axes: Axes }> = {
 
 function overlay(node: ReactNode) {
   return createPortal(node, document.body)
+}
+
+type BoothForm = {
+  backend: string
+  host: string
+  dry_run: boolean
+  user: string
+  tool: string
+  z_draw: string
+  z_travel: string
+  r: string
+  r_far: string
+  far_x: string
+  far_y: string
+  speed_factor: string
+  origin_x: string
+  origin_y: string
+  x_sign: string
+  y_sign: string
+  cp_draw: string
+}
+
+function fieldText(value: unknown): string {
+  if (value === null || value === undefined || value === '') return ''
+  return String(value)
+}
+
+function boothFromFrame(frame: Record<string, number | string | boolean | null>): BoothForm {
+  return {
+    backend: fieldText(frame.backend) || 'mg400',
+    host: fieldText(frame.host),
+    dry_run: frame.dry_run === true || frame.dry_run === 'true' || frame.dry_run === 1,
+    user: fieldText(frame.user ?? 0),
+    tool: fieldText(frame.tool ?? 0),
+    z_draw: fieldText(frame.z_draw),
+    z_travel: fieldText(frame.z_travel),
+    r: fieldText(frame.r),
+    r_far: fieldText(frame.r_far),
+    far_x: fieldText(frame.far_x),
+    far_y: fieldText(frame.far_y),
+    speed_factor: fieldText(frame.speed_factor ?? 20),
+    origin_x: fieldText(frame.origin_x),
+    origin_y: fieldText(frame.origin_y),
+    x_sign: fieldText(frame.x_sign ?? -1),
+    y_sign: fieldText(frame.y_sign ?? -1),
+    cp_draw: fieldText(frame.cp_draw ?? 0),
+  }
 }
 
 function format(value: unknown): string {
@@ -166,6 +213,8 @@ export function AdminDesk() {
   const [wrong, setWrong] = useState(false)
   const [token, setToken] = useState<string | null>(null)
   const [status, setStatus] = useState<AdminStatus | null>(null)
+  const [booth, setBooth] = useState<BoothForm | null>(null)
+  const boothReady = useRef(false)
   const [notice, setNotice] = useState('')
   const [step, setStep] = useState(1)
   const [space, setSpace] = useState<'plano' | 'joints'>('plano')
@@ -189,6 +238,8 @@ export function AdminDesk() {
   const sticks = space === 'plano' ? PLANE : JOINTS
 
   function close() {
+    boothReady.current = false
+    setBooth(null)
     setPhase('closed')
     setToken(null)
     setPin('')
@@ -196,6 +247,14 @@ export function AdminDesk() {
     setNotice('')
     setStatus(null)
   }
+
+  useEffect(() => {
+    if (phase !== 'panel') return
+    const frame = status?.frame
+    if (boothReady.current || !frame || frame.origin_x == null && frame.host == null) return
+    boothReady.current = true
+    setBooth(boothFromFrame(frame))
+  }, [phase, status])
 
   async function submitPin(next: string) {
     if (sending.current || next.length !== 4) return
@@ -295,6 +354,57 @@ export function AdminDesk() {
       setNotice('')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'el robot rechazó la orden')
+    }
+  }
+
+  function teach(which: 'origin' | 'far') {
+    if (live.length < 4) return
+    setBooth((current) => {
+      if (!current) return current
+      if (which === 'origin') {
+        return {
+          ...current,
+          origin_x: String(live[0]),
+          origin_y: String(live[1]),
+          z_draw: String(live[2]),
+          r: String(live[3]),
+        }
+      }
+      return {
+        ...current,
+        far_x: String(live[0]),
+        far_y: String(live[1]),
+        r_far: String(live[3]),
+      }
+    })
+  }
+
+  async function saveBooth() {
+    if (!token || !booth) return
+    const number = (value: string) => Number(value)
+    try {
+      await saveAdminBooth(token, {
+        backend: booth.backend,
+        host: booth.host.trim(),
+        dry_run: booth.dry_run,
+        user: number(booth.user),
+        tool: number(booth.tool),
+        z_draw: number(booth.z_draw),
+        z_travel: number(booth.z_travel),
+        r: number(booth.r),
+        r_far: number(booth.r_far),
+        far_x: number(booth.far_x),
+        far_y: number(booth.far_y),
+        speed_factor: number(booth.speed_factor),
+        origin_x: number(booth.origin_x),
+        origin_y: number(booth.origin_y),
+        x_sign: number(booth.x_sign),
+        y_sign: number(booth.y_sign),
+        cp_draw: number(booth.cp_draw),
+      })
+      setNotice('Cabina guardada. El siguiente dibujo usa estos valores.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'no se pudo guardar la cabina')
     }
   }
 
@@ -584,11 +694,118 @@ export function AdminDesk() {
                         Usar pose actual
                       </button>
                     </form>
-                    <p className="admin-hint">
-                      Hoja {format(Number(status?.frame?.origin_x))} , {format(Number(status?.frame?.origin_y))}
-                      {' · '}Z {format(Number(status?.frame?.z_draw))} / {format(Number(status?.frame?.z_travel))}
-                      {' · '}R {format(Number(status?.frame?.r))} → {format(Number(status?.frame?.r_far))}
-                    </p>
+                    {booth && (
+                      <form
+                        className="admin-booth"
+                        onSubmit={(event) => {
+                          event.preventDefault()
+                          void saveBooth()
+                        }}
+                      >
+                        <p>Cabina</p>
+                        <label>
+                          Modo
+                          <select
+                            value={booth.backend}
+                            onChange={(event) =>
+                              setBooth((current) => current && { ...current, backend: event.target.value })
+                            }
+                          >
+                            <option value="mg400">Robot</option>
+                            <option value="mock">Simulador</option>
+                          </select>
+                        </label>
+                        <label>
+                          IP
+                          <input
+                            value={booth.host}
+                            onChange={(event) =>
+                              setBooth((current) => current && { ...current, host: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="admin-check">
+                          <input
+                            type="checkbox"
+                            checked={booth.dry_run}
+                            onChange={(event) =>
+                              setBooth((current) => current && { ...current, dry_run: event.target.checked })
+                            }
+                          />
+                          Sin mover
+                        </label>
+                        {(
+                          [
+                            ['user', 'Usuario'],
+                            ['tool', 'Herramienta'],
+                            ['speed_factor', 'Velocidad'],
+                            ['cp_draw', 'CP'],
+                            ['z_draw', 'Z dibujo'],
+                            ['z_travel', 'Z viaje'],
+                            ['origin_x', 'Origen X'],
+                            ['origin_y', 'Origen Y'],
+                            ['r', 'R origen'],
+                            ['far_x', 'Esquina X'],
+                            ['far_y', 'Esquina Y'],
+                            ['r_far', 'R esquina'],
+                          ] as const
+                        ).map(([key, label]) => (
+                          <label key={key}>
+                            {label}
+                            <input
+                              inputMode="decimal"
+                              value={booth[key]}
+                              onChange={(event) =>
+                                setBooth((current) => current && { ...current, [key]: event.target.value })
+                              }
+                            />
+                          </label>
+                        ))}
+                        <label>
+                          Signo X
+                          <select
+                            value={booth.x_sign}
+                            onChange={(event) =>
+                              setBooth((current) => current && { ...current, x_sign: event.target.value })
+                            }
+                          >
+                            <option value="-1">-1</option>
+                            <option value="1">1</option>
+                          </select>
+                        </label>
+                        <label>
+                          Signo Y
+                          <select
+                            value={booth.y_sign}
+                            onChange={(event) =>
+                              setBooth((current) => current && { ...current, y_sign: event.target.value })
+                            }
+                          >
+                            <option value="-1">-1</option>
+                            <option value="1">1</option>
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          className="admin-press"
+                          disabled={live.length < 4}
+                          onClick={() => teach('origin')}
+                        >
+                          Pose como origen
+                        </button>
+                        <button
+                          type="button"
+                          className="admin-press"
+                          disabled={live.length < 4}
+                          onClick={() => teach('far')}
+                        >
+                          Pose como esquina
+                        </button>
+                        <button type="submit" className="admin-press" disabled={Boolean(status?.busy)}>
+                          Guardar cabina
+                        </button>
+                      </form>
+                    )}
                   </div>
                 </div>
               </div>

@@ -2050,6 +2050,74 @@
   line-height: 1.35;
 }
 
+.admin-booth {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.7rem;
+  border-radius: 16px;
+  background: rgba(4, 10, 22, 0.22);
+}
+
+.admin-booth > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.admin-booth label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.admin-booth input,
+.admin-booth select {
+  min-width: 0;
+  width: 100%;
+  padding: 0.4rem 0.45rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 0.95rem;
+  text-transform: none;
+  user-select: text;
+}
+
+.admin-booth input:hover,
+.admin-booth input:focus,
+.admin-booth select:hover,
+.admin-booth select:focus {
+  border-color: rgba(255, 255, 255, 0.5);
+  outline: none;
+}
+
+.admin-booth .admin-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.85rem;
+}
+
+.admin-booth .admin-check input {
+  width: auto;
+}
+
+.admin-booth button {
+  grid-column: span 1;
+}
+
 .admin-pose button:disabled,
 .admin-actions button:disabled,
 .admin-nudge-axes button:disabled {
