@@ -82,3 +82,59 @@ export async function postJob(sketchId?: string | null): Promise<JobResponse> {
 export async function getJob(jobId: string): Promise<JobStatus> {
   return request<JobStatus>(`/api/jobs/${jobId}`)
 }
+
+export interface AdminStatus {
+  backend: string
+  busy: boolean
+  connected: boolean
+  detail?: string
+  mode?: number | null
+  mode_label?: string
+  pose?: number[]
+  angles?: number[]
+  alarms?: string
+  alarm_text?: string
+  frame?: Record<string, number | string | null>
+}
+
+export interface AdminCommand {
+  action: string
+  axis?: string
+  mm?: number
+  value?: number
+  on?: boolean
+  index?: number
+  x?: number
+  y?: number
+  z?: number
+  r?: number
+  speed?: number
+}
+
+function adminHeaders(token: string): HeadersInit {
+  return { 'X-Admin-Token': token }
+}
+
+/** PIN de 4 dígitos → token para el resto del panel. */
+export async function unlockAdmin(pin: string): Promise<string> {
+  const data = await request<{ token: string }>('/api/admin/unlock', {
+    method: 'POST',
+    body: JSON.stringify({ pin }),
+  })
+  return data.token
+}
+
+export function adminStatus(token: string): Promise<AdminStatus> {
+  return request<AdminStatus>('/api/admin/status', { headers: adminHeaders(token) })
+}
+
+export function adminCommand(
+  token: string,
+  command: AdminCommand,
+): Promise<{ command: string; code: number; value: string }> {
+  return request('/api/admin/command', {
+    method: 'POST',
+    headers: adminHeaders(token),
+    body: JSON.stringify(command),
+  })
+}
