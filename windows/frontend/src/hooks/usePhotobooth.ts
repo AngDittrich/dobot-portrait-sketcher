@@ -13,6 +13,7 @@ import type { DrawingStyleId } from '../lib/drawingStyles'
  *
  *   attract → camera → countdown → capture → review → style
  *        → reveal → confirm → drawing → thanks → attract
+ *                                     ↘ robotError → drawing | attract
  *
  * La foto se muestra antes de gastar un token. La IA corre al salir de
  * style, con los rasgos elegidos. Al pulsar ¡SÍ! se crea el trabajo del robot.
@@ -29,6 +30,7 @@ export type PhotoboothStatus =
   | 'confirm'
   | 'drawing'
   | 'thanks'
+  | 'robotError'
 
 export interface ToastData {
   id: number
@@ -42,6 +44,7 @@ export interface RobotJob {
   status: 'queued' | 'drawing' | 'done' | 'error'
   progress: number
   etaSeconds: number
+  error: string | null
 }
 
 interface PhotoboothState {
@@ -71,6 +74,7 @@ type Action =
   | { type: 'PROGRESS'; value: number }
   | { type: 'REVEALED'; sketch: string }
   | { type: 'DRAW' }
+  | { type: 'ROBOT_FAILED' }
   | { type: 'THANKS' }
   | { type: 'RETAKE' }
   | { type: 'TIMEOUT' }
@@ -174,7 +178,11 @@ function reducer(state: PhotoboothState, action: Action): PhotoboothState {
     case 'REVEALED':
       return { ...state, status: 'confirm', sketch: action.sketch, progress: 1 }
     case 'DRAW':
+      if (state.status !== 'confirm' && state.status !== 'robotError') return state
       return { ...state, status: 'drawing' }
+    case 'ROBOT_FAILED':
+      if (state.status !== 'drawing') return state
+      return { ...state, status: 'robotError' }
     case 'THANKS':
       return { ...state, status: 'thanks', celebrationId: state.celebrationId + 1 }
     case 'RETAKE':
@@ -311,14 +319,14 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
 
   /**
    * Pantalla de dibujo: si hay un trabajo del robot, espera a que termine.
-   * Si no hay backend, cierra a los 3 s.
+   * Si no hay backend, cierra a los 3 s. Un trabajo con error se queda en
+   * robotError: no se le dice a la persona que se lleve un dibujo a medias.
    */
   useEffect(() => {
     if (state.status !== 'drawing') return
-    const waiting = robotJob && (robotJob.status === 'queued' || robotJob.status === 'drawing')
-    if (waiting) return
+    if (robotJob && robotJob.status !== 'done') return
 
-    const delay = robotJob?.status === 'done' ? 600 : robotJob ? 1600 : DRAWING_MS
+    const delay = robotJob ? 600 : DRAWING_MS
     const timer = setTimeout(() => dispatch({ type: 'THANKS' }), delay)
     return () => clearTimeout(timer)
   }, [state.status, robotJob])
@@ -358,11 +366,13 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
   const startRobotJob = useCallback(async () => {
     try {
       const job = await postJob(getLastSketchId())
+      console.info(`[robot] ${job.job_id} enviado (boceto ${job.sketch_id})`)
       setRobotJob({
         jobId: job.job_id,
         status: 'drawing',
         progress: 0,
         etaSeconds: job.est_seconds,
+        error: null,
       })
 
       stopRobotPolling()
@@ -377,26 +387,39 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
                     status: status.status,
                     progress: status.progress,
                     etaSeconds: status.eta_seconds,
+                    error: status.error,
                   }
                 : previous,
             )
-            if (status.status === 'done' || status.status === 'error') {
+            if (status.status === 'done') {
               stopRobotPolling()
-              if (status.status === 'error') {
-                dispatch({
-                  type: 'TOAST',
-                  toast: makeToast('info', 'El robot no pudo terminar el dibujo.'),
-                })
-              }
+              console.info(`[robot] ${job.job_id} terminado`)
+            } else if (status.status === 'error') {
+              stopRobotPolling()
+              console.error(
+                `[robot] ${job.job_id} falló al ${Math.round(status.progress * 100)} %:`,
+                status.error,
+              )
+              dispatch({ type: 'ROBOT_FAILED' })
             }
           } catch (error) {
-            console.warn('Se perdió el seguimiento del trabajo.', error)
+            console.error(`[robot] se perdió el seguimiento de ${job.job_id}`, error)
             stopRobotPolling()
-            setRobotJob((previous) => (previous ? { ...previous, status: 'error' } : previous))
+            setRobotJob((previous) =>
+              previous ? { ...previous, status: 'error', error: String(error) } : previous,
+            )
+            dispatch({ type: 'ROBOT_FAILED' })
           }
         })()
       }, 1000)
     } catch (error) {
+      // Sin backend (fetch no llega) la cabina sigue como demo. Si el backend
+      // contestó con un error, el trabajo no existe y hay que avisar.
+      if (error instanceof Error && error.message.startsWith('Backend ')) {
+        console.error('[robot] el backend rechazó el trabajo:', error.message)
+        dispatch({ type: 'ROBOT_FAILED' })
+        return
+      }
       console.warn('No se pudo enviar el retrato al robot.', error)
       dispatch({
         type: 'TOAST',
@@ -420,6 +443,20 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     dispatch({ type: 'DRAW' })
     void startRobotJob()
   }, [startRobotJob])
+
+  /** Desde robotError: vuelve a mandar el mismo boceto. */
+  const retryRobot = useCallback(() => {
+    stopRobotPolling()
+    setRobotJob(null)
+    dispatch({ type: 'DRAW' })
+    void startRobotJob()
+  }, [startRobotJob, stopRobotPolling])
+
+  const home = useCallback(() => {
+    stopRobotPolling()
+    setRobotJob(null)
+    dispatch({ type: 'ATTRACT' })
+  }, [stopRobotPolling])
 
   const retake = useCallback(() => {
     stopRobotPolling()
@@ -454,6 +491,8 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     start,
     release,
     accept,
+    retryRobot,
+    home,
     retake,
     like,
     toggleTrait,
