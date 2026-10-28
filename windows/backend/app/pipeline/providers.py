@@ -22,6 +22,7 @@ import base64
 import hashlib
 import json
 import os
+import random
 import time
 import urllib.error
 import urllib.request
@@ -67,7 +68,16 @@ FIDELITY_RULES = """FIDELITY RULES, most important:
   photo does not have.
 - Draw facial hair only if it is visible in the photo. Never invent a beard,
   mustache or goatee.
-- The eyes stay open with a visible pupil. Never draw them closed or as arcs."""
+- The eyes stay open with a visible pupil. Never draw them closed or as arcs.
+- Each eye is one clean outline with one small solid black pupil. Never a
+  square, a rectangle or a block, never a highlight or a line across the iris.
+- If a hat, cap, beanie, headphones or helmet is added, the real hair still
+  shows below it: the hairline on the forehead, the hair over the ears and at
+  the nape. Never leave the skull bald under a hat.
+- The mouth is closed and keeps its real shape, with one outline per lip. No
+  teeth, no tongue, no open mouth unless the person is laughing in the photo.
+- Glasses, if worn, keep their real shape and thickness and never cover or
+  hide the eyes."""
 
 # Reglas que valen para los cuatro estilos; antes solo las llevaba el prompt
 # por defecto. El pelo se perdió una vez por pedir "menos líneas": salió un
@@ -77,14 +87,17 @@ DRAWING_RULES = """DRAWING RULES:
   no color.
 - NO hatching, NO cross-hatching, NO stippling, NO dots, NO tone, NO shading of
   any kind. Fewer lines is better.
-- Hair and facial hair keep their real silhouette and volume, drawn with a few
-  long confident strokes. Never leave the head bald or with a few stray hairs.
-- Hair, beards and mustaches are an outline with at most three short interior
-  strokes, never a filled solid black shape and never hatched or scribbled
-  inside. A thin goatee or mustache stays thin: one contour, not a black patch.
+- Hair and facial hair keep their real silhouette and volume: one mass drawn
+  with a few long confident strokes, never a row of short spiky marks over the
+  forehead. Never leave the head bald or with a few stray hairs.
+- Hair, beard and mustache are outline only: ONE clean contour per mass, and
+  the inside stays pure white paper. No hatch lines, no scribbles, no interior
+  marks at all, never a filled solid black shape. A thin mustache or goatee is
+  a single thin line, never a black patch.
 - No words, letters, numbers, logos, signatures or watermarks anywhere.
 - Plain white background, nothing else in the frame: no border, no vignette.
-- Clothing stays blank unless a costume is added below.
+- Clothing is blank: the collar and one or two fold lines at most. No wrinkles,
+  no fabric pattern, no cloth texture.
 - The whole head and shoulders must fit inside the frame.
 - An added costume or hat is a few simple outlines, never a detailed drawing,
   and it never covers the face or the eyes."""
@@ -100,11 +113,13 @@ cheeks, and draw them clearly oversized. Use loose, confident hand-drawn
 outlines, a touch imperfect on purpose, with one bold weight instead of many
 thin lines.
 
-The exaggeration is only the size of those features. The expression stays the
-one in the photo: if the person is not smiling there, the drawing does not
-smile either, and the mouth keeps its real shape. The eyes keep their exact
-position, size and distance so the person is still recognizable, and nothing is
-added that is not already in the photo.
+The exaggeration is only the size of those features. Exaggerate the nose, the
+chin or the cheeks, and nothing else. The eyes are never enlarged, shrunk or
+moved, with or without glasses: they keep their exact position, size and
+distance so the person is still recognizable. The expression stays the one in
+the photo: if the person is not smiling there, the drawing does not smile
+either, and the mouth keeps its real shape. Nothing is added that is not
+already in the photo.
 
 The character can be whimsical, but the paper stays a drawing: black lines on
 white, no color, no shading, no scenery, no sky, no clouds and no background of
@@ -137,6 +152,8 @@ STYLE_OPENINGS = {
 }
 
 # Ids que manda la cabina. Texto libre del visitante no entra al prompt.
+EAR_SIDES = ("left", "right")
+
 TRAIT_LINES = {
     "chef": "Dress them as a chef: a plain toque and a simple jacket, few outlines.",
     "medico": "Dress them as a doctor: a plain coat and a simple stethoscope, few outlines.",
@@ -150,8 +167,13 @@ TRAIT_LINES = {
     "gorra": "Add one simple baseball cap.",
     "corona": "Add one simple three-point crown.",
     "lentes": "Add one pair of simple round glasses.",
-    "mono": "Add one simple bow tie.",
-    "flor": "Add one simple five-petal flower beside the ear.",
+    "mono": "Add one simple bow tie over a plain shirt collar, and draw the shirt collar that holds it.",
+    "flor": (
+        "Add one simple flower tucked behind the {ear} ear; only the flower head shows beside the "
+        "head, never over the glasses or the face."
+    ),
+    "aretes": "Add one small simple earring on each earlobe, drawn as a single short line.",
+    "diadema": "Add one simple headband across the top of the hair, not over the forehead.",
 }
 
 # Qué parte del cuerpo ocupa cada rasgo. Dos rasgos que comparten espacio se
@@ -173,6 +195,8 @@ TRAIT_SLOTS = {
     "lentes": ("eyes",),
     "mono": ("neck",),
     "flor": ("hair",),
+    "aretes": ("ears",),
+    "diadema": ("hair",),
 }
 
 
@@ -203,12 +227,22 @@ def filter_traits(traits: list[str] | None) -> list[str]:
     return kept
 
 
-def build_prompt(traits: list[str] | None = None, style: str | None = None) -> str:
-    """Estilo elegido más los rasgos conocidos. Ids que no están en el mapa se ignoran."""
+def build_prompt(
+    traits: list[str] | None = None,
+    style: str | None = None,
+    ear_side: str | None = None,
+) -> str:
+    """Estilo elegido más los rasgos conocidos. Ids que no están en el mapa se ignoran.
+
+    El lado de la flor se pide explícito: con "one ear" el modelo elegía
+    siempre el mismo y todos los retratos salían iguales. Sin `ear_side` se
+    sortea por visita.
+    """
     chosen = resolve_style(style)
     opening = CARICATURE_OPENING if chosen == DEFAULT_STYLE else STYLE_OPENINGS[chosen]
     base = opening + RULES
-    extras = [TRAIT_LINES[trait] for trait in filter_traits(traits)]
+    side = ear_side if ear_side in EAR_SIDES else random.choice(EAR_SIDES)
+    extras = [TRAIT_LINES[trait].format(ear=side) for trait in filter_traits(traits)]
     if not extras:
         return base
     lines = "\n".join(f"- {line}" for line in extras)
@@ -256,7 +290,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
     return Settings(
         provider=get("SKETCH_PROVIDER", "auto").strip().lower(),
         model=get("OPENROUTER_SKETCH_MODEL", "google/gemini-nano-banana-2.1"),
-        fallback_model=get("OPENROUTER_SKETCH_FALLBACK", "google/gemini-3-pro-image"),
+        fallback_model=get("OPENROUTER_SKETCH_FALLBACK", "openai/gpt-image-2"),
         api_key=get("OPENROUTER_API_KEY", ""),
         timeout_s=float(get("SKETCH_TIMEOUT_S", str(DEFAULT_TIMEOUT_S))),
     )
