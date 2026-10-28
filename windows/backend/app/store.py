@@ -32,6 +32,7 @@ class Job:
     eta_seconds: float = 0.0
     error: str | None = None
     created_at: float = field(default_factory=time.time)
+    finished_at: float | None = None
 
 
 class _BoundedStore:
@@ -52,6 +53,10 @@ class _BoundedStore:
             return None
         self._items.move_to_end(key)
         return self._items[key]
+
+    def latest(self, count: int) -> list[Any]:
+        """Los más recientes primero (el OrderedDict crece hacia el final)."""
+        return list(reversed(self._items.values()))[:count]
 
 
 class SketchStore(_BoundedStore):

@@ -11,6 +11,7 @@ Contrato que consume el frontend React (`windows/frontend`):
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import sys
@@ -23,7 +24,7 @@ import cv2
 if str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import FastAPI, Header, HTTPException  # noqa: E402
+from fastapi import Body, FastAPI, Header, HTTPException, Query, Response  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 from starlette.concurrency import run_in_threadpool  # noqa: E402
@@ -45,7 +46,16 @@ from app.admin_ops import (  # noqa: E402
     token_ok,
 )
 from app.robot import busy  # noqa: E402
-from app.robot.client import Segment, Trajectory, robot_from_env  # noqa: E402
+from app.robot.booth import (  # noqa: E402
+    BoothError,
+    apply_booth,
+    booth_from_client,
+    client_from_booth,
+    load_booth,
+    parse_booth,
+    write_booth,
+)
+from app.robot.client import MockRobotClient, Segment, Trajectory, configure_logging, robot_from_env  # noqa: E402
 from app.store import Job, JobStore, Sketch, SketchStore  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -84,10 +94,23 @@ app.add_middleware(
 )
 
 renderer = PortraitRenderer(MODELS_DIR)
+configure_logging()
 robot = robot_from_env()
+try:
+    _saved_booth = load_booth()
+except BoothError:
+    logging.getLogger("robot").exception("robot.json ignorado; sigo con .env")
+    _saved_booth = None
+if _saved_booth:
+    try:
+        robot = client_from_booth(_saved_booth)
+    except BoothError:
+        logging.getLogger("robot").exception("robot.json ignorado; sigo con .env")
 robot_log = logging.getLogger("robot")
 sketches = SketchStore()
 jobs = JobStore()
+# Contadores desde el arranque (el JobStore es LRU y olvida; esto no).
+activity_totals = {"done": 0, "error": 0}
 
 
 class SketchParams(BaseModel):
@@ -352,10 +375,12 @@ async def create_job(payload: JobRequest) -> dict:
             job.status = "done"
             job.progress = 1.0
             job.eta_seconds = 0.0
+            activity_totals["done"] += 1
             robot_log.info("%s: terminado en %.1f s", job.id, time.monotonic() - started)
         except Exception as exc:  # noqa: BLE001
             job.status = "error"
             job.error = str(exc)
+            activity_totals["error"] += 1
             robot_log.exception(
                 "%s: fallo al %.1f%% tras %.1f s",
                 job.id,
@@ -363,6 +388,7 @@ async def create_job(payload: JobRequest) -> dict:
                 time.monotonic() - started,
             )
         finally:
+            job.finished_at = time.time()
             busy.leave()
 
     asyncio.create_task(run())
@@ -431,17 +457,7 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
         "backend": robot.name,
         "busy": busy.active(),
         "connected": False,
-        "frame": {
-            "host": getattr(robot, "host", ""),
-            "origin_x": getattr(robot, "origin_x", None),
-            "origin_y": getattr(robot, "origin_y", None),
-            "z_draw": getattr(robot, "z_draw", None),
-            "z_travel": getattr(robot, "z_travel", None),
-            "r": getattr(robot, "r", None),
-            "r_far": getattr(robot, "r_far", None),
-            "far_x": getattr(robot, "far_x", None),
-            "far_y": getattr(robot, "far_y", None),
-        },
+        "frame": booth_from_client(robot),
     }
     if robot.name != "mg400":
         snapshot["detail"] = "el backend está en simulador"
@@ -470,6 +486,33 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
     return snapshot
 
 
+@app.post("/api/admin/settings")
+def admin_settings(
+    body: dict = Body(...),
+    x_admin_token: str | None = Header(default=None),
+) -> dict:
+    """Guarda la hoja, las alturas y la IP. El `.env` deja de mandar en el próximo arranque."""
+    global robot
+    _require_admin(x_admin_token)
+    if busy.active():
+        raise HTTPException(status_code=409, detail="el robot está dibujando")
+    try:
+        booth = parse_booth(body)
+    except BoothError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if booth.backend == "mock":
+        robot = MockRobotClient()
+    elif getattr(robot, "name", "") == "mg400":
+        apply_booth(robot, booth)  # type: ignore[arg-type]
+    else:
+        robot = client_from_booth(booth.as_dict())
+    try:
+        write_booth(booth)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="no se pudo guardar la cabina") from exc
+    return booth.as_dict()
+
+
 @app.post("/api/admin/command")
 async def admin_command(
     body: AdminCommand,
@@ -493,6 +536,59 @@ async def admin_command(
     if code != 0:
         raise HTTPException(status_code=502, detail=f"{command} devolvio {code} {value}".strip())
     return {"command": command, "code": code, "value": value}
+
+
+@app.get("/api/admin/activity")
+def admin_activity(x_admin_token: str | None = Header(default=None)) -> dict:
+    """Dibujos recientes, contadores del arranque y proveedor de IA, para la página admin."""
+    _require_admin(x_admin_token)
+    settings = providers.load_settings()
+    return {
+        "jobs": [
+            {
+                "job_id": job.id,
+                "sketch_id": job.sketch_id,
+                "status": job.status,
+                "progress": round(job.progress, 3),
+                "error": job.error,
+                "created_at": job.created_at,
+                "finished_at": job.finished_at,
+            }
+            for job in jobs.latest(20)
+        ],
+        "totals": dict(activity_totals),
+        "provider": {
+            "configured": settings.provider,
+            "model": settings.model,
+            "fallback_model": settings.fallback_model,
+            "available": providers.available_providers(settings),
+        },
+    }
+
+
+@app.get("/api/admin/sketches/{sketch_id}/preview")
+def admin_sketch_preview(
+    sketch_id: str,
+    token: str = Query(default=""),
+    x_admin_token: str | None = Header(default=None),
+) -> Response:
+    """Miniatura del boceto para la lista de actividad.
+
+    El `<img>` del panel no puede mandar `X-Admin-Token`, así que aquí el
+    token también vale como query param.
+    """
+    _require_admin(x_admin_token or token)
+    sketch = sketches.get(sketch_id)
+    if sketch is None:
+        raise HTTPException(status_code=404, detail="boceto no encontrado")
+    _, _, data = sketch.preview.partition(",")
+    if not data:
+        raise HTTPException(status_code=404, detail="el boceto no tiene imagen")
+    try:
+        payload = base64.b64decode(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="la imagen del boceto está corrupta") from exc
+    return Response(content=payload, media_type="image/png")
 
 
 def _numbers(value: str) -> list[float]:
