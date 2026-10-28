@@ -244,7 +244,6 @@ def lab_portrait_lines(
     ink_span: float | None = None,
     speck_area: int = SPECK_AREA,
     stages: dict | None = None,
-    faceparse=None,
 ) -> tuple[np.ndarray, np.ndarray, dict]:
     """Boceto del laboratorio sobre el recorte ya puesto en blanco.
 
@@ -265,7 +264,6 @@ def lab_portrait_lines(
     landmark_map = None
     faded = False
     zoned = False
-    parsed = False
     small_eyes = False
 
     if landmarks_px is not None and landmarker is not None:
@@ -317,26 +315,6 @@ def lab_portrait_lines(
                 pass
         except Exception:
             landmark_map = None
-
-        if faceparse is not None:
-            # Base estilo mariposa: bordes ENTRE regiones (0/1, ya limpios).
-            # El XDoG solo sobrevive adentro del pelo (hebras); los rasgos
-            # MediaPipe se conservan (pupilas, parpados). El bloque de
-            # zonificado de abajo respeta las lineas fuertes tal cual.
-            try:
-                from .faceparse import HAIR_GROUP, boundaries
-
-                grouped = faceparse.parse(crop)
-                if grouped is not None:
-                    base = 1.0 - boundaries(grouped).astype(np.float32) / 255.0
-                    hair = (grouped == HAIR_GROUP).astype(np.float32)
-                    hair = cv2.dilate(hair, np.ones((5, 5), np.uint8))
-                    strand = lines * hair
-                    keep = landmark_map if landmark_map is not None else 0.0
-                    lines = np.maximum(np.maximum(base, strand), keep)
-                    parsed = True
-            except Exception:
-                parsed = False
 
         try:
             from .landmarks import CHIN, LEFT_EYE_OUTER, RIGHT_EYE_OUTER
@@ -416,7 +394,6 @@ def lab_portrait_lines(
         "glasses_ratio": round(float(ratio), 3),
         "fade": faded,
         "zoned": zoned,
-        "parsed": parsed,
     }
 
 
