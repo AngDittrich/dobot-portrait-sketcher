@@ -14,6 +14,7 @@ de DobotStudio contesta `-1` a todo aunque el socket conecte.
 from __future__ import annotations
 
 import logging
+import re
 import socket
 import time
 from dataclasses import dataclass
@@ -27,6 +28,9 @@ MOVE_PORT = 30003
 SILENCE_S = 0.12
 # RobotMode() devuelve 5 cuando el robot está habilitado, 4 deshabilitado, 9 error.
 MODE_ENABLED = 5
+# El controlador rechaza la orden con este código cuando su cola de movimiento
+# está llena. Es "espera", no un fallo: hay que reenviarla, no soltar el socket.
+QUEUE_FULL_CODE = -30000
 
 
 class MG400Error(RuntimeError):
@@ -52,7 +56,14 @@ def _parse(raw: str) -> Reply:
     try:
         code = int(head)
     except ValueError:
-        code = -99999
+        # El controlador también contesta códigos negativos pegados al eco de la
+        # orden, sin coma: `-30000MovL(...);`. Si se descarta ese número, el
+        # error real (cola llena) se confunde con un socket mudo (-99999).
+        digits = re.match(r"(-?\d+)", raw)
+        if digits is None:
+            return Reply(code=-99999, value=rest)
+        code = int(digits.group(1))
+        rest = raw[len(digits.group(1)) :]
     value = rest
     if value.startswith("{"):
         end = value.rfind("}")

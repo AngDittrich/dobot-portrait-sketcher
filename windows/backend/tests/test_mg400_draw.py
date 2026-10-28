@@ -40,8 +40,10 @@ class EnlaceFalso:
 
 
 def _cliente(enlace: EnlaceFalso) -> MG400Client:
-    return MG400Client(
+    return MG400Client(pace_lead_s=0.0, 
         link=enlace,
+        min_step_mm=0.0,
+        wait_arrival=False,
         host="192.168.10.55",
         user=1,
         tool=2,
@@ -106,14 +108,16 @@ def test_baja_sobre_el_trazo_y_viaja_en_alto():
         if _xyz(anterior)[2] != _xyz(orden)[2]:
             assert "CP=1" in orden
     assert all(",12.000," in orden for orden in movimientos)
-    assert enlace.moves[-1] == "Sync()"
+    assert not any("Sync()" in move for move in enlace.moves)
 
 
 def test_un_punto_en_cero_no_se_manda_como_cero():
     """Y=0 parte la hoja (92 mm bajo el origen). El controlador marca error si el blanco es 0."""
     enlace = EnlaceFalso()
-    cliente = MG400Client(
+    cliente = MG400Client(pace_lead_s=0.0, 
         link=enlace,
+        min_step_mm=0.0,
+        wait_arrival=False,
         z_draw=-167.0,
         z_travel=-160.0,
         r=145.0,
@@ -146,8 +150,10 @@ def test_un_punto_en_cero_no_se_manda_como_cero():
 def test_las_esquinas_medidas_caen_en_el_papel():
     """Superior izquierda (360, 92) y, 142 x 237 mm despues, inferior derecha (218, -145)."""
     enlace = EnlaceFalso()
-    cliente = MG400Client(
+    cliente = MG400Client(pace_lead_s=0.0, 
         link=enlace,
+        min_step_mm=0.0,
+        wait_arrival=False,
         z_draw=-167.0,
         z_travel=-160.0,
         r=145.0,
@@ -176,8 +182,10 @@ def test_las_esquinas_medidas_caen_en_el_papel():
 
 def test_el_giro_llega_a_96_en_la_esquina_lejana():
     enlace = EnlaceFalso()
-    cliente = MG400Client(
+    cliente = MG400Client(pace_lead_s=0.0, 
         link=enlace,
+        min_step_mm=0.0,
+        wait_arrival=False,
         z_draw=-167.0,
         z_travel=-160.0,
         r=145.0,
@@ -233,7 +241,7 @@ class _EnlaceQueFalla:
 
 def test_un_fallo_suelta_el_socket_para_el_siguiente_dibujo():
     enlace = _EnlaceQueFalla()
-    cliente = MG400Client(link=enlace, z_draw=-167.0, z_travel=-160.0, r=145.0)
+    cliente = MG400Client(pace_lead_s=0.0, link=enlace, z_draw=-167.0, z_travel=-160.0, r=145.0)
     papel = Trajectory(
         segments=[Segment(type="draw", points=[[0.0, 0.0], [5.0, 0.0]])],
         width_mm=10.0,
@@ -267,7 +275,7 @@ class _EnlaceQueFallaConDiagnostico(_EnlaceQueFalla):
 
 def test_un_fallo_deja_el_diagnostico_en_el_log(caplog: pytest.LogCaptureFixture):
     enlace = _EnlaceQueFallaConDiagnostico()
-    cliente = MG400Client(link=enlace, z_draw=-167.0, z_travel=-160.0, r=145.0)
+    cliente = MG400Client(pace_lead_s=0.0, link=enlace, z_draw=-167.0, z_travel=-160.0, r=145.0)
     papel = Trajectory(
         segments=[Segment(type="draw", points=[[0.0, 0.0], [5.0, 0.0]])],
         width_mm=10.0,
@@ -312,7 +320,7 @@ def test_una_respuesta_lenta_avisa_pero_no_corta(
 
     with caplog.at_level("INFO", logger="robot"):
         asyncio.run(correr())
-    assert enlace.moves[-1] == "Sync()"
+    assert not any("Sync()" in move for move in enlace.moves)
     assert "tardo" in caplog.text
 
 
@@ -396,7 +404,7 @@ def test_el_modo_seco_no_abre_el_socket(monkeypatch: pytest.MonkeyPatch):
         raise AssertionError("el modo seco no abre socket")
 
     monkeypatch.setattr("app.robot.mg400.MG400Link", no_conectar)
-    cliente = MG400Client(dry_run=True, host="192.168.10.55", z_draw=1.0, z_travel=6.0, r=0.0)
+    cliente = MG400Client(pace_lead_s=0.0, dry_run=True, host="192.168.10.55", z_draw=1.0, z_travel=6.0, r=0.0)
 
     async def correr() -> None:
         await cliente.connect()
@@ -415,7 +423,7 @@ def test_el_modo_seco_no_abre_el_socket(monkeypatch: pytest.MonkeyPatch):
 
     asyncio.run(correr())
     assert any(orden.startswith("MovL") for orden in cliente.commands)
-    assert cliente.commands[-1] == "Sync()"
+    assert not any("Sync()" in orden for orden in cliente.commands)
 
 
 def test_la_ip_por_defecto_es_la_del_robot(monkeypatch: pytest.MonkeyPatch):
