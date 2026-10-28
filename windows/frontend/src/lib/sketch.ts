@@ -20,6 +20,35 @@ const BLUR_RADIUS = 6
 const GRAPHITE = { r: 30, g: 41, b: 59 } // --slate-800
 const PAPER = { r: 250, g: 250, b: 249 }
 
+/** Trazo del boceto: los mismos puntos, en px del recorte, que lleva el robot. */
+export interface SketchStroke {
+  points: [number, number][]
+}
+
+/** Lo que necesita la cabina: la imagen y los trazos que la forman. */
+export interface SketchDetail {
+  image: string
+  strokes: SketchStroke[]
+}
+
+/**
+ * Boceto del backend, con sus trazos. Si el backend no responde se cae al
+ * sketch local, que no trae trazos (la cabina lo muestra como imagen fija).
+ */
+export async function generateSketchDetail(
+  photoDataUrl: string,
+  traits: string[] = [],
+  style = 'caricatura',
+): Promise<SketchDetail> {
+  try {
+    const result = await postSketch(photoDataUrl, traits, style)
+    return { image: result.image, strokes: result.strokes ?? [] }
+  } catch (error) {
+    console.warn('El backend no respondió; se usa el sketch local.', error)
+    return { image: await generateSketchLocal(photoDataUrl), strokes: [] }
+  }
+}
+
 /**
  * Boceto del backend. Si el backend no responde se cae al sketch local,
  * para que la demo siga viva sin el servidor levantado.
@@ -29,13 +58,7 @@ export async function generateSketch(
   traits: string[] = [],
   style = 'caricatura',
 ): Promise<string> {
-  try {
-    const result = await postSketch(photoDataUrl, traits, style)
-    return result.image
-  } catch (error) {
-    console.warn('El backend no respondió; se usa el sketch local.', error)
-    return generateSketchLocal(photoDataUrl)
-  }
+  return (await generateSketchDetail(photoDataUrl, traits, style)).image
 }
 
 /** Versión 100 % local en el navegador (canvas). */

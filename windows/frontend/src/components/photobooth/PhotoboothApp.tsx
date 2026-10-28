@@ -205,7 +205,9 @@ export function PhotoboothApp() {
             </motion.div>
           )}
 
-          {booth.status === 'drawing' && <DrawingScreen key="drawing" job={booth.robotJob} />}
+          {booth.status === 'drawing' && (
+            <DrawingScreen key="drawing" job={booth.robotJob} sketch={booth.sketch} strokes={booth.strokes} />
+          )}
           {booth.status === 'thanks' && <ThanksScreen key="thanks" />}
           {booth.status === 'robotError' && <RobotErrorScreen key="robot-error" />}
         </AnimatePresence>

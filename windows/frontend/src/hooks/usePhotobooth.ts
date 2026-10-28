@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import type Webcam from 'react-webcam'
 import { getJob, getLastSketchId, postJob } from '../lib/api'
-import { generateSketch } from '../lib/sketch'
+import { generateSketchDetail, type SketchDetail, type SketchStroke } from '../lib/sketch'
 import { EMPTY_TRAITS, selectedTraitIds, toggleTrait } from '../lib/traits'
 import type { TraitGroup, TraitSelection } from '../lib/traits'
 import { DEFAULT_STYLE, isDrawingStyle } from '../lib/drawingStyles'
@@ -54,6 +54,8 @@ interface PhotoboothState {
   traits: TraitSelection
   styleId: DrawingStyleId
   sketch: string | null
+  /** Trazos del boceto, para ir pintándolos mientras el robot dibuja. */
+  strokes: SketchStroke[]
   /** Progreso 0..1 del reveal (iris + transformación a sketch). */
   progress: number
   toast: ToastData | null
@@ -72,7 +74,7 @@ type Action =
   | { type: 'STYLE'; id: DrawingStyleId }
   | { type: 'CONTINUE' }
   | { type: 'PROGRESS'; value: number }
-  | { type: 'REVEALED'; sketch: string }
+  | { type: 'REVEALED'; sketch: string; strokes: SketchStroke[] }
   | { type: 'DRAW' }
   | { type: 'ROBOT_FAILED' }
   | { type: 'THANKS' }
@@ -122,6 +124,7 @@ const initialState: PhotoboothState = {
   traits: EMPTY_TRAITS,
   styleId: DEFAULT_STYLE,
   sketch: null,
+  strokes: [],
   progress: 0,
   toast: null,
   celebrationId: 0,
@@ -155,6 +158,7 @@ function reducer(state: PhotoboothState, action: Action): PhotoboothState {
         traits: EMPTY_TRAITS,
         styleId: DEFAULT_STYLE,
         sketch: null,
+        strokes: [],
         progress: 0,
       }
     case 'REVIEW':
@@ -172,11 +176,11 @@ function reducer(state: PhotoboothState, action: Action): PhotoboothState {
       return { ...state, styleId: action.id }
     case 'CONTINUE':
       if (state.status !== 'style') return state
-      return { ...state, status: 'reveal', sketch: null, progress: 0 }
+      return { ...state, status: 'reveal', sketch: null, strokes: [], progress: 0 }
     case 'PROGRESS':
       return { ...state, progress: action.value }
     case 'REVEALED':
-      return { ...state, status: 'confirm', sketch: action.sketch, progress: 1 }
+      return { ...state, status: 'confirm', sketch: action.sketch, strokes: action.strokes, progress: 1 }
     case 'DRAW':
       if (state.status !== 'confirm' && state.status !== 'robotError') return state
       return { ...state, status: 'drawing' }
@@ -250,19 +254,19 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     if (state.status !== 'reveal' || !state.photo) return
 
     let cancelled = false
-    let sketchResult: string | null = null
+    let sketchResult: SketchDetail | null = null
     let sketchReady = false
     let progressDone = false
 
     const maybeFinish = () => {
       if (!cancelled && sketchReady && progressDone && sketchResult) {
-        dispatch({ type: 'REVEALED', sketch: sketchResult })
+        dispatch({ type: 'REVEALED', sketch: sketchResult.image, strokes: sketchResult.strokes })
       }
     }
 
     // La IA corre aquí, ya con la foto aceptada y los rasgos. Si el backend
-    // no está, generateSketch dibuja en local.
-    generateSketch(state.photo, selectedTraitIds(state.traits), state.styleId)
+    // no está, generateSketchDetail dibuja en local (sin trazos).
+    generateSketchDetail(state.photo, selectedTraitIds(state.traits), state.styleId)
       .then((sketch) => {
         sketchResult = sketch
         sketchReady = true

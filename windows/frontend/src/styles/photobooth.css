@@ -2069,3 +2069,70 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Hoja que se va dibujando mientras el robot trabaja                  */
+/* ------------------------------------------------------------------ */
+
+.booth-scene--drawing {
+  width: min(1180px, 100%);
+}
+
+.booth-sheet {
+  position: relative;
+  height: min(64vh, 620px);
+  aspect-ratio: 3 / 4;
+  flex: 0 0 auto;
+  border-radius: 0.35rem;
+  background: #fbfaf7;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.16),
+    0 28px 60px -22px rgba(2, 6, 23, 0.55);
+  overflow: hidden;
+}
+
+/* La luz entra por arriba a la izquierda, como el foco de la cabina. */
+.booth-sheet::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.85), rgba(226, 232, 240, 0.28));
+  pointer-events: none;
+}
+
+.booth-sheet-edge {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
+  pointer-events: none;
+}
+
+.booth-sheet-canvas,
+.booth-sheet-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.booth-sheet-image {
+  object-fit: contain;
+}
+
+.booth-scene-copy--drawing {
+  align-items: center;
+  text-align: center;
+  max-width: 24rem;
+}
+
+.booth-robot--drawing {
+  max-height: min(38vh, 340px);
+  max-width: min(100%, 320px);
+  margin-bottom: -0.5rem;
+}
+
+@media (max-width: 860px) {
+  .booth-sheet {
+    height: min(52vh, 460px);
+  }
+}
