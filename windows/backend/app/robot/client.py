@@ -137,6 +137,8 @@ class MG400Client(RobotClient):
         speed_factor: int = 20,
         origin_x: float = 0.0,
         origin_y: float = 0.0,
+        x_sign: int = -1,
+        y_sign: int = -1,
         dry_run: bool = False,
         cp_draw: int = 0,
     ) -> None:
@@ -151,6 +153,8 @@ class MG400Client(RobotClient):
         self.speed_travel = min(100, max(1, speed_factor * 2))
         self.origin_x = origin_x
         self.origin_y = origin_y
+        self.x_sign = _axis_sign(x_sign, "ROBOT_X_SIGN")
+        self.y_sign = _axis_sign(y_sign, "ROBOT_Y_SIGN")
         self.dry_run = dry_run
         self.cp_draw = cp_draw
         self.commands: list[str] = []
@@ -189,6 +193,8 @@ class MG400Client(RobotClient):
             speed_factor=optional_int("ROBOT_SPEED_FACTOR", 20),
             origin_x=optional_float("ROBOT_ORIGIN_X", 0.0),
             origin_y=optional_float("ROBOT_ORIGIN_Y", 0.0),
+            x_sign=optional_int("ROBOT_X_SIGN", -1),
+            y_sign=optional_int("ROBOT_Y_SIGN", -1),
             dry_run=dry_run,
             cp_draw=optional_int("ROBOT_CP_DRAW", 0),
         )
@@ -217,7 +223,6 @@ class MG400Client(RobotClient):
         pen_down = False
         held: list[float] | None = None
         last = Segment(type="travel")
-        height = trajectory.height_mm
 
         for segment in trajectory.segments:
             points = segment.points
@@ -225,14 +230,14 @@ class MG400Client(RobotClient):
                 continue
             last = segment
             if segment.type == "travel":
-                pen_down, held = await self._travel(points, held, pen_down, height)
+                pen_down, held = await self._travel(points, held, pen_down)
             else:
-                pen_down, held = await self._draw_segment(points, held, pen_down, height)
+                pen_down, held = await self._draw_segment(points, held, pen_down)
             done += segment.length
             await on_progress(min(1.0, done / total), segment)
 
         if pen_down and held is not None:
-            await self._goto(held[0], held[1], self.z_travel, height, self.speed_factor, 0)
+            await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
         await self._sync()
         await on_progress(1.0, last)
 
@@ -241,20 +246,19 @@ class MG400Client(RobotClient):
         points: list[list[float]],
         held: list[float] | None,
         pen_down: bool,
-        height: float,
     ) -> tuple[bool, list[float]]:
         start = points[0]
         if pen_down and held is not None and not _near(held, start):
-            await self._goto(held[0], held[1], self.z_travel, height, self.speed_factor, 0)
+            await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
             pen_down = False
         if held is None or not _near(held, start):
-            await self._goto(start[0], start[1], self.z_travel, height, self.speed_travel, 0)
+            await self._goto(start[0], start[1], self.z_travel,  self.speed_travel, 0)
             held = start
         if not pen_down:
-            await self._goto(start[0], start[1], self.z_draw, height, self.speed_factor, 0)
+            await self._goto(start[0], start[1], self.z_draw,  self.speed_factor, 0)
             pen_down = True
         for point in points[1:]:
-            await self._goto(point[0], point[1], self.z_draw, height, self.speed_factor, self.cp_draw)
+            await self._goto(point[0], point[1], self.z_draw,  self.speed_factor, self.cp_draw)
             held = point
         return pen_down, held if held is not None else start
 
@@ -263,15 +267,14 @@ class MG400Client(RobotClient):
         points: list[list[float]],
         held: list[float] | None,
         pen_down: bool,
-        height: float,
     ) -> tuple[bool, list[float]]:
         if pen_down and held is not None:
-            await self._goto(held[0], held[1], self.z_travel, height, self.speed_factor, 0)
+            await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
             pen_down = False
         for point in points:
             if held is not None and _near(held, point):
                 continue
-            await self._goto(point[0], point[1], self.z_travel, height, self.speed_travel, 0)
+            await self._goto(point[0], point[1], self.z_travel,  self.speed_travel, 0)
             held = point
         return pen_down, held if held is not None else points[-1]
 
@@ -280,12 +283,11 @@ class MG400Client(RobotClient):
         x: float,
         y: float,
         z: float,
-        height: float,
         speed: int,
         cp: int,
     ) -> None:
-        robot_x = x + self.origin_x
-        robot_y = (height - y) + self.origin_y
+        robot_x = self.origin_x + self.x_sign * x
+        robot_y = self.origin_y + self.y_sign * y
         command = (
             f"MovL({robot_x:.3f},{robot_y:.3f},{z:.3f},{self.r:.3f},"
             f"SpeedL={int(speed)},AccL={int(speed)},CP={int(cp)})"
@@ -334,6 +336,14 @@ class MG400Client(RobotClient):
 
 def _near(left: list[float], right: list[float], tolerance: float = 0.05) -> bool:
     return ((left[0] - right[0]) ** 2 + (left[1] - right[1]) ** 2) ** 0.5 <= tolerance
+
+
+def _axis_sign(value: int, name: str) -> int:
+    from app.robot.mg400 import MG400Error
+
+    if value not in (-1, 1):
+        raise MG400Error(f"{name} tiene que ser 1 o -1")
+    return value
 
 
 def _dotenv() -> dict[str, str]:

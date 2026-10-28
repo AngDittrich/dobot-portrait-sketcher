@@ -50,7 +50,9 @@ def _cliente(enlace: EnlaceFalso) -> MG400Client:
         r=12.0,
         speed_factor=20,
         origin_x=100.0,
-        origin_y=200.0,
+        origin_y=240.0,
+        x_sign=1,
+        y_sign=-1,
     )
 
 
@@ -105,6 +107,37 @@ def test_baja_sobre_el_trazo_y_viaja_en_alto():
             assert "CP=0" in orden
     assert all(",12.000," in orden for orden in movimientos)
     assert enlace.moves[-1] == "Sync()"
+
+
+def test_las_esquinas_medidas_caen_en_el_papel():
+    """Superior izquierda (360, 92) y, 142 x 237 mm despues, inferior derecha (218, -145)."""
+    enlace = EnlaceFalso()
+    cliente = MG400Client(
+        link=enlace,
+        z_draw=-167.0,
+        z_travel=-160.0,
+        r=145.0,
+        origin_x=360.0,
+        origin_y=92.0,
+    )
+    papel = Trajectory(
+        segments=[Segment(type="draw", points=[[0.0, 0.0], [142.0, 237.0]])],
+        width_mm=142.0,
+        height_mm=237.0,
+    )
+
+    async def correr() -> None:
+        async def progreso(_valor: float, _segmento: Segment) -> None:
+            return None
+
+        await cliente.draw(papel, progreso)
+
+    asyncio.run(correr())
+    movimientos = [orden for orden in enlace.moves if orden.startswith("MovL")]
+    assert _xyz(movimientos[0]) == (360.0, 92.0, -160.0)
+    assert _xyz(movimientos[1]) == (360.0, 92.0, -167.0)
+    assert _xyz(movimientos[2]) == (218.0, -145.0, -167.0)
+    assert ",145.000," in movimientos[2]
 
 
 def test_rechaza_un_punto_fuera_del_papel_sin_mover():
@@ -168,12 +201,14 @@ def test_la_ip_por_defecto_es_la_del_robot(monkeypatch: pytest.MonkeyPatch):
 def test_sin_alturas_no_arma_el_cliente_real(monkeypatch: pytest.MonkeyPatch):
     for name in ("ROBOT_HOST", "ROBOT_Z_DRAW", "ROBOT_Z_TRAVEL", "ROBOT_DRY_RUN"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("app.robot.client._dotenv", lambda: {})
     with pytest.raises(MG400Error):
         MG400Client.from_env()
 
 
 def test_sin_backend_sigue_el_simulador(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("ROBOT_BACKEND", raising=False)
+    monkeypatch.setattr("app.robot.client._dotenv", lambda: {})
     from app.robot.client import robot_from_env
 
     assert robot_from_env().name == "mock"
