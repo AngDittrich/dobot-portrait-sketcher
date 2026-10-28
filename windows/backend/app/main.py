@@ -11,6 +11,7 @@ Contrato que consume el frontend React (`windows/frontend`):
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import sys
@@ -23,7 +24,7 @@ import cv2
 if str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import Body, FastAPI, Header, HTTPException  # noqa: E402
+from fastapi import Body, FastAPI, Header, HTTPException, Query, Response  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 from starlette.concurrency import run_in_threadpool  # noqa: E402
@@ -108,6 +109,8 @@ if _saved_booth:
 robot_log = logging.getLogger("robot")
 sketches = SketchStore()
 jobs = JobStore()
+# Contadores desde el arranque (el JobStore es LRU y olvida; esto no).
+activity_totals = {"done": 0, "error": 0}
 
 
 class SketchParams(BaseModel):
@@ -372,10 +375,12 @@ async def create_job(payload: JobRequest) -> dict:
             job.status = "done"
             job.progress = 1.0
             job.eta_seconds = 0.0
+            activity_totals["done"] += 1
             robot_log.info("%s: terminado en %.1f s", job.id, time.monotonic() - started)
         except Exception as exc:  # noqa: BLE001
             job.status = "error"
             job.error = str(exc)
+            activity_totals["error"] += 1
             robot_log.exception(
                 "%s: fallo al %.1f%% tras %.1f s",
                 job.id,
@@ -383,6 +388,7 @@ async def create_job(payload: JobRequest) -> dict:
                 time.monotonic() - started,
             )
         finally:
+            job.finished_at = time.time()
             busy.leave()
 
     asyncio.create_task(run())
@@ -530,6 +536,59 @@ async def admin_command(
     if code != 0:
         raise HTTPException(status_code=502, detail=f"{command} devolvio {code} {value}".strip())
     return {"command": command, "code": code, "value": value}
+
+
+@app.get("/api/admin/activity")
+def admin_activity(x_admin_token: str | None = Header(default=None)) -> dict:
+    """Dibujos recientes, contadores del arranque y proveedor de IA, para la página admin."""
+    _require_admin(x_admin_token)
+    settings = providers.load_settings()
+    return {
+        "jobs": [
+            {
+                "job_id": job.id,
+                "sketch_id": job.sketch_id,
+                "status": job.status,
+                "progress": round(job.progress, 3),
+                "error": job.error,
+                "created_at": job.created_at,
+                "finished_at": job.finished_at,
+            }
+            for job in jobs.latest(20)
+        ],
+        "totals": dict(activity_totals),
+        "provider": {
+            "configured": settings.provider,
+            "model": settings.model,
+            "fallback_model": settings.fallback_model,
+            "available": providers.available_providers(settings),
+        },
+    }
+
+
+@app.get("/api/admin/sketches/{sketch_id}/preview")
+def admin_sketch_preview(
+    sketch_id: str,
+    token: str = Query(default=""),
+    x_admin_token: str | None = Header(default=None),
+) -> Response:
+    """Miniatura del boceto para la lista de actividad.
+
+    El `<img>` del panel no puede mandar `X-Admin-Token`, así que aquí el
+    token también vale como query param.
+    """
+    _require_admin(x_admin_token or token)
+    sketch = sketches.get(sketch_id)
+    if sketch is None:
+        raise HTTPException(status_code=404, detail="boceto no encontrado")
+    _, _, data = sketch.preview.partition(",")
+    if not data:
+        raise HTTPException(status_code=404, detail="el boceto no tiene imagen")
+    try:
+        payload = base64.b64decode(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="la imagen del boceto está corrupta") from exc
+    return Response(content=payload, media_type="image/png")
 
 
 def _numbers(value: str) -> list[float]:
