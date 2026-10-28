@@ -166,3 +166,35 @@ export function adminCommand(
     body: JSON.stringify(command),
   })
 }
+
+export interface AdminActivityJob {
+  job_id: string
+  sketch_id: string
+  status: 'queued' | 'drawing' | 'done' | 'error'
+  progress: number
+  error: string | null
+  /** Segundos Unix; `finished_at` es null mientras sigue dibujando. */
+  created_at: number
+  finished_at: number | null
+}
+
+export interface AdminActivity {
+  jobs: AdminActivityJob[]
+  totals: { done: number; error: number }
+  provider: {
+    configured: string
+    model: string
+    fallback_model: string
+    available: Record<string, boolean>
+  }
+}
+
+/** Dibujos recientes, contadores y proveedor de IA (sección Actividad). */
+export function adminActivity(token: string): Promise<AdminActivity> {
+  return request<AdminActivity>('/api/admin/activity', { headers: adminHeaders(token) })
+}
+
+/** Las `<img>` no mandan headers: el token viaja en la query para la miniatura. */
+export function adminSketchPreviewUrl(sketchId: string, token: string): string {
+  return `${API_BASE}/api/admin/sketches/${encodeURIComponent(sketchId)}/preview?token=${encodeURIComponent(token)}`
+}
