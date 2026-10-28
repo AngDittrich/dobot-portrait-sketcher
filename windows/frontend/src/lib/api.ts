@@ -94,7 +94,7 @@ export interface AdminStatus {
   angles?: number[]
   alarms?: string
   alarm_text?: string
-  frame?: Record<string, number | string | null>
+  frame?: Record<string, number | string | boolean | null>
 }
 
 export interface AdminCommand {
@@ -128,6 +128,34 @@ export function adminStatus(token: string): Promise<AdminStatus> {
   return request<AdminStatus>('/api/admin/status', { headers: adminHeaders(token) })
 }
 
+export interface BoothSettings {
+  backend: string
+  host: string
+  dry_run: boolean
+  user: number
+  tool: number
+  z_draw: number
+  z_travel: number
+  r: number
+  r_far: number
+  far_x: number
+  far_y: number
+  speed_factor: number
+  origin_x: number
+  origin_y: number
+  x_sign: number
+  y_sign: number
+  cp_draw: number
+}
+
+export function saveAdminBooth(token: string, booth: BoothSettings): Promise<BoothSettings> {
+  return request<BoothSettings>('/api/admin/settings', {
+    method: 'POST',
+    headers: adminHeaders(token),
+    body: JSON.stringify(booth),
+  })
+}
+
 export function adminCommand(
   token: string,
   command: AdminCommand,
@@ -137,4 +165,36 @@ export function adminCommand(
     headers: adminHeaders(token),
     body: JSON.stringify(command),
   })
+}
+
+export interface AdminActivityJob {
+  job_id: string
+  sketch_id: string
+  status: 'queued' | 'drawing' | 'done' | 'error'
+  progress: number
+  error: string | null
+  /** Segundos Unix; `finished_at` es null mientras sigue dibujando. */
+  created_at: number
+  finished_at: number | null
+}
+
+export interface AdminActivity {
+  jobs: AdminActivityJob[]
+  totals: { done: number; error: number }
+  provider: {
+    configured: string
+    model: string
+    fallback_model: string
+    available: Record<string, boolean>
+  }
+}
+
+/** Dibujos recientes, contadores y proveedor de IA (sección Actividad). */
+export function adminActivity(token: string): Promise<AdminActivity> {
+  return request<AdminActivity>('/api/admin/activity', { headers: adminHeaders(token) })
+}
+
+/** Las `<img>` no mandan headers: el token viaja en la query para la miniatura. */
+export function adminSketchPreviewUrl(sketchId: string, token: string): string {
+  return `${API_BASE}/api/admin/sketches/${encodeURIComponent(sketchId)}/preview?token=${encodeURIComponent(token)}`
 }

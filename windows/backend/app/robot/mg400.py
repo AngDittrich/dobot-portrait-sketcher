@@ -206,9 +206,13 @@ class MG400Link:
         """
         mode = self.mode()
         logger.info("RobotMode() -> %s %r", mode, self.last_raw)
+        # En alarma (modo 9, límite de brazo) EnableRobot responde -1 al instante.
+        # Hay que limpiar antes de habilitar; si no, el dibujo se corta ahí.
         if mode != MODE_ENABLED:
+            self._step("ClearError()")
             self._step("EnableRobot()")
-        self._step("ClearError()")
+        else:
+            self._step("ClearError()")
         self._step("Continue()")
         self._step(f"SpeedFactor({int(percent)})")
 
