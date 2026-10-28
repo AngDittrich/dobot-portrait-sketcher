@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import type { RobotJob } from '../../hooks/usePhotobooth'
 import type { SketchStroke } from '../../lib/sketch'
@@ -16,9 +17,27 @@ interface DrawingScreenProps {
   strokes: SketchStroke[]
 }
 
+function clock(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds))
+  const minutes = Math.floor(total / 60)
+  const rest = total % 60
+  return `${minutes}:${rest.toString().padStart(2, '0')}`
+}
+
 export function DrawingScreen({ job, sketch, strokes }: DrawingScreenProps) {
   const drawing = job === null || job.status === 'queued' || job.status === 'drawing'
   const progress = job === null ? null : job.progress
+
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    const started = performance.now()
+    const timer = window.setInterval(() => {
+      setElapsed((performance.now() - started) / 1000)
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const remaining = job ? job.etaSeconds - elapsed : null
 
   return (
     <motion.section
@@ -55,6 +74,13 @@ export function DrawingScreen({ job, sketch, strokes }: DrawingScreenProps) {
           {drawing ? 'El robot está dibujando tu imagen ahora' : 'Tu retrato está listo'}
         </h1>
         <RobotStatus job={job} />
+        <p className="booth-clock">
+          <span>{clock(elapsed)}</span>
+          {drawing && remaining !== null && remaining > 0 && (
+            <span className="booth-clock-rest">faltan ~{clock(remaining)}</span>
+          )}
+          {!drawing && <span className="booth-clock-rest">terminado en {clock(elapsed)}</span>}
+        </p>
       </div>
     </motion.section>
   )

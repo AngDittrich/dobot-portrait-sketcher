@@ -10,6 +10,10 @@ import type { SketchStroke } from '../../lib/sketch'
  * una simulación fiel, no un efecto. Mientras el backend reporta progreso
  * cada segundo, aquí se interpola con requestAnimationFrame para que la
  * línea avance continua y nunca retroceda.
+ *
+ * Entre un trazo y el siguiente la pluma se levanta y viaja: eso se dibuja
+ * como una línea punteada tenue con la punta en movimiento, para que se
+ * entienda lo mismo que hace el brazo.
  */
 
 interface SketchCanvasProps {
@@ -25,6 +29,16 @@ const EASE_MS = 420
 /** Segundos que tarda el dibujo simulado cuando no hay robot conectado. */
 const IDLE_SECONDS = 14
 
+interface Plan {
+  lengths: number[]
+  starts: number[]
+  total: number
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
 export function SketchCanvas({ strokes, progress }: SketchCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const shownRef = useRef(0)
@@ -35,7 +49,7 @@ export function SketchCanvas({ strokes, progress }: SketchCanvasProps) {
   }, [progress])
 
   /** Trazos con su longitud acumulada, medidos una sola vez. */
-  const plan = useMemo(() => {
+  const plan = useMemo<Plan>(() => {
     const lengths: number[] = []
     const starts: number[] = []
     let total = 0
@@ -54,9 +68,7 @@ export function SketchCanvas({ strokes, progress }: SketchCanvasProps) {
         if (y < minY) minY = y
         if (x > maxX) maxX = x
         if (y > maxY) maxY = y
-        if (i > 0) {
-          length += Math.hypot(x - points[i - 1][0], y - points[i - 1][1])
-        }
+        if (i > 0) length += Math.hypot(x - points[i - 1][0], y - points[i - 1][1])
       }
       lengths.push(length)
       total += length
@@ -97,10 +109,11 @@ export function SketchCanvas({ strokes, progress }: SketchCanvasProps) {
 
       const boxW = plan.maxX - plan.minX || 1
       const boxH = plan.maxY - plan.minY || 1
-      const pad = 14
+      const pad = 16
       const scale = Math.min((width - pad * 2) / boxW, (height - pad * 2) / boxH)
       const offsetX = (width - boxW * scale) / 2 - plan.minX * scale
       const offsetY = (height - boxH * scale) / 2 - plan.minY * scale
+      const place = (x: number, y: number): [number, number] => [x * scale + offsetX, y * scale + offsetY]
 
       ctx.strokeStyle = INK
       ctx.lineWidth = Math.max(1.6, 2.1 * scale * 0.35)
@@ -108,7 +121,8 @@ export function SketchCanvas({ strokes, progress }: SketchCanvasProps) {
       ctx.lineJoin = 'round'
 
       const goal = revealed * plan.total
-      let tip: [number, number] | null = null
+      let nib: [number, number] | null = null
+      let penDown = false
 
       for (let s = 0; s < strokes.length; s++) {
         const start = plan.starts[s]
@@ -118,8 +132,9 @@ export function SketchCanvas({ strokes, progress }: SketchCanvasProps) {
         const remaining = goal - start
 
         ctx.beginPath()
-        ctx.moveTo(points[0][0] * scale + offsetX, points[0][1] * scale + offsetY)
+        ctx.moveTo(...place(points[0][0], points[0][1]))
         let walked = 0
+        let cut = false
         for (let i = 1; i < points.length; i++) {
           const [x, y] = points[i]
           const [px, py] = points[i - 1]
@@ -129,26 +144,74 @@ export function SketchCanvas({ strokes, progress }: SketchCanvasProps) {
             const t = step > 0 ? (remaining - walked) / step : 0
             const cx = px + (x - px) * t
             const cy = py + (y - py) * t
-            ctx.lineTo(cx * scale + offsetX, cy * scale + offsetY)
-            tip = [cx * scale + offsetX, cy * scale + offsetY]
+            ctx.lineTo(...place(cx, cy))
+            nib = place(cx, cy)
+            penDown = true
+            cut = true
             break
           }
           walked += step
-          ctx.lineTo(x * scale + offsetX, y * scale + offsetY)
+          ctx.lineTo(...place(x, y))
         }
         ctx.stroke()
-        if (tip) break
+
+        if (cut) break
       }
 
-      // Punta de la pluma: apenas un punto de luz donde va la tinta.
-      if (tip && revealed < 1) {
+      if (nib === null && goal < plan.total) {
+        // En el hueco: la punta viaja del final de un trazo al inicio del otro.
+        let gapFrom = 0
+        let gapIndex = -1
+        for (let s = 0; s < strokes.length - 1; s++) {
+          const end = plan.starts[s] + plan.lengths[s]
+          if (goal >= end && goal < plan.starts[s + 1]) {
+            gapFrom = end
+            gapIndex = s
+            break
+          }
+        }
+        if (gapIndex >= 0) {
+          const from = strokes[gapIndex].points
+          const to = strokes[gapIndex + 1].points
+          if (from.length > 0 && to.length > 0) {
+            const a = place(from[from.length - 1][0], from[from.length - 1][1])
+            const b = place(to[0][0], to[0][1])
+            const gap = plan.starts[gapIndex + 1] - gapFrom
+            const t = gap > 0 ? Math.min(1, (goal - gapFrom) / gap) : 1
+
+            ctx.save()
+            ctx.setLineDash([3, 5])
+            ctx.lineWidth = 1
+            ctx.strokeStyle = 'rgba(30, 41, 59, 0.28)'
+            ctx.beginPath()
+            ctx.moveTo(a[0], a[1])
+            ctx.lineTo(b[0], b[1])
+            ctx.stroke()
+            ctx.restore()
+
+            nib = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+            penDown = false
+          }
+        }
+      }
+
+      // Punta de la pluma: punto lleno cuando escribe, anillo tenue cuando vuela.
+      if (nib && revealed < 1) {
         ctx.save()
-        ctx.shadowColor = 'rgba(30, 41, 59, 0.55)'
-        ctx.shadowBlur = 10
-        ctx.fillStyle = INK
-        ctx.beginPath()
-        ctx.arc(tip[0], tip[1], 2.2, 0, Math.PI * 2)
-        ctx.fill()
+        if (penDown) {
+          ctx.shadowColor = 'rgba(30, 41, 59, 0.55)'
+          ctx.shadowBlur = 10
+          ctx.fillStyle = INK
+          ctx.beginPath()
+          ctx.arc(nib[0], nib[1], 2.2, 0, Math.PI * 2)
+          ctx.fill()
+        } else {
+          ctx.strokeStyle = 'rgba(30, 41, 59, 0.4)'
+          ctx.lineWidth = 1.2
+          ctx.beginPath()
+          ctx.arc(nib[0], nib[1], 2.6, 0, Math.PI * 2)
+          ctx.stroke()
+        }
         ctx.restore()
       }
     }
