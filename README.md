@@ -121,7 +121,7 @@ Por defecto la API va al mismo origen. Para apuntar al PC del robot:
 | `ROBOT_BACKEND` | `mock` (no mueve nada) o `mg400`. |
 | `ROBOT_HOST` | IP del controlador (en la cabina, `192.168.10.55`). |
 | `ROBOT_Z_DRAW` / `ROBOT_Z_TRAVEL` | Altura con el plumón apoyado y levantado. **Se miden en la cabina.** |
-| `ROBOT_ORIGIN_X` / `ROBOT_ORIGIN_Y` | Esquina del papel en coordenadas del robot. |
+| `ROBOT_ORIGIN_X` / `ROBOT_ORIGIN_Y` | Centro del papel en coordenadas del robot. |
 | `ROBOT_X_SIGN` / `ROBOT_Y_SIGN` | `-1` si esas coordenadas bajan al avanzar por el dibujo. |
 | `ROBOT_SPEED_FACTOR` | Porcentaje de velocidad del controlador. |
 | `ROBOT_CP_DRAW` | Suavizado de esquinas. `100`; con `0` el brazo frena en cada punto. |
