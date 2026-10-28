@@ -11,6 +11,7 @@ Contrato que consume el frontend React (`windows/frontend`):
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
 import time
@@ -33,7 +34,7 @@ from app.pipeline import vectorize as vectorize_ops  # noqa: E402
 from app.pipeline.caption import CAPTION_BUDGET_S, append_caption  # noqa: E402
 from app.pipeline.providers import DEFAULT_STYLE  # noqa: E402
 from app.pipeline.portrait import PortraitRenderer  # noqa: E402
-from app.robot.client import MockRobotClient, Segment, Trajectory  # noqa: E402
+from app.robot.client import Segment, Trajectory, robot_from_env  # noqa: E402
 from app.store import Job, JobStore, Sketch, SketchStore  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -72,7 +73,8 @@ app.add_middleware(
 )
 
 renderer = PortraitRenderer(MODELS_DIR)
-robot = MockRobotClient()
+robot = robot_from_env()
+robot_log = logging.getLogger("robot")
 sketches = SketchStore()
 jobs = JobStore()
 
@@ -312,12 +314,23 @@ async def create_job(payload: JobRequest) -> dict:
     trajectory = Trajectory(
         segments=[Segment(type=item["type"], points=item["points"]) for item in sketch.segments],
         width_mm=float(sketch.stats.get("target_width_mm", 140.0)),
+        height_mm=float(sketch.stats.get("height_mm", 0.0)),
     )
     job = Job(id=f"job_{uuid.uuid4().hex[:10]}", sketch_id=sketch.id, status="drawing")
     jobs.put(job.id, job)
 
     async def run() -> None:
         total = trajectory.total_length or 1.0
+        started = time.monotonic()
+        robot_log.info(
+            "%s: inicia con %s (boceto %s, %d segmentos, %.0f x %.0f mm)",
+            job.id,
+            robot.name,
+            sketch.id,
+            len(trajectory.segments),
+            trajectory.width_mm,
+            trajectory.height_mm,
+        )
         try:
             await robot.connect()
 
@@ -329,9 +342,16 @@ async def create_job(payload: JobRequest) -> dict:
             job.status = "done"
             job.progress = 1.0
             job.eta_seconds = 0.0
+            robot_log.info("%s: terminado en %.1f s", job.id, time.monotonic() - started)
         except Exception as exc:  # noqa: BLE001
             job.status = "error"
             job.error = str(exc)
+            robot_log.exception(
+                "%s: fallo al %.1f%% tras %.1f s",
+                job.id,
+                job.progress * 100,
+                time.monotonic() - started,
+            )
 
     asyncio.create_task(run())
     return {

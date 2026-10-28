@@ -9,6 +9,7 @@ import { CameraStage } from './CameraStage'
 import { IdleRing } from './IdleRing'
 import { ConfettiCanvas } from './ConfettiCanvas'
 import { DrawingScreen } from './DrawingScreen'
+import { RobotErrorScreen } from './RobotErrorScreen'
 import { ThanksScreen } from './ThanksScreen'
 import { Toast } from './Toast'
 import { WelcomeScreen } from './WelcomeScreen'
@@ -45,6 +46,7 @@ const STATUS_MESSAGES: Record<PhotoboothStatus, string> = {
   confirm: 'Retrato listo. Elige TOMAR OTRA o SÍ.',
   drawing: 'El robot está dibujando tu imagen ahora.',
   thanks: 'Listo. Toma tu dibujo. SYSCOM agradece tu visita.',
+  robotError: 'El robot se detuvo. Elige REINTENTAR o INICIO.',
 }
 
 const headingAnimation = {
@@ -203,10 +205,28 @@ export function PhotoboothApp() {
 
           {booth.status === 'drawing' && <DrawingScreen key="drawing" job={booth.robotJob} />}
           {booth.status === 'thanks' && <ThanksScreen key="thanks" />}
+          {booth.status === 'robotError' && <RobotErrorScreen key="robot-error" />}
         </AnimatePresence>
       </main>
 
       <AnimatePresence>
+        {booth.status === 'robotError' && (
+          <motion.div
+            key="robot-error"
+            className="booth-choices"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            transition={{ type: 'spring', stiffness: 280, damping: 24 }}
+          >
+            <button type="button" className="btn booth-choice booth-choice--no" onClick={booth.home}>
+              INICIO
+            </button>
+            <button type="button" className="btn booth-choice booth-choice--yes" onClick={booth.retryRobot}>
+              REINTENTAR
+            </button>
+          </motion.div>
+        )}
         {(booth.status === 'review' || booth.status === 'style' || booth.status === 'confirm') && (
           <motion.div
             key={booth.status}

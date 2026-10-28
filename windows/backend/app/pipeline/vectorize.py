@@ -834,17 +834,21 @@ def build_trajectory(
         path = resample_polyline(mm_points, spacing_mm)
         length_mm = _polyline_length(mm_points)
         draw_length_mm += length_mm
-        segments.append({"type": "draw", "points": path.tolist()})
-        if current is not None:
-            travel = float(np.hypot(*(mm_points[0] - current)))
+        # El viaje va antes del trazo: si se emite después, la punta sigue
+        # apoyada y une los dos trazos con una raya recta.
+        if current is not None and len(path):
+            start = path[0]
+            travel = float(np.hypot(*(start - current)))
             travel_length_mm += travel
             segments.append(
                 {
                     "type": "travel",
-                    "points": [current.tolist(), mm_points[0].tolist()],
+                    "points": [current.tolist(), start.tolist()],
                 }
             )
-        current = mm_points[-1]
+        segments.append({"type": "draw", "points": path.tolist()})
+        if len(path):
+            current = path[-1]
 
     draw_seconds = draw_length_mm / max(1.0, speed_mm_s)
     travel_seconds = travel_length_mm / max(1.0, speed_mm_s * 1.6)
@@ -855,6 +859,7 @@ def build_trajectory(
         "total_length_mm": round(draw_length_mm + travel_length_mm, 1),
         "mm_per_px": round(mm_per_px, 4),
         "target_width_mm": target_width_mm,
+        "height_mm": round(height * mm_per_px, 3),
         "speed_mm_s": speed_mm_s,
         "est_draw_seconds": round(draw_seconds, 1),
         "est_total_seconds": round(draw_seconds + travel_seconds, 1),
