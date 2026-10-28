@@ -15,7 +15,7 @@ export function RobotErrorScreen() {
       transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
     >
       <img
-        src="/robot/dobotidlemarker.webp"
+        src="/robot/dobot-robot-error.webp"
         alt="Robot Dobot detenido"
         className="booth-robot"
         draggable={false}
