@@ -4,6 +4,7 @@ import type Webcam from 'react-webcam'
 import { useFraming } from '../../hooks/useFraming'
 import { usePhotobooth } from '../../hooks/usePhotobooth'
 import type { PhotoboothStatus } from '../../hooks/usePhotobooth'
+import { AdminDesk } from './AdminDesk'
 import { BoothControls } from './BoothControls'
 import { CameraStage } from './CameraStage'
 import { IdleRing } from './IdleRing'
@@ -142,6 +143,7 @@ export function PhotoboothApp() {
           <span className="booth-brand-divider" aria-hidden="true" />
           <span className="booth-product">Robot Dobot</span>
           <span className="booth-demo-note">Conectado al backend del robot</span>
+          <AdminDesk />
         </div>
       </header>
 
