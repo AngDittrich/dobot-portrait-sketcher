@@ -4,11 +4,13 @@ import {
   Flame,
   FlaskConical,
   Flower2,
+  Gem,
   Glasses,
   Headphones,
   Palette,
   Plane,
   Rocket,
+  Sparkles,
   Stethoscope,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -29,6 +31,8 @@ const ICONS: Record<string, LucideIcon> = {
   corona: Crown,
   lentes: Glasses,
   flor: Flower2,
+  aretes: Gem,
+  diadema: Sparkles,
 }
 
 interface StylePickerProps {
