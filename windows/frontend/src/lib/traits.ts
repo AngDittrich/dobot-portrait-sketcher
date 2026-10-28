@@ -24,6 +24,8 @@ const SLOTS: Record<string, TraitSlot[]> = {
   lentes: ['eyes'],
   mono: ['neck'],
   flor: ['hair'],
+  aretes: ['ears'],
+  diadema: ['hair'],
 }
 
 export function traitSlots(id: string): TraitSlot[] {
@@ -89,6 +91,8 @@ export const TRAIT_CATEGORIES: TraitCategory[] = [
       { id: 'lentes', label: 'Lentes' },
       { id: 'mono', label: 'Moño' },
       { id: 'flor', label: 'Flor' },
+      { id: 'aretes', label: 'Aretes' },
+      { id: 'diadema', label: 'Diadema' },
     ],
   },
 ]
