@@ -109,6 +109,40 @@ def test_baja_sobre_el_trazo_y_viaja_en_alto():
     assert enlace.moves[-1] == "Sync()"
 
 
+def test_un_punto_en_cero_no_se_manda_como_cero():
+    """Y=0 parte la hoja (92 mm bajo el origen). El controlador marca error si el blanco es 0."""
+    enlace = EnlaceFalso()
+    cliente = MG400Client(
+        link=enlace,
+        z_draw=-167.0,
+        z_travel=-160.0,
+        r=145.0,
+        origin_x=360.0,
+        origin_y=92.0,
+        x_sign=-1,
+        y_sign=-1,
+    )
+    papel = Trajectory(
+        segments=[Segment(type="draw", points=[[0.0, 92.0], [10.0, 92.0]])],
+        width_mm=140.0,
+        height_mm=240.0,
+    )
+
+    async def correr() -> None:
+        async def progreso(_valor: float, _segmento: Segment) -> None:
+            return None
+
+        await cliente.draw(papel, progreso)
+
+    asyncio.run(correr())
+    for orden in enlace.moves:
+        if not orden.startswith("MovL"):
+            continue
+        x, y, z = _xyz(orden)
+        assert x != 0 and y != 0 and z != 0
+        assert ",0.000," not in orden
+
+
 def test_las_esquinas_medidas_caen_en_el_papel():
     """Superior izquierda (360, 92) y, 142 x 237 mm despues, inferior derecha (218, -145)."""
     enlace = EnlaceFalso()

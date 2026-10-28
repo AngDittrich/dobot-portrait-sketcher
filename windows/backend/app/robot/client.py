@@ -305,11 +305,11 @@ class MG400Client(RobotClient):
         speed: int,
         cp: int,
     ) -> None:
-        robot_x = self.origin_x + self.x_sign * x
-        robot_y = self.origin_y + self.y_sign * y
-        rotation = self._rotation(robot_x, robot_y)
+        robot_x = _nonzero(self.origin_x + self.x_sign * x)
+        robot_y = _nonzero(self.origin_y + self.y_sign * y)
+        rotation = _nonzero(self._rotation(robot_x, robot_y))
         command = (
-            f"MovL({robot_x:.3f},{robot_y:.3f},{z:.3f},{rotation:.3f},"
+            f"MovL({robot_x:.3f},{robot_y:.3f},{_nonzero(z):.3f},{rotation:.3f},"
             f"SpeedL={int(speed)},AccL={int(speed)},CP={_blend(cp)})"
         )
         await self._move(command)
@@ -409,6 +409,13 @@ class MG400Client(RobotClient):
                 )
                 if outside:
                     raise MG400Error(f"punto fuera del papel: {x:.2f}, {y:.2f}")
+
+
+def _nonzero(value: float) -> float:
+    """El MG400 marca error si una orden le pide llegar exactamente a 0."""
+    if abs(value) >= 0.001:
+        return value
+    return 0.001 if value >= 0 else -0.001
 
 
 def _blend(value: int) -> int:
