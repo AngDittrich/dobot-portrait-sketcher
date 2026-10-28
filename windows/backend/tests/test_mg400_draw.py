@@ -104,7 +104,7 @@ def test_baja_sobre_el_trazo_y_viaja_en_alto():
     ]
     for anterior, orden in zip(movimientos, movimientos[1:]):
         if _xyz(anterior)[2] != _xyz(orden)[2]:
-            assert "CP=0" in orden
+            assert "CP=1" in orden
     assert all(",12.000," in orden for orden in movimientos)
     assert enlace.moves[-1] == "Sync()"
 
@@ -138,6 +138,85 @@ def test_las_esquinas_medidas_caen_en_el_papel():
     assert _xyz(movimientos[1]) == (360.0, 92.0, -167.0)
     assert _xyz(movimientos[2]) == (218.0, -145.0, -167.0)
     assert ",145.000," in movimientos[2]
+
+
+def test_el_giro_llega_a_96_en_la_esquina_lejana():
+    enlace = EnlaceFalso()
+    cliente = MG400Client(
+        link=enlace,
+        z_draw=-167.0,
+        z_travel=-160.0,
+        r=145.0,
+        r_far=96.0,
+        far_x=218.0,
+        far_y=-145.0,
+        origin_x=360.0,
+        origin_y=92.0,
+    )
+    papel = Trajectory(
+        segments=[Segment(type="draw", points=[[0.0, 0.0], [142.0, 237.0]])],
+        width_mm=142.0,
+        height_mm=237.0,
+    )
+
+    async def correr() -> None:
+        async def progreso(_valor: float, _segmento: Segment) -> None:
+            return None
+
+        await cliente.draw(papel, progreso)
+
+    asyncio.run(correr())
+    movimientos = [orden for orden in enlace.moves if orden.startswith("MovL")]
+    assert ",145.000," in movimientos[0]
+    assert ",96.000," in movimientos[2]
+
+
+class _EnlaceQueFalla:
+    def __init__(self) -> None:
+        self.closed = False
+        self.prepared = 0
+
+    def move(self, command: str) -> Reply:
+        if command.startswith("MovL"):
+            return Reply(code=-99999, value="")
+        return Reply(code=0, value="")
+
+    def dashboard(self, _command: str) -> Reply:
+        return Reply(code=0, value="")
+
+    def prepare(self, _percent: int = 20) -> None:
+        self.prepared += 1
+
+    def sync(self) -> None:
+        return None
+
+    def errors(self) -> str:
+        return "9"
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_un_fallo_suelta_el_socket_para_el_siguiente_dibujo():
+    enlace = _EnlaceQueFalla()
+    cliente = MG400Client(link=enlace, z_draw=-167.0, z_travel=-160.0, r=145.0)
+    papel = Trajectory(
+        segments=[Segment(type="draw", points=[[0.0, 0.0], [5.0, 0.0]])],
+        width_mm=10.0,
+        height_mm=10.0,
+    )
+
+    async def correr() -> None:
+        async def progreso(_valor: float, _segmento: Segment) -> None:
+            return None
+
+        await cliente.draw(papel, progreso)
+
+    with pytest.raises(MG400Error, match="sin respuesta"):
+        asyncio.run(correr())
+    assert enlace.closed
+    assert cliente._ready is False
+    assert cliente._link is None
 
 
 def test_rechaza_un_punto_fuera_del_papel_sin_mover():

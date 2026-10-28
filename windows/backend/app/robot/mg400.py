@@ -78,9 +78,9 @@ class MG400Link:
         sock.settimeout(self.timeout_s)
         return sock
 
-    def _ask(self, sock: socket.socket, command: str) -> Reply:
+    def _ask(self, sock: socket.socket, command: str, timeout_s: float | None = None) -> Reply:
         sock.sendall((command + "\n").encode("ascii"))
-        sock.settimeout(self.timeout_s)
+        sock.settimeout(self.timeout_s if timeout_s is None else timeout_s)
         data = b""
         while True:
             try:
@@ -206,8 +206,15 @@ class MG400Link:
             self.sync()
 
     def sync(self) -> None:
-        """Espera a que la cola de movimiento se vacíe."""
-        self.move("Sync()")
+        """Espera a que la cola de movimiento se vacíe.
+
+        Un retrato puede tardar hasta un par de minutos. El tiempo de lectura
+        de un MovL no alcanza: si se corta antes, el socket se desfasa y el
+        siguiente dibujo ya no obtiene respuesta.
+        """
+        reply = self._ask(self._move, "Sync()", timeout_s=180.0)
+        if not reply.ok:
+            raise MG400Error(f"Sync devolvio {reply.code}")
 
     def jog(self, axis: str) -> None:
         """Arranca un desplazamiento continuo hasta `jog_stop` (X+, Y-, Z+...)."""

@@ -141,6 +141,9 @@ class MG400Client(RobotClient):
         y_sign: int = -1,
         dry_run: bool = False,
         cp_draw: int = 0,
+        r_far: float | None = None,
+        far_x: float | None = None,
+        far_y: float | None = None,
     ) -> None:
         self._link = link
         self.host = host
@@ -157,6 +160,9 @@ class MG400Client(RobotClient):
         self.y_sign = _axis_sign(y_sign, "ROBOT_Y_SIGN")
         self.dry_run = dry_run
         self.cp_draw = cp_draw
+        self.r_far = r_far
+        self.far_x = far_x
+        self.far_y = far_y
         self.commands: list[str] = []
         self._ready = False
 
@@ -183,6 +189,16 @@ class MG400Client(RobotClient):
             raw = _setting(name)
             return default if not raw else float(raw)
 
+        def optional_float_or_none(name: str) -> float | None:
+            raw = _setting(name)
+            return None if not raw else float(raw)
+
+        r_far = optional_float_or_none("ROBOT_R_FAR")
+        far_x = optional_float_or_none("ROBOT_FAR_X")
+        far_y = optional_float_or_none("ROBOT_FAR_Y")
+        if len([item for item in (r_far, far_x, far_y) if item is not None]) not in (0, 3):
+            raise MG400Error("ROBOT_R_FAR, ROBOT_FAR_X y ROBOT_FAR_Y van juntos")
+
         return cls(
             host=_setting("ROBOT_HOST", "192.168.10.55"),
             user=optional_int("ROBOT_USER", 0),
@@ -197,6 +213,9 @@ class MG400Client(RobotClient):
             y_sign=optional_int("ROBOT_Y_SIGN", -1),
             dry_run=dry_run,
             cp_draw=optional_int("ROBOT_CP_DRAW", 0),
+            r_far=r_far,
+            far_x=far_x,
+            far_y=far_y,
         )
 
     async def connect(self) -> None:
@@ -212,7 +231,7 @@ class MG400Client(RobotClient):
         await asyncio.to_thread(self._link.prepare, self.speed_factor)  # type: ignore[attr-defined]
         await self._dashboard(f"User({int(self.user)})")
         await self._dashboard(f"Tool({int(self.tool)})")
-        await self._dashboard("CP(0)")
+        await self._dashboard(f"CP({_blend(self.cp_draw)})")
         self._ready = True
 
     async def draw(self, trajectory: Trajectory, on_progress: ProgressCallback) -> None:
@@ -288,31 +307,89 @@ class MG400Client(RobotClient):
     ) -> None:
         robot_x = self.origin_x + self.x_sign * x
         robot_y = self.origin_y + self.y_sign * y
+        rotation = self._rotation(robot_x, robot_y)
         command = (
-            f"MovL({robot_x:.3f},{robot_y:.3f},{z:.3f},{self.r:.3f},"
-            f"SpeedL={int(speed)},AccL={int(speed)},CP={int(cp)})"
+            f"MovL({robot_x:.3f},{robot_y:.3f},{z:.3f},{rotation:.3f},"
+            f"SpeedL={int(speed)},AccL={int(speed)},CP={_blend(cp)})"
         )
         await self._move(command)
+
+    def _rotation(self, robot_x: float, robot_y: float) -> float:
+        """Gira entre el R del origen y el de la esquina lejana, si se midió."""
+        if self.r_far is None or self.far_x is None or self.far_y is None:
+            return self.r
+        along_x = self.far_x - self.origin_x
+        along_y = self.far_y - self.origin_y
+        span = along_x * along_x + along_y * along_y
+        if span <= 1e-6:
+            return self.r
+        offset_x = robot_x - self.origin_x
+        offset_y = robot_y - self.origin_y
+        traveled = (offset_x * along_x + offset_y * along_y) / span
+        traveled = min(1.0, max(0.0, traveled))
+        return self.r + traveled * (self.r_far - self.r)
+
+    def _drop(self) -> None:
+        """Suelta el socket. Si se reutiliza después de un fallo, el siguiente dibujo no obtiene respuesta."""
+        link = self._link
+        self._link = None
+        self._ready = False
+        close = getattr(link, "close", None)
+        if close is None:
+            return
+        try:
+            close()
+        except OSError:
+            return
 
     async def _move(self, command: str) -> None:
         from app.robot.mg400 import MG400Error
 
         self.commands.append(command)
-        reply = await asyncio.to_thread(self._link.move, command)  # type: ignore[attr-defined]
-        if not getattr(reply, "ok", False):
-            raise MG400Error(f"{command} devolvio {getattr(reply, 'code', '?')}")
+        try:
+            reply = await asyncio.to_thread(self._link.move, command)  # type: ignore[attr-defined]
+        except Exception:
+            self._drop()
+            raise
+        if getattr(reply, "ok", False):
+            return
+        alarm = await self._alarm()
+        code = getattr(reply, "code", "?")
+        self._drop()
+        detail = " sin respuesta del controlador" if code == -99999 else ""
+        if alarm:
+            detail += f" alarma {alarm}"
+        raise MG400Error(f"{command} devolvio {code}{detail}")
+
+    async def _alarm(self) -> str:
+        errors = getattr(self._link, "errors", None)
+        if errors is None:
+            return ""
+        try:
+            return str(await asyncio.to_thread(errors)).strip()
+        except Exception:
+            return ""
 
     async def _dashboard(self, command: str) -> None:
         from app.robot.mg400 import MG400Error
 
         self.commands.append(command)
-        reply = await asyncio.to_thread(self._link.dashboard, command)  # type: ignore[attr-defined]
+        try:
+            reply = await asyncio.to_thread(self._link.dashboard, command)  # type: ignore[attr-defined]
+        except Exception:
+            self._drop()
+            raise
         if not getattr(reply, "ok", False):
+            self._drop()
             raise MG400Error(f"{command} devolvio {getattr(reply, 'code', '?')}")
 
     async def _sync(self) -> None:
         self.commands.append("Sync()")
-        await asyncio.to_thread(self._link.sync)  # type: ignore[attr-defined]
+        try:
+            await asyncio.to_thread(self._link.sync)  # type: ignore[attr-defined]
+        except Exception:
+            self._drop()
+            raise
 
     @staticmethod
     def _validate(trajectory: Trajectory) -> None:
@@ -332,6 +409,11 @@ class MG400Client(RobotClient):
                 )
                 if outside:
                     raise MG400Error(f"punto fuera del papel: {x:.2f}, {y:.2f}")
+
+
+def _blend(value: int) -> int:
+    """CP del MG400 va de 1 a 100. 0 es parámetro fuera de rango y corta la cola."""
+    return min(100, max(1, int(value)))
 
 
 def _near(left: list[float], right: list[float], tolerance: float = 0.05) -> bool:
