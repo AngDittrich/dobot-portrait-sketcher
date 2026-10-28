@@ -859,6 +859,7 @@ def build_trajectory(
         "total_length_mm": round(draw_length_mm + travel_length_mm, 1),
         "mm_per_px": round(mm_per_px, 4),
         "target_width_mm": target_width_mm,
+        "height_mm": round(height * mm_per_px, 3),
         "speed_mm_s": speed_mm_s,
         "est_draw_seconds": round(draw_seconds, 1),
         "est_total_seconds": round(draw_seconds + travel_seconds, 1),

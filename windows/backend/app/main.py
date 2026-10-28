@@ -33,7 +33,7 @@ from app.pipeline import vectorize as vectorize_ops  # noqa: E402
 from app.pipeline.caption import CAPTION_BUDGET_S, append_caption  # noqa: E402
 from app.pipeline.providers import DEFAULT_STYLE  # noqa: E402
 from app.pipeline.portrait import PortraitRenderer  # noqa: E402
-from app.robot.client import MockRobotClient, Segment, Trajectory  # noqa: E402
+from app.robot.client import Segment, Trajectory, robot_from_env  # noqa: E402
 from app.store import Job, JobStore, Sketch, SketchStore  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -72,7 +72,7 @@ app.add_middleware(
 )
 
 renderer = PortraitRenderer(MODELS_DIR)
-robot = MockRobotClient()
+robot = robot_from_env()
 sketches = SketchStore()
 jobs = JobStore()
 
@@ -312,6 +312,7 @@ async def create_job(payload: JobRequest) -> dict:
     trajectory = Trajectory(
         segments=[Segment(type=item["type"], points=item["points"]) for item in sketch.segments],
         width_mm=float(sketch.stats.get("target_width_mm", 140.0)),
+        height_mm=float(sketch.stats.get("height_mm", 0.0)),
     )
     job = Job(id=f"job_{uuid.uuid4().hex[:10]}", sketch_id=sketch.id, status="drawing")
     jobs.put(job.id, job)

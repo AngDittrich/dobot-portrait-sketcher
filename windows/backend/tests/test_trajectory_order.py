@@ -27,6 +27,7 @@ def test_el_viaje_precede_al_trazo_siguiente():
     dibujo, viaje, siguiente = result.segments
     assert viaje["points"][0] == dibujo["points"][-1]
     assert viaje["points"][-1] == siguiente["points"][0]
+    assert result.stats["height_mm"] == 100.0
 
 
 def test_un_solo_trazo_no_tiene_viaje():

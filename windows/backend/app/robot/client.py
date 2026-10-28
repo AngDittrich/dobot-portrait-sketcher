@@ -11,6 +11,7 @@ import asyncio
 import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
@@ -160,26 +161,26 @@ class MG400Client(RobotClient):
         """Arma el cliente con la IP del robot y las alturas medidas en la cabina."""
         from app.robot.mg400 import MG400Error
 
-        dry_run = os.environ.get("ROBOT_DRY_RUN", "").strip().lower() in {"1", "true", "yes"}
+        dry_run = _setting("ROBOT_DRY_RUN").lower() in {"1", "true", "yes"}
 
         def required(name: str) -> float:
-            raw = os.environ.get(name)
-            if raw is None or not raw.strip():
+            raw = _setting(name)
+            if not raw:
                 if dry_run:
                     return 0.0
                 raise MG400Error(f"falta {name}")
             return float(raw)
 
         def optional_int(name: str, default: int) -> int:
-            raw = os.environ.get(name)
-            return default if raw is None or not raw.strip() else int(raw)
+            raw = _setting(name)
+            return default if not raw else int(raw)
 
         def optional_float(name: str, default: float) -> float:
-            raw = os.environ.get(name)
-            return default if raw is None or not raw.strip() else float(raw)
+            raw = _setting(name)
+            return default if not raw else float(raw)
 
         return cls(
-            host=os.environ.get("ROBOT_HOST", "192.168.10.55"),
+            host=_setting("ROBOT_HOST", "192.168.10.55"),
             user=optional_int("ROBOT_USER", 0),
             tool=optional_int("ROBOT_TOOL", 0),
             z_draw=required("ROBOT_Z_DRAW"),
@@ -333,3 +334,38 @@ class MG400Client(RobotClient):
 
 def _near(left: list[float], right: list[float], tolerance: float = 0.05) -> bool:
     return ((left[0] - right[0]) ** 2 + (left[1] - right[1]) ** 2) ** 0.5 <= tolerance
+
+
+def _dotenv() -> dict[str, str]:
+    """Lee `windows/backend/.env` con el mismo formato que el proveedor del boceto."""
+    path = Path(__file__).resolve().parents[2] / ".env"
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def _setting(name: str, default: str = "") -> str:
+    """La variable de entorno gana; si no está, se usa el .env."""
+    raw = os.environ.get(name)
+    if raw is not None and raw.strip():
+        return raw.strip()
+    return _dotenv().get(name, default).strip()
+
+
+def robot_from_env() -> RobotClient:
+    """`ROBOT_BACKEND=mock` (default) o `mg400`."""
+    backend = _setting("ROBOT_BACKEND", "mock").lower() or "mock"
+    if backend == "mock":
+        return MockRobotClient()
+    if backend == "mg400":
+        return MG400Client.from_env()
+    from app.robot.mg400 import MG400Error
+
+    raise MG400Error(f"ROBOT_BACKEND desconocido: {backend}")

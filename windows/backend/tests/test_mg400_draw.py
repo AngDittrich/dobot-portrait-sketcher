@@ -170,3 +170,37 @@ def test_sin_alturas_no_arma_el_cliente_real(monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv(name, raising=False)
     with pytest.raises(MG400Error):
         MG400Client.from_env()
+
+
+def test_sin_backend_sigue_el_simulador(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("ROBOT_BACKEND", raising=False)
+    from app.robot.client import robot_from_env
+
+    assert robot_from_env().name == "mock"
+
+
+def test_backend_mg400_usa_el_cliente_real(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("ROBOT_BACKEND", "mg400")
+    monkeypatch.setenv("ROBOT_DRY_RUN", "1")
+    monkeypatch.delenv("ROBOT_HOST", raising=False)
+    from app.robot.client import robot_from_env
+
+    cliente = robot_from_env()
+    assert cliente.name == "mg400"
+    assert cliente.host == "192.168.10.55"
+
+
+def test_el_archivo_env_elige_el_mg400_en_seco(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("ROBOT_BACKEND", raising=False)
+    monkeypatch.delenv("ROBOT_DRY_RUN", raising=False)
+    monkeypatch.delenv("ROBOT_HOST", raising=False)
+    monkeypatch.setattr(
+        "app.robot.client._dotenv",
+        lambda: {"ROBOT_BACKEND": "mg400", "ROBOT_DRY_RUN": "1"},
+    )
+    from app.robot.client import robot_from_env
+
+    cliente = robot_from_env()
+    assert cliente.name == "mg400"
+    assert cliente.host == "192.168.10.55"
+    assert cliente.dry_run is True
