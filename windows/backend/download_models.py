@@ -4,8 +4,8 @@ Uso:
     .venv\\Scripts\\python.exe download_models.py
 
 Los archivos quedan en `windows/backend/models/` y están excluidos de git
-(son unos 200 MB). Para no descargarlos otra vez se puede apuntar a los
-del laboratorio con la variable de entorno MODELS_DIR.
+(son unos 9 MB: detección de cara, U2Net de retrato y landmarks). Se puede
+apuntar a otra carpeta con la variable de entorno MODELS_DIR.
 """
 
 from __future__ import annotations

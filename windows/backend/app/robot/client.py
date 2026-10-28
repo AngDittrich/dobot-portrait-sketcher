@@ -37,6 +37,12 @@ MIN_ACC_MM_S2 = 1.0
 # controlador cerraba el socket a los 2-3 s; con 6 mm quedan ~1/5 y el brazo
 # acelera (10.2 mm/s medidos contra 2.4 mm/s con pasos cortos).
 DEFAULT_MIN_STEP_MM = 6.0
+
+# Si el final de un trazo queda a menos de esto del inicio del siguiente, el
+# lápiz no se levanta: se une con un conector corto. Cada cambio de altura
+# obliga a vaciar la cola del MG400 y cuesta ~3 s, así que encadenar es lo que
+# baja el retrato de 365 s.
+DEFAULT_JOIN_GAP_MM = 2.0
 # Confirmación de llegada: se lee la pose hasta que el brazo está a 0.5 mm.
 ARRIVAL_TOLERANCE_MM = 0.5
 ARRIVAL_POLL_S = 0.1
@@ -223,12 +229,15 @@ class MG400Client(RobotClient):
         acc_mm_s2: float = DEFAULT_ACC_MM_S2,
         pace_lead_s: float = DEFAULT_PACE_LEAD_S,
         min_step_mm: float = DEFAULT_MIN_STEP_MM,
+        join_gap_mm: float = DEFAULT_JOIN_GAP_MM,
         wait_arrival: bool = True,
         arrival_tolerance_mm: float = ARRIVAL_TOLERANCE_MM,
         arrival_poll_s: float = ARRIVAL_POLL_S,
         arrival_extra_s: float = ARRIVAL_EXTRA_S,
         reconnects: int = 30,
         pipeline: int = DEFAULT_PIPELINE,
+        unstick_resets: int = 3,
+        unstick_sleep_s: float = 6.0,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -240,6 +249,7 @@ class MG400Client(RobotClient):
         self.acc_mm_s2 = min(MAX_ACC_MM_S2, max(MIN_ACC_MM_S2, float(acc_mm_s2)))
         self.pace_lead_s = pace_lead_s
         self.min_step_mm = max(0.0, float(min_step_mm))
+        self.join_gap_mm = max(0.0, float(join_gap_mm))
         self.wait_arrival = wait_arrival
         self.pipeline = max(1, int(pipeline))
         self._pending: list[tuple[float, float, float, int]] = []
@@ -248,6 +258,9 @@ class MG400Client(RobotClient):
         self.arrival_extra_s = arrival_extra_s
         self.reconnects = int(reconnects)
         self._reconnects_left = self.reconnects
+        self.unstick_resets = max(0, int(unstick_resets))
+        self.unstick_sleep_s = float(unstick_sleep_s)
+        self._resets_left = self.unstick_resets
         self._last_point: tuple[float, float, float] | None = None
         self._clock = clock
         self._sleep = sleep
@@ -327,6 +340,7 @@ class MG400Client(RobotClient):
             acc_mm_s2=optional_float("ROBOT_ACC_MM_S2", DEFAULT_ACC_MM_S2),
             pipeline=optional_int("ROBOT_PIPELINE", DEFAULT_PIPELINE),
             min_step_mm=optional_float("ROBOT_STEP_MM", DEFAULT_MIN_STEP_MM),
+            join_gap_mm=optional_float("ROBOT_JOIN_MM", DEFAULT_JOIN_GAP_MM),
             r_far=r_far,
             far_x=far_x,
             far_y=far_y,
@@ -367,6 +381,7 @@ class MG400Client(RobotClient):
         self._sent = 0
         self._pace_due = None
         self._pace_target = None
+        self._resets_left = self.unstick_resets
         self._last_point = None
         self._pending = []
         self._reconnects_left = self.reconnects
@@ -407,15 +422,28 @@ class MG400Client(RobotClient):
         pen_down: bool,
     ) -> tuple[bool, list[float]]:
         start = points[0]
-        if pen_down and held is not None and not _near(held, start):
-            await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
-            pen_down = False
-        if held is None or not _near(held, start):
-            await self._goto(start[0], start[1], self.z_travel,  self.speed_travel, 0)
+        cerca = (
+            pen_down
+            and held is not None
+            and self.join_gap_mm > 0
+            and _distance(held, start) <= self.join_gap_mm
+            and not _near(held, start)
+        )
+        if cerca:
+            # El conector se dibuja: cuesta ~0.5 s y ahorra los ~3 s de subir,
+            # trasladar y volver a bajar el lápiz.
+            await self._goto(start[0], start[1], self.z_draw,  self.speed_factor, self.cp_draw)
             held = start
-        if not pen_down:
-            await self._goto(start[0], start[1], self.z_draw,  self.speed_factor, 0)
-            pen_down = True
+        else:
+            if pen_down and held is not None and not _near(held, start):
+                await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
+                pen_down = False
+            if held is None or not _near(held, start):
+                await self._goto(start[0], start[1], self.z_travel,  self.speed_travel, 0)
+                held = start
+            if not pen_down:
+                await self._goto(start[0], start[1], self.z_draw,  self.speed_factor, 0)
+                pen_down = True
         for point in points[1:]:
             # Paso mínimo: 1706 comandos de 1.18 mm matan la conexión del
             # MG400. Con 6 mm quedan ~1/5 de las órdenes y el brazo alcanza
@@ -436,6 +464,20 @@ class MG400Client(RobotClient):
         pen_down: bool,
     ) -> tuple[bool, list[float]]:
         if pen_down and held is not None:
+            corto = (
+                self.join_gap_mm > 0
+                and bool(points)
+                and _distance(held, points[-1]) <= self.join_gap_mm
+            )
+            if corto:
+                # El trazo siguiente empieza pegado: se dibuja el conector en
+                # vez de subir el lápiz y vaciar la cola (~3 s por cambio).
+                for point in points:
+                    if held is not None and _near(held, point):
+                        continue
+                    await self._goto(point[0], point[1], self.z_draw,  self.speed_factor, self.cp_draw)
+                    held = point
+                return pen_down, held if held is not None else points[-1]
             await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
             pen_down = False
         for point in points:
@@ -480,7 +522,11 @@ class MG400Client(RobotClient):
             while len(self._pending) >= self.pipeline:
                 await self._wait_pending()
         else:
-            await self._wait_arrival(robot_x, robot_y, distance, speed)
+            trabado = await self._wait_arrival(robot_x, robot_y, distance, speed)
+            if trabado and self._resets_left > 0:
+                await self._unstick()
+                await self._move(command)
+                await self._wait_arrival(robot_x, robot_y, distance, speed)
         self._last_point = target
 
     async def _drain(self) -> None:
@@ -498,40 +544,71 @@ class MG400Client(RobotClient):
         robot_y: float,
         distance_mm: float,
         speed: int,
-    ) -> None:
+    ) -> bool:
         """Espera a que el brazo llegue antes de mandar la siguiente orden.
 
         Medido: con flujo continuo de MovL el controlador cierra el socket a
         los 2-3 s. Una orden a la vez, confirmando la pose, aguantó 40/40.
+
+        Devuelve True solo si el brazo no se acercó nada: la orden se aceptó
+        pero la cola del controlador quedó trabada.
         """
         if not self.wait_arrival:
-            return
+            return False
         link = self._link
         pose = getattr(link, "pose", None)
         if pose is None:
-            return
+            return False
         presupuesto = distance_mm / effective_speed_mm_s(
             distance_mm, speed, self.acc_mm_s2
         ) + self.arrival_extra_s
         limite = time.monotonic() + presupuesto
         mejor = float("inf")
+        inicial: float | None = None
         while time.monotonic() < limite:
             try:
                 actual = await asyncio.to_thread(pose)
             except Exception:  # noqa: BLE001 - sin lectura seguimos dibujando
-                return
+                return False
             distancia = (
                 (float(actual[0]) - robot_x) ** 2 + (float(actual[1]) - robot_y) ** 2
             ) ** 0.5
+            if inicial is None:
+                inicial = distancia
             if distancia <= self.arrival_tolerance_mm:
-                return
+                return False
             if ya_paso(mejor, distancia, self.arrival_tolerance_mm):
-                return
+                return False
             mejor = min(mejor, distancia)
             await asyncio.sleep(self.arrival_poll_s)
         logger.warning(
             "el brazo no llego a %.1f,%.1f en %.1f s (sigo)", robot_x, robot_y, presupuesto
         )
+        # Se movió menos de medio milímetro: la orden nunca llegó a ejecutarse.
+        return inicial is not None and inicial - mejor < 0.5
+
+    async def _unstick(self) -> None:
+        """Destraba la cola del controlador sin ir al robot.
+
+        Medido tras una alarma: el MG400 acepta MovL con código 0 y el brazo no
+        se mueve. Stop() devuelve -10000, ClearError() responde 0 pero no basta
+        y ResetRobot() sí. Después de eso hay que soltar el socket y volver a
+        conectar, porque el controlador cierra la conexión vieja.
+        """
+        self._resets_left -= 1
+        logger.warning(
+            "el brazo no se movio: reinicio la cola del controlador (quedan %d)",
+            self._resets_left,
+        )
+        dashboard = getattr(self._link, "dashboard", None)
+        if dashboard is not None:
+            try:
+                await asyncio.to_thread(dashboard, "ResetRobot()")
+            except Exception:  # noqa: BLE001 - si no contesta, se reconecta igual
+                logger.exception("ResetRobot() no respondio")
+        await asyncio.sleep(self.unstick_sleep_s)
+        self._drop()
+        await self.connect()
 
     async def _pace(self, target: tuple[float, float, float], speed: int) -> None:
         """Deja pasar el tiempo justo para no llenar la cola del controlador.
