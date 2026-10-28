@@ -109,3 +109,29 @@ def test_un_trazo_lejano_si_levanta_el_lapiz() -> None:
 
     # Baja al primer trazo, sube, viaja y vuelve a bajar: al menos dos subidas.
     assert _subidas(enlace) >= 2
+
+
+def _dibujar_con_traslado(destino: float) -> EnlaceVivo:
+    """La trayectoria real trae un segmento de traslado entre trazos."""
+    enlace = EnlaceVivo()
+    client = _cliente(enlace)
+    papel = Trajectory(
+        segments=[
+            Segment(type="draw", points=[[0.0, 0.0], [10.0, 0.0]]),
+            Segment(type="travel", points=[[destino, 0.0]]),
+            Segment(type="draw", points=[[destino, 0.0], [20.0, 0.0]]),
+        ],
+        width_mm=140.0,
+        height_mm=140.0,
+    )
+    asyncio.run(client.draw(papel, _nada))
+    return enlace
+
+
+def test_el_traslado_corto_no_levanta_el_lapiz() -> None:
+    corto = _dibujar_con_traslado(11.0)
+    largo = _dibujar_con_traslado(16.0)
+
+    assert _subidas(corto) < _subidas(largo), (
+        f"corto={_subidas(corto)} largo={_subidas(largo)}"
+    )

@@ -464,6 +464,20 @@ class MG400Client(RobotClient):
         pen_down: bool,
     ) -> tuple[bool, list[float]]:
         if pen_down and held is not None:
+            corto = (
+                self.join_gap_mm > 0
+                and bool(points)
+                and _distance(held, points[-1]) <= self.join_gap_mm
+            )
+            if corto:
+                # El trazo siguiente empieza pegado: se dibuja el conector en
+                # vez de subir el lápiz y vaciar la cola (~3 s por cambio).
+                for point in points:
+                    if held is not None and _near(held, point):
+                        continue
+                    await self._goto(point[0], point[1], self.z_draw,  self.speed_factor, self.cp_draw)
+                    held = point
+                return pen_down, held if held is not None else points[-1]
             await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
             pen_down = False
         for point in points:
