@@ -51,8 +51,8 @@ def _cliente(enlace: EnlaceFalso) -> MG400Client:
         z_travel=-180.0,
         r=12.0,
         speed_factor=20,
-        origin_x=100.0,
-        origin_y=240.0,
+        origin_x=150.0,
+        origin_y=220.0,
         x_sign=1,
         y_sign=-1,
     )
@@ -121,8 +121,8 @@ def test_un_punto_en_cero_no_se_manda_como_cero():
         z_draw=-167.0,
         z_travel=-160.0,
         r=145.0,
-        origin_x=360.0,
-        origin_y=92.0,
+        origin_x=290.0,
+        origin_y=-28.0,
         x_sign=-1,
         y_sign=-1,
     )
@@ -148,7 +148,7 @@ def test_un_punto_en_cero_no_se_manda_como_cero():
 
 
 def test_las_esquinas_medidas_caen_en_el_papel():
-    """Superior izquierda (360, 92) y, 142 x 237 mm despues, inferior derecha (218, -145)."""
+    """Centro (289, -26.5) y, 142 x 237 mm despues, las esquinas (360, 92) y (218, -145)."""
     enlace = EnlaceFalso()
     cliente = MG400Client(pace_lead_s=0.0, 
         link=enlace,
@@ -157,8 +157,8 @@ def test_las_esquinas_medidas_caen_en_el_papel():
         z_draw=-167.0,
         z_travel=-160.0,
         r=145.0,
-        origin_x=360.0,
-        origin_y=92.0,
+        origin_x=289.0,
+        origin_y=-26.5,
     )
     papel = Trajectory(
         segments=[Segment(type="draw", points=[[0.0, 0.0], [142.0, 237.0]])],
@@ -192,8 +192,8 @@ def test_el_giro_llega_a_96_en_la_esquina_lejana():
         r_far=96.0,
         far_x=218.0,
         far_y=-145.0,
-        origin_x=360.0,
-        origin_y=92.0,
+        origin_x=289.0,
+        origin_y=-26.5,
     )
     papel = Trajectory(
         segments=[Segment(type="draw", points=[[0.0, 0.0], [142.0, 237.0]])],

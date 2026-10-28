@@ -36,13 +36,13 @@ MIN_ACC_MM_S2 = 1.0
 # Paso mínimo entre órdenes. Con 1.18 mm hacían falta 1706 MovL y el
 # controlador cerraba el socket a los 2-3 s; con 6 mm quedan ~1/5 y el brazo
 # acelera (10.2 mm/s medidos contra 2.4 mm/s con pasos cortos).
-DEFAULT_MIN_STEP_MM = 6.0
+DEFAULT_MIN_STEP_MM = 8.0
 
 # Si el final de un trazo queda a menos de esto del inicio del siguiente, el
 # lápiz no se levanta: se une con un conector corto. Cada cambio de altura
 # obliga a vaciar la cola del MG400 y cuesta ~3 s, así que encadenar es lo que
 # baja el retrato de 365 s.
-DEFAULT_JOIN_GAP_MM = 2.0
+DEFAULT_JOIN_GAP_MM = 6.0
 # Confirmación de llegada: se lee la pose hasta que el brazo está a 0.5 mm.
 ARRIVAL_TOLERANCE_MM = 0.5
 ARRIVAL_POLL_S = 0.1
@@ -238,6 +238,8 @@ class MG400Client(RobotClient):
         pipeline: int = DEFAULT_PIPELINE,
         unstick_resets: int = 3,
         unstick_sleep_s: float = 6.0,
+        connect_retries: int = 3,
+        connect_retry_s: float = 0.6,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -260,6 +262,8 @@ class MG400Client(RobotClient):
         self._reconnects_left = self.reconnects
         self.unstick_resets = max(0, int(unstick_resets))
         self.unstick_sleep_s = float(unstick_sleep_s)
+        self.connect_retries = max(1, int(connect_retries))
+        self.connect_retry_s = float(connect_retry_s)
         self._resets_left = self.unstick_resets
         self._last_point: tuple[float, float, float] | None = None
         # Radio (mm al eje) del punto que no cupo. Más adentro no se vuelve a intentar.
@@ -280,6 +284,10 @@ class MG400Client(RobotClient):
         self.speed_travel = min(100, max(1, speed_factor * 2))
         self.origin_x = origin_x
         self.origin_y = origin_y
+        # El origen es el centro del papel: la altura del recorte cambia con
+        # cada foto y la esquina obligaría a recalcularla en cada retrato.
+        self._paper_w = 0.0
+        self._paper_h = 0.0
         self.x_sign = _axis_sign(x_sign, "ROBOT_X_SIGN")
         self.y_sign = _axis_sign(y_sign, "ROBOT_Y_SIGN")
         self.dry_run = dry_run
@@ -355,27 +363,44 @@ class MG400Client(RobotClient):
         async with self._io:
             if self._ready and self._link is not None:
                 return
-            try:
-                if self._link is None:
-                    if self._stage_link is not None:
-                        self._link = self._stage_link
-                    elif self.dry_run:
-                        logger.info("modo seco: no se abre socket")
-                        self._link = _DryLink()
-                    else:
-                        from app.robot.mg400 import MG400Link
+            for intento in range(1, self.connect_retries + 1):
+                try:
+                    await self._abrir()
+                    return
+                except Exception as exc:
+                    # El controlador cierra los sockets que pasan un rato sin
+                    # uso: entre la foto y el boceto hay diez o quince segundos
+                    # y el primer comando llega a un socket muerto. Se abre
+                    # otro en vez de dar el trabajo por perdido.
+                    self._close_link()
+                    if intento >= self.connect_retries:
+                        raise
+                    logger.warning(
+                        "la conexion no contesto (%s); abro otra (%d/%d)",
+                        exc,
+                        intento,
+                        self.connect_retries,
+                    )
+                    await self._sleep(self.connect_retry_s)
 
-                        self._link = await asyncio.to_thread(
-                            MG400Link, self.host, move_timeout_s=self.move_timeout_s
-                        )
-                await asyncio.to_thread(self._link.prepare, self.speed_factor)  # type: ignore[attr-defined]
-                await self._dashboard(f"User({int(self.user)})")
-                await self._dashboard(f"Tool({int(self.tool)})")
-                await self._dashboard(f"CP({_blend(self.cp_draw)})")
-                self._ready = True
-            except Exception:
-                self._close_link()
-                raise
+    async def _abrir(self) -> None:
+        if self._link is None:
+            if self._stage_link is not None:
+                self._link = self._stage_link
+            elif self.dry_run:
+                logger.info("modo seco: no se abre socket")
+                self._link = _DryLink()
+            else:
+                from app.robot.mg400 import MG400Link
+
+                self._link = await asyncio.to_thread(
+                    MG400Link, self.host, move_timeout_s=self.move_timeout_s
+                )
+        await asyncio.to_thread(self._link.prepare, self.speed_factor)  # type: ignore[attr-defined]
+        await self._dashboard(f"User({int(self.user)})")
+        await self._dashboard(f"Tool({int(self.tool)})")
+        await self._dashboard(f"CP({_blend(self.cp_draw)})")
+        self._ready = True
 
     async def draw(self, trajectory: Trajectory, on_progress: ProgressCallback) -> None:
         self._validate(trajectory)
@@ -387,6 +412,8 @@ class MG400Client(RobotClient):
         self._last_point = None
         self._radio_minimo = None
         self._pending = []
+        self._paper_w = trajectory.width_mm
+        self._paper_h = trajectory.height_mm
         self._reconnects_left = self.reconnects
         self._total = sum(len(segment.points) for segment in trajectory.segments)
         logger.info(
@@ -500,8 +527,8 @@ class MG400Client(RobotClient):
         cp: int,
     ) -> bool:
         """Manda el punto. False si quedó fuera del brazo y se saltó para seguir dibujando."""
-        robot_x = _nonzero(self.origin_x + self.x_sign * x)
-        robot_y = _nonzero(self.origin_y + self.y_sign * y)
+        robot_x = _nonzero(self.origin_x + self.x_sign * (x - self._paper_w / 2))
+        robot_y = _nonzero(self.origin_y + self.y_sign * (y - self._paper_h / 2))
         if self._mas_adentro(robot_x, robot_y):
             logger.warning(
                 "salto %.1f,%.1f: queda mas cerca del brazo que un punto que no cupo",

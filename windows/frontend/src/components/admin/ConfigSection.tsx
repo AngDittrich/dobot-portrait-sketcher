@@ -180,11 +180,11 @@ export function ConfigSection({
           <h3>Hoja y calibración</h3>
           <div className="admin-fields">
             <label>
-              Origen X
+              Centro X
               <input inputMode="decimal" value={booth.origin_x} onChange={(event) => patch('origin_x', event.target.value)} />
             </label>
             <label>
-              Origen Y
+              Centro Y
               <input inputMode="decimal" value={booth.origin_y} onChange={(event) => patch('origin_y', event.target.value)} />
             </label>
             <label>
@@ -214,7 +214,7 @@ export function ConfigSection({
           </div>
           <div className="admin-card-actions">
             <button type="button" className="admin-press" disabled={live.length < 4} onClick={() => teach('origin')}>
-              Pose como origen
+              Pose como centro
             </button>
             <button type="button" className="admin-press" disabled={live.length < 4} onClick={() => teach('far')}>
               Pose como esquina
