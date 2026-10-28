@@ -13,8 +13,12 @@ de DobotStudio contesta `-1` a todo aunque el socket conecte.
 
 from __future__ import annotations
 
+import logging
 import socket
+import time
 from dataclasses import dataclass
+
+logger = logging.getLogger("robot")
 
 DASHBOARD_PORT = 29999
 MOVE_PORT = 30003
@@ -67,9 +71,15 @@ class MG400Link:
         dashboard_port: int = DASHBOARD_PORT,
         move_port: int = MOVE_PORT,
         timeout_s: float = 5.0,
+        move_timeout_s: float = 60.0,
     ) -> None:
         self.host = host
         self.timeout_s = timeout_s
+        # Con la cola llena el controlador retiene la respuesta del MovL hasta
+        # que hay espacio; cortar antes cierra el socket y detiene el brazo.
+        self.move_timeout_s = move_timeout_s
+        self.last_raw = b""
+        logger.info("conectando a %s (dashboard %s, movimiento %s)", host, dashboard_port, move_port)
         self._dashboard = self._open(dashboard_port)
         self._move = self._open(move_port)
 
@@ -78,9 +88,9 @@ class MG400Link:
         sock.settimeout(self.timeout_s)
         return sock
 
-    def _ask(self, sock: socket.socket, command: str) -> Reply:
+    def _ask(self, sock: socket.socket, command: str, timeout_s: float | None = None) -> Reply:
         sock.sendall((command + "\n").encode("ascii"))
-        sock.settimeout(self.timeout_s)
+        sock.settimeout(self.timeout_s if timeout_s is None else timeout_s)
         data = b""
         while True:
             try:
@@ -97,13 +107,22 @@ class MG400Link:
             if text.endswith(";") and "," in text:
                 break
             sock.settimeout(SILENCE_S)
+        self.last_raw = data
         return _parse(data.decode("utf-8", errors="replace"))
 
     def dashboard(self, command: str) -> Reply:
         return self._ask(self._dashboard, command)
 
     def move(self, command: str) -> Reply:
-        return self._ask(self._move, command)
+        return self._ask(self._move, command, timeout_s=self.move_timeout_s)
+
+    def _step(self, command: str) -> Reply:
+        started = time.monotonic()
+        reply = self.dashboard(command)
+        logger.info(
+            "%s -> %s %r (%.2f s)", command, reply.code, self.last_raw, time.monotonic() - started
+        )
+        return self.require(reply, command)
 
     def require(self, reply: Reply, command: str) -> Reply:
         if not reply.ok:
@@ -169,11 +188,13 @@ class MG400Link:
         `EnableRobot` solo se manda si hace falta: en un robot ya habilitado
         tarda más de un segundo y es lo que hacía sentir lento cada clic.
         """
-        if self.mode() != MODE_ENABLED:
-            self.require(self.dashboard("EnableRobot()"), "EnableRobot")
-        self.require(self.dashboard("ClearError()"), "ClearError")
-        self.require(self.dashboard("Continue()"), "Continue")
-        self.require(self.dashboard(f"SpeedFactor({int(percent)})"), "SpeedFactor")
+        mode = self.mode()
+        logger.info("RobotMode() -> %s %r", mode, self.last_raw)
+        if mode != MODE_ENABLED:
+            self._step("EnableRobot()")
+        self._step("ClearError()")
+        self._step("Continue()")
+        self._step(f"SpeedFactor({int(percent)})")
 
     def disable(self) -> Reply:
         return self.dashboard("DisableRobot()")
@@ -206,8 +227,15 @@ class MG400Link:
             self.sync()
 
     def sync(self) -> None:
-        """Espera a que la cola de movimiento se vacíe."""
-        self.move("Sync()")
+        """Espera a que la cola de movimiento se vacíe.
+
+        Un retrato puede tardar hasta un par de minutos. El tiempo de lectura
+        de un MovL no alcanza: si se corta antes, el socket se desfasa y el
+        siguiente dibujo ya no obtiene respuesta.
+        """
+        reply = self._ask(self._move, "Sync()", timeout_s=180.0)
+        if not reply.ok:
+            raise MG400Error(f"Sync devolvio {reply.code}")
 
     def jog(self, axis: str) -> None:
         """Arranca un desplazamiento continuo hasta `jog_stop` (X+, Y-, Z+...)."""
