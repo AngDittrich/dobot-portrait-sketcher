@@ -37,6 +37,12 @@ MIN_ACC_MM_S2 = 1.0
 # controlador cerraba el socket a los 2-3 s; con 6 mm quedan ~1/5 y el brazo
 # acelera (10.2 mm/s medidos contra 2.4 mm/s con pasos cortos).
 DEFAULT_MIN_STEP_MM = 6.0
+
+# Si el final de un trazo queda a menos de esto del inicio del siguiente, el
+# lápiz no se levanta: se une con un conector corto. Cada cambio de altura
+# obliga a vaciar la cola del MG400 y cuesta ~3 s, así que encadenar es lo que
+# baja el retrato de 365 s.
+DEFAULT_JOIN_GAP_MM = 2.0
 # Confirmación de llegada: se lee la pose hasta que el brazo está a 0.5 mm.
 ARRIVAL_TOLERANCE_MM = 0.5
 ARRIVAL_POLL_S = 0.1
@@ -223,6 +229,7 @@ class MG400Client(RobotClient):
         acc_mm_s2: float = DEFAULT_ACC_MM_S2,
         pace_lead_s: float = DEFAULT_PACE_LEAD_S,
         min_step_mm: float = DEFAULT_MIN_STEP_MM,
+        join_gap_mm: float = DEFAULT_JOIN_GAP_MM,
         wait_arrival: bool = True,
         arrival_tolerance_mm: float = ARRIVAL_TOLERANCE_MM,
         arrival_poll_s: float = ARRIVAL_POLL_S,
@@ -242,6 +249,7 @@ class MG400Client(RobotClient):
         self.acc_mm_s2 = min(MAX_ACC_MM_S2, max(MIN_ACC_MM_S2, float(acc_mm_s2)))
         self.pace_lead_s = pace_lead_s
         self.min_step_mm = max(0.0, float(min_step_mm))
+        self.join_gap_mm = max(0.0, float(join_gap_mm))
         self.wait_arrival = wait_arrival
         self.pipeline = max(1, int(pipeline))
         self._pending: list[tuple[float, float, float, int]] = []
@@ -332,6 +340,7 @@ class MG400Client(RobotClient):
             acc_mm_s2=optional_float("ROBOT_ACC_MM_S2", DEFAULT_ACC_MM_S2),
             pipeline=optional_int("ROBOT_PIPELINE", DEFAULT_PIPELINE),
             min_step_mm=optional_float("ROBOT_STEP_MM", DEFAULT_MIN_STEP_MM),
+            join_gap_mm=optional_float("ROBOT_JOIN_MM", DEFAULT_JOIN_GAP_MM),
             r_far=r_far,
             far_x=far_x,
             far_y=far_y,
@@ -413,15 +422,28 @@ class MG400Client(RobotClient):
         pen_down: bool,
     ) -> tuple[bool, list[float]]:
         start = points[0]
-        if pen_down and held is not None and not _near(held, start):
-            await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
-            pen_down = False
-        if held is None or not _near(held, start):
-            await self._goto(start[0], start[1], self.z_travel,  self.speed_travel, 0)
+        cerca = (
+            pen_down
+            and held is not None
+            and self.join_gap_mm > 0
+            and _distance(held, start) <= self.join_gap_mm
+            and not _near(held, start)
+        )
+        if cerca:
+            # El conector se dibuja: cuesta ~0.5 s y ahorra los ~3 s de subir,
+            # trasladar y volver a bajar el lápiz.
+            await self._goto(start[0], start[1], self.z_draw,  self.speed_factor, self.cp_draw)
             held = start
-        if not pen_down:
-            await self._goto(start[0], start[1], self.z_draw,  self.speed_factor, 0)
-            pen_down = True
+        else:
+            if pen_down and held is not None and not _near(held, start):
+                await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
+                pen_down = False
+            if held is None or not _near(held, start):
+                await self._goto(start[0], start[1], self.z_travel,  self.speed_travel, 0)
+                held = start
+            if not pen_down:
+                await self._goto(start[0], start[1], self.z_draw,  self.speed_factor, 0)
+                pen_down = True
         for point in points[1:]:
             # Paso mínimo: 1706 comandos de 1.18 mm matan la conexión del
             # MG400. Con 6 mm quedan ~1/5 de las órdenes y el brazo alcanza
