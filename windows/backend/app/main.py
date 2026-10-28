@@ -11,6 +11,7 @@ Contrato que consume el frontend React (`windows/frontend`):
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
 import time
@@ -73,6 +74,7 @@ app.add_middleware(
 
 renderer = PortraitRenderer(MODELS_DIR)
 robot = robot_from_env()
+robot_log = logging.getLogger("robot")
 sketches = SketchStore()
 jobs = JobStore()
 
@@ -319,6 +321,16 @@ async def create_job(payload: JobRequest) -> dict:
 
     async def run() -> None:
         total = trajectory.total_length or 1.0
+        started = time.monotonic()
+        robot_log.info(
+            "%s: inicia con %s (boceto %s, %d segmentos, %.0f x %.0f mm)",
+            job.id,
+            robot.name,
+            sketch.id,
+            len(trajectory.segments),
+            trajectory.width_mm,
+            trajectory.height_mm,
+        )
         try:
             await robot.connect()
 
@@ -330,9 +342,16 @@ async def create_job(payload: JobRequest) -> dict:
             job.status = "done"
             job.progress = 1.0
             job.eta_seconds = 0.0
+            robot_log.info("%s: terminado en %.1f s", job.id, time.monotonic() - started)
         except Exception as exc:  # noqa: BLE001
             job.status = "error"
             job.error = str(exc)
+            robot_log.exception(
+                "%s: fallo al %.1f%% tras %.1f s",
+                job.id,
+                job.progress * 100,
+                time.monotonic() - started,
+            )
 
     asyncio.create_task(run())
     return {

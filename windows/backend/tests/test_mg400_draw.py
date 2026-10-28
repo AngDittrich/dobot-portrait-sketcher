@@ -253,6 +253,123 @@ def test_un_fallo_suelta_el_socket_para_el_siguiente_dibujo():
     assert cliente._link is None
 
 
+class _EnlaceQueFallaConDiagnostico(_EnlaceQueFalla):
+    last_raw = b""
+
+    def dashboard(self, command: str) -> Reply:
+        respuestas = {
+            "RobotMode()": Reply(code=0, value="9"),
+            "GetErrorID()": Reply(code=0, value="[[22],[],[],[],[]]"),
+            "GetPose()": Reply(code=0, value="250.0,28.9,-167.0,125.0"),
+        }
+        return respuestas.get(command, Reply(code=0, value=""))
+
+
+def test_un_fallo_deja_el_diagnostico_en_el_log(caplog: pytest.LogCaptureFixture):
+    enlace = _EnlaceQueFallaConDiagnostico()
+    cliente = MG400Client(link=enlace, z_draw=-167.0, z_travel=-160.0, r=145.0)
+    papel = Trajectory(
+        segments=[Segment(type="draw", points=[[0.0, 0.0], [5.0, 0.0]])],
+        width_mm=10.0,
+        height_mm=10.0,
+    )
+
+    async def correr() -> None:
+        async def progreso(_valor: float, _segmento: Segment) -> None:
+            return None
+
+        await cliente.draw(papel, progreso)
+
+    with caplog.at_level("INFO", logger="robot"), pytest.raises(MG400Error):
+        asyncio.run(correr())
+    texto = caplog.text
+    assert "MovL(" in texto
+    assert "RobotMode()" in texto and "9" in texto
+    assert "GetErrorID()" in texto and "[[22]" in texto
+    assert "GetPose()" in texto
+
+
+class _EnlaceLento(EnlaceFalso):
+    def move(self, command: str) -> Reply:
+        import time
+
+        time.sleep(0.03)
+        return super().move(command)
+
+
+def test_una_respuesta_lenta_avisa_pero_no_corta(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("app.robot.client.SLOW_REPLY_S", 0.01)
+    enlace = _EnlaceLento()
+    cliente = _cliente(enlace)
+
+    async def correr() -> None:
+        async def progreso(_valor: float, _segmento: Segment) -> None:
+            return None
+
+        await cliente.draw(_trayectoria(), progreso)
+
+    with caplog.at_level("INFO", logger="robot"):
+        asyncio.run(correr())
+    assert enlace.moves[-1] == "Sync()"
+    assert "tardo" in caplog.text
+
+
+def test_el_movl_espera_lo_que_tarde_la_cola():
+    """El controlador retiene la respuesta mientras la cola está llena: no es un fallo."""
+    import socket
+    import threading
+    import time
+
+    from app.robot.mg400 import MG400Link
+
+    def servidor(retraso: float) -> tuple[socket.socket, int]:
+        escucha = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        escucha.bind(("127.0.0.1", 0))
+        escucha.listen(1)
+
+        def atender() -> None:
+            conexion, _ = escucha.accept()
+            with conexion:
+                while True:
+                    datos = conexion.recv(1024)
+                    if not datos:
+                        return
+                    time.sleep(retraso)
+                    orden = datos.decode().strip()
+                    conexion.sendall(f"0,{{}},{orden};".encode())
+
+        threading.Thread(target=atender, daemon=True).start()
+        return escucha, escucha.getsockname()[1]
+
+    tablero, puerto_tablero = servidor(0.0)
+    movimiento, puerto_movimiento = servidor(0.4)
+    enlace = MG400Link(
+        "127.0.0.1",
+        dashboard_port=puerto_tablero,
+        move_port=puerto_movimiento,
+        timeout_s=0.1,
+        move_timeout_s=3.0,
+    )
+    try:
+        assert enlace.move("MovL(1,2,3,4)").ok
+        assert enlace.last_raw.startswith(b"0,")
+    finally:
+        enlace.close()
+        tablero.close()
+        movimiento.close()
+
+
+def test_el_plazo_del_movl_sale_del_entorno(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("ROBOT_DRY_RUN", "1")
+    monkeypatch.setenv("ROBOT_MOVE_TIMEOUT_S", "12")
+    assert MG400Client.from_env().move_timeout_s == 12.0
+    monkeypatch.delenv("ROBOT_MOVE_TIMEOUT_S")
+    monkeypatch.setattr("app.robot.client._dotenv", lambda: {"ROBOT_DRY_RUN": "1"})
+    assert MG400Client.from_env().move_timeout_s == 60.0
+
+
 def test_rechaza_un_punto_fuera_del_papel_sin_mover():
     enlace = EnlaceFalso()
     cliente = _cliente(enlace)

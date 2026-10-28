@@ -8,10 +8,19 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger("robot")
+
+# Una respuesta más lenta que esto suele ser la cola del controlador llena.
+SLOW_REPLY_S = 1.0
+# Cada cuántas órdenes se imprime el avance en nivel INFO.
+LOG_EVERY = 50
 
 
 @dataclass
@@ -144,8 +153,12 @@ class MG400Client(RobotClient):
         r_far: float | None = None,
         far_x: float | None = None,
         far_y: float | None = None,
+        move_timeout_s: float = 60.0,
     ) -> None:
         self._link = link
+        self.move_timeout_s = move_timeout_s
+        self._sent = 0
+        self._total = 0
         self.host = host
         self.user = user
         self.tool = tool
@@ -216,6 +229,7 @@ class MG400Client(RobotClient):
             r_far=r_far,
             far_x=far_x,
             far_y=far_y,
+            move_timeout_s=optional_float("ROBOT_MOVE_TIMEOUT_S", 60.0),
         )
 
     async def connect(self) -> None:
@@ -223,11 +237,14 @@ class MG400Client(RobotClient):
             return
         if self._link is None:
             if self.dry_run:
+                logger.info("modo seco: no se abre socket")
                 self._link = _DryLink()
             else:
                 from app.robot.mg400 import MG400Link
 
-                self._link = MG400Link(self.host)
+                self._link = await asyncio.to_thread(
+                    MG400Link, self.host, move_timeout_s=self.move_timeout_s
+                )
         await asyncio.to_thread(self._link.prepare, self.speed_factor)  # type: ignore[attr-defined]
         await self._dashboard(f"User({int(self.user)})")
         await self._dashboard(f"Tool({int(self.tool)})")
@@ -237,6 +254,14 @@ class MG400Client(RobotClient):
     async def draw(self, trajectory: Trajectory, on_progress: ProgressCallback) -> None:
         self._validate(trajectory)
         await self.connect()
+        self._sent = 0
+        self._total = sum(len(segment.points) for segment in trajectory.segments)
+        logger.info(
+            "dibujo: %d segmentos, ~%d puntos, %.0f mm con lapiz abajo",
+            len(trajectory.segments),
+            self._total,
+            trajectory.draw_length,
+        )
         total = trajectory.total_length or 1.0
         done = 0.0
         pen_down = False
@@ -346,20 +371,66 @@ class MG400Client(RobotClient):
         from app.robot.mg400 import MG400Error
 
         self.commands.append(command)
+        self._sent += 1
+        started = time.monotonic()
         try:
             reply = await asyncio.to_thread(self._link.move, command)  # type: ignore[attr-defined]
         except Exception:
+            logger.exception("orden %d: %s no se pudo enviar", self._sent, command)
+            await self._diagnose()
             self._drop()
             raise
-        if getattr(reply, "ok", False):
-            return
-        alarm = await self._alarm()
+        elapsed = time.monotonic() - started
         code = getattr(reply, "code", "?")
+        if getattr(reply, "ok", False):
+            if elapsed >= SLOW_REPLY_S:
+                logger.warning(
+                    "orden %d/%d: el robot tardo %.1f s en aceptar %s (cola llena)",
+                    self._sent,
+                    self._total,
+                    elapsed,
+                    command,
+                )
+            elif self._sent % LOG_EVERY == 0:
+                logger.info("orden %d/%d enviada: %s", self._sent, self._total, command)
+            else:
+                logger.debug("orden %d -> %s (%.3f s): %s", self._sent, code, elapsed, command)
+            return
+        logger.error(
+            "orden %d/%d: %s devolvio %s tras %.1f s, respuesta cruda %r",
+            self._sent,
+            self._total,
+            command,
+            code,
+            elapsed,
+            getattr(self._link, "last_raw", b""),
+        )
+        await self._diagnose()
+        alarm = await self._alarm()
         self._drop()
         detail = " sin respuesta del controlador" if code == -99999 else ""
         if alarm:
             detail += f" alarma {alarm}"
         raise MG400Error(f"{command} devolvio {code}{detail}")
+
+    async def _diagnose(self) -> None:
+        """Lee el estado del controlador por el dashboard antes de soltar el socket."""
+        dashboard = getattr(self._link, "dashboard", None)
+        if dashboard is None:
+            return
+        for command in ("RobotMode()", "GetErrorID()", "GetPose()"):
+            try:
+                reply = await asyncio.to_thread(dashboard, command)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("diagnostico %s: sin respuesta (%s)", command, exc)
+                continue
+            logger.error(
+                "diagnostico %s -> %s {%s} crudo %r",
+                command,
+                getattr(reply, "code", "?"),
+                getattr(reply, "value", ""),
+                getattr(self._link, "last_raw", b""),
+            )
 
     async def _alarm(self) -> str:
         errors = getattr(self._link, "errors", None)
@@ -377,19 +448,26 @@ class MG400Client(RobotClient):
         try:
             reply = await asyncio.to_thread(self._link.dashboard, command)  # type: ignore[attr-defined]
         except Exception:
+            logger.exception("%s no se pudo enviar", command)
             self._drop()
             raise
+        logger.info("%s -> %s", command, getattr(reply, "code", "?"))
         if not getattr(reply, "ok", False):
             self._drop()
             raise MG400Error(f"{command} devolvio {getattr(reply, 'code', '?')}")
 
     async def _sync(self) -> None:
         self.commands.append("Sync()")
+        logger.info("%d ordenes enviadas; Sync() espera a que el brazo termine", self._sent)
+        started = time.monotonic()
         try:
             await asyncio.to_thread(self._link.sync)  # type: ignore[attr-defined]
         except Exception:
+            logger.exception("Sync() fallo tras %.1f s", time.monotonic() - started)
+            await self._diagnose()
             self._drop()
             raise
+        logger.info("Sync() termino en %.1f s", time.monotonic() - started)
 
     @staticmethod
     def _validate(trajectory: Trajectory) -> None:
@@ -458,8 +536,20 @@ def _setting(name: str, default: str = "") -> str:
     return _dotenv().get(name, default).strip()
 
 
+def configure_logging() -> None:
+    """Saca el logger `robot` a la consola de uvicorn, que solo configura los suyos."""
+    level = _setting("ROBOT_LOG_LEVEL", "INFO").upper()
+    logger.setLevel(getattr(logging, level, logging.INFO))
+    if logger.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s ROBOT %(levelname)s %(message)s", "%H:%M:%S"))
+    logger.addHandler(handler)
+
+
 def robot_from_env() -> RobotClient:
     """`ROBOT_BACKEND=mock` (default) o `mg400`."""
+    configure_logging()
     backend = _setting("ROBOT_BACKEND", "mock").lower() or "mock"
     if backend == "mock":
         return MockRobotClient()
