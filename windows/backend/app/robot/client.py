@@ -262,6 +262,8 @@ class MG400Client(RobotClient):
         self.unstick_sleep_s = float(unstick_sleep_s)
         self._resets_left = self.unstick_resets
         self._last_point: tuple[float, float, float] | None = None
+        # Radio (mm al eje) del punto que no cupo. Más adentro no se vuelve a intentar.
+        self._radio_minimo: float | None = None
         self._clock = clock
         self._sleep = sleep
         self._pace_due: float | None = None
@@ -383,6 +385,7 @@ class MG400Client(RobotClient):
         self._pace_target = None
         self._resets_left = self.unstick_resets
         self._last_point = None
+        self._radio_minimo = None
         self._pending = []
         self._reconnects_left = self.reconnects
         self._total = sum(len(segment.points) for segment in trajectory.segments)
@@ -432,29 +435,30 @@ class MG400Client(RobotClient):
         if cerca:
             # El conector se dibuja: cuesta ~0.5 s y ahorra los ~3 s de subir,
             # trasladar y volver a bajar el lápiz.
-            await self._goto(start[0], start[1], self.z_draw,  self.speed_factor, self.cp_draw)
-            held = start
+            if await self._goto(start[0], start[1], self.z_draw,  self.speed_factor, self.cp_draw):
+                held = start
         else:
             if pen_down and held is not None and not _near(held, start):
-                await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
-                pen_down = False
+                if await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0):
+                    pen_down = False
             if held is None or not _near(held, start):
-                await self._goto(start[0], start[1], self.z_travel,  self.speed_travel, 0)
-                held = start
+                if await self._goto(start[0], start[1], self.z_travel,  self.speed_travel, 0):
+                    held = start
             if not pen_down:
-                await self._goto(start[0], start[1], self.z_draw,  self.speed_factor, 0)
-                pen_down = True
+                if await self._goto(start[0], start[1], self.z_draw,  self.speed_factor, 0):
+                    pen_down = True
+                    held = start
         for point in points[1:]:
             # Paso mínimo: 1706 comandos de 1.18 mm matan la conexión del
             # MG400. Con 6 mm quedan ~1/5 de las órdenes y el brazo alcanza
             # a acelerar (10 mm/s medidos contra 2.4 mm/s con pasos cortos).
-            if _distance(held, point) < self.min_step_mm and point is not points[-1]:
+            if held is not None and _distance(held, point) < self.min_step_mm and point is not points[-1]:
                 continue
-            await self._goto(point[0], point[1], self.z_draw,  self.speed_factor, self.cp_draw)
-            held = point
+            if await self._goto(point[0], point[1], self.z_draw,  self.speed_factor, self.cp_draw):
+                held = point
         if held is not None and _distance(held, points[-1]) > 1e-6:
-            await self._goto(points[-1][0], points[-1][1], self.z_draw,  self.speed_factor, self.cp_draw)
-            held = points[-1]
+            if await self._goto(points[-1][0], points[-1][1], self.z_draw,  self.speed_factor, self.cp_draw):
+                held = points[-1]
         return pen_down, held if held is not None else start
 
     async def _travel(
@@ -475,16 +479,16 @@ class MG400Client(RobotClient):
                 for point in points:
                     if held is not None and _near(held, point):
                         continue
-                    await self._goto(point[0], point[1], self.z_draw,  self.speed_factor, self.cp_draw)
-                    held = point
+                    if await self._goto(point[0], point[1], self.z_draw,  self.speed_factor, self.cp_draw):
+                        held = point
                 return pen_down, held if held is not None else points[-1]
-            await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
-            pen_down = False
+            if await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0):
+                pen_down = False
         for point in points:
             if held is not None and _near(held, point):
                 continue
-            await self._goto(point[0], point[1], self.z_travel,  self.speed_travel, 0)
-            held = point
+            if await self._goto(point[0], point[1], self.z_travel,  self.speed_travel, 0):
+                held = point
         return pen_down, held if held is not None else points[-1]
 
     async def _goto(
@@ -494,9 +498,17 @@ class MG400Client(RobotClient):
         z: float,
         speed: int,
         cp: int,
-    ) -> None:
+    ) -> bool:
+        """Manda el punto. False si quedó fuera del brazo y se saltó para seguir dibujando."""
         robot_x = _nonzero(self.origin_x + self.x_sign * x)
         robot_y = _nonzero(self.origin_y + self.y_sign * y)
+        if self._mas_adentro(robot_x, robot_y):
+            logger.warning(
+                "salto %.1f,%.1f: queda mas cerca del brazo que un punto que no cupo",
+                robot_x,
+                robot_y,
+            )
+            return False
         rotation = _nonzero(self._rotation(robot_x, robot_y))
         command = (
             f"MovL({robot_x:.3f},{robot_y:.3f},{_nonzero(z):.3f},{rotation:.3f},"
@@ -522,12 +534,45 @@ class MG400Client(RobotClient):
             while len(self._pending) >= self.pipeline:
                 await self._wait_pending()
         else:
-            trabado = await self._wait_arrival(robot_x, robot_y, distance, speed)
-            if trabado and self._resets_left > 0:
-                await self._unstick()
-                await self._move(command)
-                await self._wait_arrival(robot_x, robot_y, distance, speed)
+            estado = await self._wait_arrival(robot_x, robot_y, distance, speed)
+            if estado == "short":
+                # Se movió, pero no llegó: está entrando a la zona pegada al eje.
+                # El siguiente punto, más adentro, no se manda.
+                self._marcar_borde(robot_x, robot_y)
+                limite = await self._en_limite()
+                if limite:
+                    logger.warning(
+                        "el punto %.1f,%.1f queda en el limite del brazo (%s); lo salto y sigo",
+                        robot_x,
+                        robot_y,
+                        limite,
+                    )
+                    await self._soltar_limite()
+                else:
+                    logger.warning(
+                        "el punto %.1f,%.1f no cupo junto al brazo; no sigo mas adentro",
+                        robot_x,
+                        robot_y,
+                    )
+                return False
+            if estado == "stuck":
+                limite = await self._en_limite()
+                if limite:
+                    self._marcar_borde(robot_x, robot_y)
+                    logger.warning(
+                        "el punto %.1f,%.1f queda en el limite del brazo (%s); lo salto y sigo",
+                        robot_x,
+                        robot_y,
+                        limite,
+                    )
+                    await self._soltar_limite()
+                    return False
+                if self._resets_left > 0:
+                    await self._unstick()
+                    await self._move(command)
+                    await self._wait_arrival(robot_x, robot_y, distance, speed)
         self._last_point = target
+        return True
 
     async def _drain(self) -> None:
         """Espera a que se ejecute todo lo que quedó en vuelo."""
@@ -536,7 +581,8 @@ class MG400Client(RobotClient):
 
     async def _wait_pending(self) -> None:
         robot_x, robot_y, distance, speed = self._pending.pop(0)
-        await self._wait_arrival(robot_x, robot_y, distance, speed)
+        if await self._wait_arrival(robot_x, robot_y, distance, speed) == "short":
+            self._marcar_borde(robot_x, robot_y)
 
     async def _wait_arrival(
         self,
@@ -544,21 +590,22 @@ class MG400Client(RobotClient):
         robot_y: float,
         distance_mm: float,
         speed: int,
-    ) -> bool:
+    ) -> str:
         """Espera a que el brazo llegue antes de mandar la siguiente orden.
 
         Medido: con flujo continuo de MovL el controlador cierra el socket a
         los 2-3 s. Una orden a la vez, confirmando la pose, aguantó 40/40.
 
-        Devuelve True solo si el brazo no se acercó nada: la orden se aceptó
-        pero la cola del controlador quedó trabada.
+        `ok` si llegó o ya pasó el punto. `stuck` si no se acercó nada: la
+        cola aceptó la orden y no la ejecutó. `short` si se movió pero el
+        plazo se acabó lejos del punto, junto al brazo.
         """
         if not self.wait_arrival:
-            return False
+            return "ok"
         link = self._link
         pose = getattr(link, "pose", None)
         if pose is None:
-            return False
+            return "ok"
         presupuesto = distance_mm / effective_speed_mm_s(
             distance_mm, speed, self.acc_mm_s2
         ) + self.arrival_extra_s
@@ -569,23 +616,45 @@ class MG400Client(RobotClient):
             try:
                 actual = await asyncio.to_thread(pose)
             except Exception:  # noqa: BLE001 - sin lectura seguimos dibujando
-                return False
+                return "ok"
             distancia = (
                 (float(actual[0]) - robot_x) ** 2 + (float(actual[1]) - robot_y) ** 2
             ) ** 0.5
             if inicial is None:
                 inicial = distancia
             if distancia <= self.arrival_tolerance_mm:
-                return False
+                return "ok"
             if ya_paso(mejor, distancia, self.arrival_tolerance_mm):
-                return False
+                return "ok"
             mejor = min(mejor, distancia)
             await asyncio.sleep(self.arrival_poll_s)
+        lejos = mejor if mejor < float("inf") else -1.0
         logger.warning(
-            "el brazo no llego a %.1f,%.1f en %.1f s (sigo)", robot_x, robot_y, presupuesto
+            "el brazo no llego a %.1f,%.1f en %.1f s; sigue a %.1f mm",
+            robot_x,
+            robot_y,
+            presupuesto,
+            lejos,
         )
         # Se movió menos de medio milímetro: la orden nunca llegó a ejecutarse.
-        return inicial is not None and inicial - mejor < 0.5
+        if inicial is not None and inicial - mejor < 0.5:
+            return "stuck"
+        if mejor > self.arrival_tolerance_mm:
+            return "short"
+        return "ok"
+
+    def _radio(self, x: float, y: float) -> float:
+        return (x * x + y * y) ** 0.5
+
+    def _mas_adentro(self, x: float, y: float) -> bool:
+        if self._radio_minimo is None:
+            return False
+        return self._radio(x, y) < self._radio_minimo
+
+    def _marcar_borde(self, x: float, y: float) -> None:
+        radio = self._radio(x, y)
+        if self._radio_minimo is None or radio < self._radio_minimo:
+            self._radio_minimo = radio
 
     async def _unstick(self) -> None:
         """Destraba la cola del controlador sin ir al robot.
@@ -609,6 +678,43 @@ class MG400Client(RobotClient):
         await asyncio.sleep(self.unstick_sleep_s)
         self._drop()
         await self.connect()
+
+    async def _en_limite(self) -> str:
+        """Texto de alarma si el controlador está en error. Vacío si solo no se movió."""
+        link = self._link
+        mode_fn = getattr(link, "mode", None)
+        if mode_fn is None:
+            return ""
+        try:
+            mode = await asyncio.to_thread(mode_fn)
+        except Exception:  # noqa: BLE001
+            return ""
+        if mode not in (9, 11):
+            return ""
+        detail = f"modo {mode}"
+        errors_fn = getattr(link, "errors", None)
+        if errors_fn is None:
+            return detail
+        try:
+            raw = str(await asyncio.to_thread(errors_fn)).strip()
+        except Exception:  # noqa: BLE001
+            return detail
+        return f"{detail} {raw}".strip()
+
+    async def _soltar_limite(self) -> None:
+        """Quita la alarma sin reiniciar el controlador ni repetir el punto ilegal."""
+        dashboard = getattr(self._link, "dashboard", None)
+        if dashboard is None:
+            return
+        for command in ("ClearError()", "EnableRobot()", "Continue()"):
+            try:
+                reply = await asyncio.to_thread(dashboard, command)
+            except Exception:  # noqa: BLE001
+                logger.exception("%s no respondio tras el limite", command)
+                return
+            code = int(getattr(reply, "code", -1))
+            if code != 0:
+                logger.warning("%s devolvio %s tras el limite", command, code)
 
     async def _pace(self, target: tuple[float, float, float], speed: int) -> None:
         """Deja pasar el tiempo justo para no llenar la cola del controlador.
