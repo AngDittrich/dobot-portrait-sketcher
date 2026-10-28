@@ -36,13 +36,13 @@ MIN_ACC_MM_S2 = 1.0
 # Paso mínimo entre órdenes. Con 1.18 mm hacían falta 1706 MovL y el
 # controlador cerraba el socket a los 2-3 s; con 6 mm quedan ~1/5 y el brazo
 # acelera (10.2 mm/s medidos contra 2.4 mm/s con pasos cortos).
-DEFAULT_MIN_STEP_MM = 6.0
+DEFAULT_MIN_STEP_MM = 8.0
 
 # Si el final de un trazo queda a menos de esto del inicio del siguiente, el
 # lápiz no se levanta: se une con un conector corto. Cada cambio de altura
 # obliga a vaciar la cola del MG400 y cuesta ~3 s, así que encadenar es lo que
 # baja el retrato de 365 s.
-DEFAULT_JOIN_GAP_MM = 2.0
+DEFAULT_JOIN_GAP_MM = 6.0
 # Confirmación de llegada: se lee la pose hasta que el brazo está a 0.5 mm.
 ARRIVAL_TOLERANCE_MM = 0.5
 ARRIVAL_POLL_S = 0.1
