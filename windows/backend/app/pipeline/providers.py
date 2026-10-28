@@ -39,7 +39,12 @@ DEFAULT_TIMEOUT_S = 25.0
 # Todo lo que no sea papel cuenta como tinta. El modelo no siempre dibuja con el
 # mismo grosor: con umbral por cuantil, las caras que dibujaba con línea fina se
 # partían en guiones. Fijo aguanta ambas.
-INK_THRESHOLD = 200
+#
+# 180 y no 200: el "papel blanco" que devuelve el modelo es gris 223 con grano, y
+# a 200 el grano de las esquinas entraba como tinta (58 manchas falsas medidas en
+# una foto real, que el robot dibujaba como una maraña de garabatos). El trazo del
+# modelo está en 25 de gris, así que 180 sigue sin perder ni una línea.
+INK_THRESHOLD = 180
 # Cierre en px para volver a pegar los huecos de un píxel de la línea fina.
 GAP_CLOSE_PX = 3
 OUTPUT_WIDTH = 768
@@ -74,9 +79,9 @@ DRAWING_RULES = """DRAWING RULES:
   any kind. Fewer lines is better.
 - Hair and facial hair keep their real silhouette and volume, drawn with a few
   long confident strokes. Never leave the head bald or with a few stray hairs.
-- Hair, beards and mustaches are an outline with a few interior strokes, never a
-  filled solid black shape. A thin goatee or mustache stays thin: one contour,
-  not a black patch.
+- Hair, beards and mustaches are an outline with at most three short interior
+  strokes, never a filled solid black shape and never hatched or scribbled
+  inside. A thin goatee or mustache stays thin: one contour, not a black patch.
 - No words, letters, numbers, logos, signatures or watermarks anywhere.
 - Plain white background, nothing else in the frame: no border, no vignette.
 - Clothing stays blank unless a costume is added below.
@@ -90,13 +95,14 @@ CARICATURE_OPENING = """Redraw this photograph as a bold, playful black ink cari
 white paper.
 
 Make the character bigger than life. Pick the two features that already stand
-out in the photo, such as a wide smile, a big nose, a round chin or strong
-eyebrows, and draw them clearly oversized. Give the face an expression with
-life: a broad open smile and raised eyebrows. Use loose, confident hand-drawn
+out in the photo, such as a big nose, a round chin, strong eyebrows or full
+cheeks, and draw them clearly oversized. Use loose, confident hand-drawn
 outlines, a touch imperfect on purpose, with one bold weight instead of many
 thin lines.
 
-The exaggeration is only the size of those features. The eyes keep their exact
+The exaggeration is only the size of those features. The expression stays the
+one in the photo: if the person is not smiling there, the drawing does not
+smile either, and the mouth keeps its real shape. The eyes keep their exact
 position, size and distance so the person is still recognizable, and nothing is
 added that is not already in the photo.
 
@@ -124,9 +130,9 @@ STYLE_OPENINGS = {
     "cartoon": (
         "Redraw this photograph as a simple black ink cartoon "
         "on plain white paper.\n\n"
-        "Rounder shapes, a bigger smile and fewer, bolder outlines, but the hair "
-        "keeps its real shape and volume and the eyes stay open with a visible "
-        "pupil."
+        "Rounder shapes and fewer, bolder outlines, but the expression stays "
+        "the one in the photo, the hair keeps its real shape and volume, and the "
+        "eyes stay open with a visible pupil."
     ),
 }
 
