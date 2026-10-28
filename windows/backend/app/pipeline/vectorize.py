@@ -22,6 +22,12 @@ NEIGHBORS_8 = ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1,
 # El 2-opt es O(n^2) por pasada; con muchos trazos se queda colgado.
 TWO_OPT_MAX_STROKES = 250
 
+# Velocidad real del MG400 con la tubería de 3 órdenes en vuelo: 174 mm en
+# 8.9 s. Con una sola orden en vuelo baja a 7.5 mm/s. El presupuesto de 150 s
+# y el tiempo que anuncia la cabina se calculan con este número medido, no con
+# el ideal de 80 mm/s que el brazo nunca alcanza.
+MEASURED_SPEED_MM_S = 19.6
+
 
 @dataclass
 class Stroke:
@@ -616,7 +622,7 @@ def estimate_seconds(
     strokes: list[np.ndarray],
     width: int,
     target_width_mm: float = 140.0,
-    speed_mm_s: float = 80.0,
+    speed_mm_s: float = MEASURED_SPEED_MM_S,
 ) -> float:
     """Segundos que tardará el robot (sin rehacer la trayectoria completa)."""
     if not strokes:
@@ -634,7 +640,7 @@ def prune_to_budget(
     width: int,
     max_seconds: float,
     target_width_mm: float = 140.0,
-    speed_mm_s: float = 80.0,
+    speed_mm_s: float = MEASURED_SPEED_MM_S,
     min_strokes: int = 12,
 ) -> list[np.ndarray]:
     """Quita los trazos más cortos hasta que el dibujo quepa en el tiempo.
@@ -809,7 +815,7 @@ def build_trajectory(
     height: int,
     target_width_mm: float = 140.0,
     spacing_mm: float = 1.5,
-    speed_mm_s: float = 80.0,
+    speed_mm_s: float = MEASURED_SPEED_MM_S,
 ) -> VectorResult:
     """Convierte los trazos ordenados en una trayectoria en milímetros.
 
