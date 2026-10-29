@@ -5,6 +5,9 @@ import type { StickId } from '../components/admin/stickSpaces'
 
 /**
  * Sondeo del estado del robot cada 800 ms mientras la página admin está abierta.
+ * No dispara otra consulta hasta que la anterior contestó: el dashboard del
+ * MG400 atiende una orden a la vez y, si la respuesta tarda más que el
+ * intervalo, las peticiones se encimaban y él cortaba la conexión.
  */
 export function useAdminStatus(token: string) {
   const [status, setStatus] = useState<AdminStatus | null>(null)
@@ -12,7 +15,10 @@ export function useAdminStatus(token: string) {
 
   useEffect(() => {
     let stop = false
+    let inFlight = false
     const tick = async () => {
+      if (inFlight) return
+      inFlight = true
       try {
         const next = await adminStatus(token)
         if (stop) return
@@ -20,6 +26,8 @@ export function useAdminStatus(token: string) {
         setPollError('')
       } catch (error) {
         if (!stop) setPollError(error instanceof Error ? error.message : 'sin respuesta')
+      } finally {
+        inFlight = false
       }
     }
     void tick()
