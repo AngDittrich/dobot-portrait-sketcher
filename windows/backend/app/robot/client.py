@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.robot import sheet as sheet_ops
+from app.robot import frame as frame_ops
+from app.robot.frame import Frame
 
 logger = logging.getLogger("robot")
 
@@ -242,7 +244,9 @@ class MG400Client(RobotClient):
         unstick_sleep_s: float = 6.0,
         connect_retries: int = 3,
         connect_retry_s: float = 0.6,
-        sheet: str = sheet_ops.DEFAULT,
+        frame: Frame | None = None,
+        lift_mm: float = frame_ops.DEFAULT_LIFT_MM,
+        margin_mm: float = frame_ops.DEFAULT_MARGIN_MM,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -267,9 +271,6 @@ class MG400Client(RobotClient):
         self.unstick_sleep_s = float(unstick_sleep_s)
         self.connect_retries = max(1, int(connect_retries))
         self.connect_retry_s = float(connect_retry_s)
-        # Hoja elegida en el panel: decide el tamaño del retrato y el área que se
-        # marca con el lápiz arriba antes de dibujar.
-        self.sheet = sheet_ops.DEFAULT if not sheet_ops.known(sheet) else str(sheet).strip().lower()
         self._resets_left = self.unstick_resets
         self._last_point: tuple[float, float, float] | None = None
         # Radio (mm al eje) del punto que no cupo. Más adentro no se vuelve a intentar.
@@ -301,6 +302,15 @@ class MG400Client(RobotClient):
         self.r_far = r_far
         self.far_x = far_x
         self.far_y = far_y
+        # Hoja enseñada con tres esquinas. Sin ella se usa el centro y los
+        # signos del `.env` (primer arranque, antes de calibrar).
+        self.frame: Frame | None = None
+        self.lift_mm = float(lift_mm)
+        self.margin_mm = float(margin_mm)
+        # (escala, u0, v0) del dibujo en curso dentro de la hoja.
+        self._fit = (1.0, 0.0, 0.0)
+        if frame is not None:
+            self.set_frame(frame, lift_mm, margin_mm)
         self.commands: list[str] = []
         self._ready = False
         # El MG400 acepta un solo cliente. Dos consultas a la vez no pueden abrir dos sockets.
@@ -361,8 +371,19 @@ class MG400Client(RobotClient):
             far_x=far_x,
             far_y=far_y,
             move_timeout_s=optional_float("ROBOT_MOVE_TIMEOUT_S", 60.0),
-            sheet=_setting("ROBOT_SHEET", sheet_ops.DEFAULT),
         )
+
+    def set_frame(self, frame: Frame | None, lift_mm: float, margin_mm: float) -> None:
+        """Cambia la hoja enseñada. Z de dibujo y de viaje pasan a salir del plano de la hoja."""
+        self.frame = frame
+        self.lift_mm = float(lift_mm)
+        self.margin_mm = float(margin_mm)
+        if frame is not None:
+            # Con hoja, z_draw y z_travel solo distinguen lápiz abajo de lápiz
+            # arriba; la altura real de cada punto sale de `_map`.
+            self.z_draw = frame.tl.z
+            self.z_travel = frame.tl.z + self.lift_mm
+            self.r = frame.tl.r
 
     async def connect(self) -> None:
         if self._ready and self._link is not None:
@@ -409,12 +430,17 @@ class MG400Client(RobotClient):
         await self._dashboard(f"CP({_blend(self.cp_draw)})")
         self._ready = True
 
-    async def mark_area(self, width_mm: float, height_mm: float) -> None:
-        """Recorre el borde de la hoja con el lápiz arriba para ubicarla en la mesa.
+    async def mark_area(self) -> None:
+        """Recorre el borde de la hoja enseñada con el lápiz arriba.
 
-        No dibuja nada: sirve para ver dónde va a caer el retrato y acomodar el
+        No dibuja nada: sirve para comprobar que las esquinas caen sobre el
         papel antes de que llegue el visitante.
         """
+        from app.robot.mg400 import MG400Error
+
+        if self.frame is None:
+            raise MG400Error("primero enseña las tres esquinas de la hoja")
+        width_mm, height_mm = self.frame.width, self.frame.height
         await self.connect()
         self._sent = 0
         self._pace_due = None
@@ -423,8 +449,7 @@ class MG400Client(RobotClient):
         self._radio_minimo = None
         self._pending = []
         self._reconnects_left = self.reconnects
-        self._paper_w = width_mm
-        self._paper_h = height_mm
+        self._fit = (1.0, 0.0, 0.0)
         corners = [
             (0.0, 0.0),
             (width_mm, 0.0),
@@ -449,6 +474,18 @@ class MG400Client(RobotClient):
         self._pending = []
         self._paper_w = trajectory.width_mm
         self._paper_h = trajectory.height_mm
+        if self.frame is not None:
+            self._fit = frame_ops.fit(
+                self.frame, trajectory.width_mm, trajectory.height_mm, self.margin_mm
+            )
+            logger.info(
+                "retrato %.0f x %.0f mm en hoja %.0f x %.0f (escala %.2f)",
+                trajectory.width_mm * self._fit[0],
+                trajectory.height_mm * self._fit[0],
+                self.frame.width,
+                self.frame.height,
+                self._fit[0],
+            )
         self._reconnects_left = self.reconnects
         self._total = sum(len(segment.points) for segment in trajectory.segments)
         logger.info(
@@ -562,8 +599,7 @@ class MG400Client(RobotClient):
         cp: int,
     ) -> bool:
         """Manda el punto. False si quedó fuera del brazo y se saltó para seguir dibujando."""
-        robot_x = _nonzero(self.origin_x + self.x_sign * (x - self._paper_w / 2))
-        robot_y = _nonzero(self.origin_y + self.y_sign * (y - self._paper_h / 2))
+        robot_x, robot_y, real_z, rotation = self._map(x, y, z)
         if self._mas_adentro(robot_x, robot_y):
             logger.warning(
                 "salto %.1f,%.1f: queda mas cerca del brazo que un punto que no cupo",
@@ -571,12 +607,8 @@ class MG400Client(RobotClient):
                 robot_y,
             )
             return False
-        rotation = _nonzero(self._rotation(robot_x, robot_y))
-        command = (
-            f"MovL({robot_x:.3f},{robot_y:.3f},{_nonzero(z):.3f},{rotation:.3f},"
-            f"SpeedL={int(speed)},AccL={int(self.acc_mm_s2)},CP={_blend(cp)})"
-        )
-        target = (robot_x, robot_y, float(z))
+        command = self._movl(robot_x, robot_y, real_z, rotation, speed, cp)
+        target = (robot_x, robot_y, real_z)
         distance = 0.0
         if self._last_point is not None:
             distance = (
@@ -804,6 +836,47 @@ class MG400Client(RobotClient):
             if espera > 0:
                 await self._sleep(espera)
         self._pace_target = target
+
+    def _map(self, x: float, y: float, z: float) -> tuple[float, float, float, float]:
+        """Punto del dibujo (mm) → X, Y, Z, R del robot.
+
+        `z` llega como `z_draw` o `z_travel`: lápiz abajo o arriba. Con hoja
+        enseñada, la altura real sale del plano de las esquinas en ese punto.
+        """
+        if self.frame is not None:
+            scale, u0, v0 = self._fit
+            robot_x, robot_y, plane_z, rotation = self.frame.to_robot(u0 + scale * x, v0 + scale * y)
+            real_z = plane_z if z == self.z_draw else plane_z + self.lift_mm
+            return _nonzero(robot_x), _nonzero(robot_y), _nonzero(real_z), _nonzero(rotation)
+        robot_x = _nonzero(self.origin_x + self.x_sign * (x - self._paper_w / 2))
+        robot_y = _nonzero(self.origin_y + self.y_sign * (y - self._paper_h / 2))
+        return robot_x, robot_y, _nonzero(float(z)), _nonzero(self._rotation(robot_x, robot_y))
+
+    def _movl(self, x: float, y: float, z: float, r: float, speed: int, cp: int) -> str:
+        return (
+            f"MovL({x:.3f},{y:.3f},{z:.3f},{r:.3f},"
+            f"SpeedL={int(speed)},AccL={int(self.acc_mm_s2)},CP={_blend(cp)})"
+        )
+
+    async def visit(self, x: float, y: float, z: float, r: float, speed: int | None = None) -> None:
+        """Lleva el brazo a un punto del robot sin arrastrar el lápiz: primero sube, luego viaja."""
+        await self.connect()
+        rate = self.speed_travel if speed is None else int(speed)
+        await self.prepare_motion(rate)
+        self._pending = []
+        pose_fn = getattr(self._link, "pose", None)
+        here: tuple[float, float, float, float] | None = None
+        if pose_fn is not None:
+            try:
+                here = tuple(float(value) for value in await asyncio.to_thread(pose_fn))[:4]  # type: ignore[assignment]
+            except Exception:  # noqa: BLE001 - sin pose se viaja directo
+                here = None
+        if here is not None and here[2] < z - 0.5:
+            await self._move(self._movl(here[0], here[1], z, here[3], rate, 0))
+            await self._wait_arrival(here[0], here[1], 0.0, rate)
+        distance = 0.0 if here is None else math.hypot(x - here[0], y - here[1])
+        await self._move(self._movl(_nonzero(x), _nonzero(y), _nonzero(z), _nonzero(r), rate, 0))
+        await self._wait_arrival(x, y, distance, rate)
 
     def _rotation(self, robot_x: float, robot_y: float) -> float:
         """Gira entre el R del origen y el de la esquina lejana, si se midió."""
