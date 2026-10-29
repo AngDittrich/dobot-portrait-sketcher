@@ -82,7 +82,7 @@ Medido paseando el brazo hasta que un tope lo detuvo (z = -95, R = 90):
 - La hoja va **horizontal**: el lado largo de izquierda a derecha. A5 queda 210 × 148 y A4 entra (297 × 210), porque el lado corto (210) cabe en los 240 mm de fondo. Con el lado largo de frente al fondo A4 no entra.
 - El retrato se queda **de pie** respecto a las esquinas enseñadas. No se gira 90°: arriba es la esquina superior que se enseñó. `build_trajectory(rotate=True)` existe, pero `SketchParams.rotate` viene apagado.
 - El tamaño lo marcan las esquinas. El selector de hoja (A6, A5, media carta, A4, carta) dice si ese tamaño cabe en la caja de arriba y cuánto ocupa el retrato.
-- **Recorrer el borde** va primero al centro de la hoja enseñada y después a las cuatro esquinas, con el lápiz arriba.
+- **Recorrer el perímetro** va primero al centro de la hoja enseñada (las cuatro esquinas, aunque todavía no se hayan guardado) y después camina el rectángulo completo, con el lápiz arriba.
 - El dashboard atiende una orden a la vez (`MG400Client._wire`). El sondeo del panel no dispara otra consulta hasta que la anterior contestó, y no reconfigura el robot al reconectar.
 
 ## Wizard de la cabina (`windows/`)

@@ -157,6 +157,7 @@ export function ConfigSection({
   const [saving, setSaving] = useState(false)
   const [marking, setMarking] = useState(false)
   const [testing, setTesting] = useState(false)
+  const [tracing, setTracing] = useState(false)
   const [moving, setMoving] = useState<string>('')
   const busy = Boolean(status?.busy)
   const live = status?.pose ?? []
@@ -269,6 +270,24 @@ export function ConfigSection({
       onNotice(error instanceof Error ? error.message : 'no se pudo marcar el marco')
     } finally {
       setMarking(false)
+    }
+  }
+
+  async function tracePerimeter() {
+    if (!booth || tracing || busy || saving) return
+    setTracing(true)
+    try {
+      const area = await adminArea(token, {
+        corners: complete(corners) ? corners : undefined,
+        lift_mm: Number(booth.lift_mm),
+      })
+      onNotice(
+        `Perímetro recorrido: ${Math.round(area.width_mm)} × ${Math.round(area.height_mm)} mm, con el lápiz arriba.`,
+      )
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : 'no se pudo recorrer el perímetro')
+    } finally {
+      setTracing(false)
     }
   }
 
@@ -515,7 +534,16 @@ export function ConfigSection({
           <button
             type="button"
             className="admin-press"
-            disabled={busy || saving || testing || marking || (!ready && !status?.calibration) || booth.backend !== 'mg400'}
+            disabled={busy || saving || tracing || marking || (!ready && !status?.calibration) || booth.backend !== 'mg400'}
+            title="Recorre las cuatro esquinas de la hoja y cierra el rectángulo, con el lápiz arriba."
+            onClick={() => void tracePerimeter()}
+          >
+            {tracing ? 'Recorriendo…' : 'Recorrer el perímetro'}
+          </button>
+          <button
+            type="button"
+            className="admin-press"
+            disabled={busy || saving || testing || marking || tracing || (!ready && !status?.calibration) || booth.backend !== 'mg400'}
             title="Escribe SYSCOM en el centro de la hoja enseñada, con el lápiz abajo."
             onClick={() => void drawTest()}
           >
