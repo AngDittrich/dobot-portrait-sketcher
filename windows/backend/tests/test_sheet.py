@@ -11,10 +11,16 @@ def test_la_a5_cabe_en_el_area_que_el_brazo_alcanza():
     assert motivo == ""
 
 
-def test_la_a4_no_cabe_porque_el_codo_no_llega_a_la_izquierda():
+def test_la_a4_no_cabe_de_frente_al_fondo():
+    # Acostada mide 297 mm y el brazo solo tiene 240 mm de fondo útil.
     cabe, motivo = sheet.fits("a4")
     assert not cabe
-    assert "codo" in motivo
+    assert "fondo" in motivo
+
+
+def test_la_hoja_se_mide_acostada():
+    # A5 acostada: 210 mm de frente al fondo y 148 a lo ancho.
+    assert sheet.place_mm("a5") == (210.0, 148.0)
 
 
 def test_el_dibujo_deja_margen_a_los_lados():
@@ -25,8 +31,8 @@ def test_el_dibujo_deja_margen_a_los_lados():
 
 def test_el_retrato_cabe_a_lo_alto_en_cada_hoja():
     for name in sheet.PAPERS:
-        ancho, alto = sheet.size_mm(name)
-        assert sheet.draw_height_mm(name) <= alto - 2 * sheet.MARGIN_MM
+        _, largo = sheet.size_mm(name)
+        assert sheet.draw_height_mm(name) <= largo - 2 * sheet.MARGIN_MM
 
 
 def test_un_nombre_desconocido_cae_en_la_hoja_de_por_defecto():

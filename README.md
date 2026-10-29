@@ -121,14 +121,14 @@ Por defecto la API va al mismo origen. Para apuntar al PC del robot:
 | `ROBOT_BACKEND` | `mock` (no mueve nada) o `mg400`. |
 | `ROBOT_HOST` | IP del controlador (en la cabina, `192.168.10.55`). |
 | `ROBOT_Z_DRAW` / `ROBOT_Z_TRAVEL` | Altura con el plumón apoyado y levantado. **Se miden en la cabina.** |
-| `ROBOT_ORIGIN_X` / `ROBOT_ORIGIN_Y` | Centro del papel en coordenadas del robot. |
+| `ROBOT_ORIGIN_X` / `ROBOT_ORIGIN_Y` | Centro del papel en coordenadas del robot. Con la hoja acostada el centro va en `319.24`, que es el punto medio de los 240 mm de fondo que alcanza el brazo. |
 | `ROBOT_X_SIGN` / `ROBOT_Y_SIGN` | `-1` si esas coordenadas bajan al avanzar por el dibujo. |
 | `ROBOT_SPEED_FACTOR` | Porcentaje de velocidad del controlador. |
 | `ROBOT_CP_DRAW` | Suavizado de esquinas. `100`; con `0` el brazo frena en cada punto. |
 | `ROBOT_ACC_MM_S2` | Aceleración. Techo del firmware: `100` (más da `-40005`). |
 | `ROBOT_STEP_MM` | Paso mínimo entre puntos de un trazo (8). |
 | `ROBOT_JOIN_MM` | Une trazos más cercanos que esto sin levantar el lápiz (6). |
-| `ROBOT_SHEET` | Hoja de papel: `a6`, `a5` o `a4`. Fija el tamaño del retrato (`a5`). |
+| `ROBOT_SHEET` | Hoja de papel: `a6`, `a5` o `a4`. Fija el tamaño del retrato (`a5`). La hoja va acostada, con el lado largo de frente al fondo. |
 | `ROBOT_PIPELINE` | Órdenes en vuelo (3). |
 | `ROBOT_DRY_RUN` | Arma los `MovL` sin abrir socket. |
 | `ROBOT_LOG_LEVEL` | `INFO` imprime cada paso; `DEBUG`, todos. |

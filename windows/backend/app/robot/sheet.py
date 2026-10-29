@@ -1,15 +1,19 @@
 """Hojas de papel que el brazo alcanza, medidas moviendo el MG400 de verdad.
 
-La caja no es un rectángulo: hacia la izquierda el codo se queda sin recorrido
-antes que la mesa, y hacia la derecha manda el radio de 440 mm. Los números
-salen de pasear el brazo desde el centro del papel hasta que un tope lo
-detiene, en la cabina real.
+La hoja va **acostada**: su lado largo apunta de frente al fondo (el eje X del
+robot) y el corto queda a lo ancho. Así el retrato, que también va acostado,
+se reparte donde hay sitio.
+
+La caja no es un rectángulo: de frente al fondo el brazo tiene 240 mm útiles
+(desde los 199 mm del muro del codo hasta los 439 mm del radio de 440), y a lo
+ancho 440 mm. Por eso el centro del papel va en el punto medio de esa banda
+—319.24 mm, no en 279.24— y las hojas se miden contra esos 240 mm.
 """
 
 from __future__ import annotations
 
-# nombre: (etiqueta, ancho mm, alto mm). Son las hojas que tienen sentido en
-# una cabina de fotos; A3 y A2 no caben ni de lejos en el área del MG400.
+# nombre: (etiqueta, lado corto mm, lado largo mm). Son las hojas que tienen
+# sentido en una cabina de fotos; A3 y A2 no caben ni de lejos.
 PAPERS: dict[str, tuple[str, float, float]] = {
     "a6": ("A6", 105.0, 148.0),
     "a5": ("A5", 148.0, 210.0),
@@ -21,11 +25,13 @@ DEFAULT = "a5"
 # Aire entre el borde de la hoja y el retrato.
 MARGIN_MM = 8.0
 
-# Caja medida desde el centro del papel, en mm.
-SAFE_LEFT_MM = 80.0
-SAFE_RIGHT_MM = 160.0
-SAFE_UP_MM = 220.0
-SAFE_DOWN_MM = 220.0
+# Caja que alcanza el brazo con el papel acostado, medida en la cabina real.
+SAFE_DEPTH_MM = 240.0
+SAFE_WIDTH_MM = 440.0
+
+# Dónde hay que centrar la hoja para que esos 240 mm queden repartidos.
+CENTER_X_MM = 319.24
+CENTER_Y_MM = -27.2
 
 # El recorte del boceto es 3:4; el alto del dibujo acompaña al ancho.
 ASPECT = 4.0 / 3.0
@@ -42,16 +48,23 @@ def _key(name: str) -> str:
 
 
 def size_mm(name: str) -> tuple[float, float]:
-    _, ancho, alto = PAPERS[_key(name)]
-    return ancho, alto
+    """(lado corto, lado largo) de la hoja, como viene en el paquete."""
+    _, corto, largo = PAPERS[_key(name)]
+    return corto, largo
 
 
 def label(name: str) -> str:
     return PAPERS[_key(name)][0]
 
 
+def place_mm(name: str) -> tuple[float, float]:
+    """(frente al fondo, a lo ancho) de la hoja ya acostada sobre la mesa."""
+    corto, largo = size_mm(name)
+    return largo, corto
+
+
 def draw_width_mm(name: str) -> float:
-    """Ancho del retrato: el de la hoja menos el aire de los dos lados."""
+    """Ancho del retrato: el lado corto de la hoja menos el aire de los lados."""
     return size_mm(name)[0] - 2 * MARGIN_MM
 
 
@@ -61,33 +74,33 @@ def draw_height_mm(name: str) -> float:
 
 def fits(name: str) -> tuple[bool, str]:
     """(cabe, motivo). El motivo se muestra en el panel cuando no cabe."""
-    ancho, alto = size_mm(name)
-    falta_izquierda = ancho / 2 - SAFE_LEFT_MM
-    if falta_izquierda > 0:
+    corto, largo = size_mm(name)
+    if largo > SAFE_DEPTH_MM:
         return False, (
-            f"el codo no llega: {label(name)} se pasa {falta_izquierda:.0f} mm "
-            "por la izquierda del área del brazo"
+            f"{label(name)} no entra de frente al fondo: el brazo llega a "
+            f"{SAFE_DEPTH_MM:.0f} mm y la hoja mide {largo:.0f} mm acostada"
         )
-    if ancho / 2 > SAFE_RIGHT_MM:
-        return False, f"{label(name)} se pasa del radio del brazo por la derecha"
-    if alto / 2 > max(SAFE_UP_MM, SAFE_DOWN_MM):
-        return False, f"{label(name)} se pasa del área del brazo de arriba a abajo"
-    if draw_height_mm(name) > alto - 2 * MARGIN_MM:
-        return False, f"el retrato no cabe a lo alto en {label(name)}"
+    if corto > SAFE_WIDTH_MM:
+        return False, (
+            f"{label(name)} no entra a lo ancho: el brazo llega a "
+            f"{SAFE_WIDTH_MM:.0f} mm y la hoja mide {corto:.0f} mm"
+        )
+    if draw_height_mm(name) > largo - 2 * MARGIN_MM:
+        return False, f"el retrato no cabe en {label(name)}"
     return True, ""
 
 
 def catalog() -> list[dict]:
     """Lo que el panel lista: tamaños, si caben y por qué no."""
     filas: list[dict] = []
-    for name, (name_label, ancho, alto) in PAPERS.items():
+    for name, (name_label, corto, largo) in PAPERS.items():
         cabe, motivo = fits(name)
         filas.append(
             {
                 "id": name,
                 "label": name_label,
-                "width_mm": ancho,
-                "height_mm": alto,
+                "width_mm": largo,
+                "height_mm": corto,
                 "draw_width_mm": draw_width_mm(name),
                 "fits": cabe,
                 "reason": motivo,
