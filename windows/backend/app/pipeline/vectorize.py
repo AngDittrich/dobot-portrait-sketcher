@@ -816,11 +816,16 @@ def build_trajectory(
     target_width_mm: float = 140.0,
     spacing_mm: float = 1.5,
     speed_mm_s: float = MEASURED_SPEED_MM_S,
+    rotate: bool = False,
 ) -> VectorResult:
     """Convierte los trazos ordenados en una trayectoria en milímetros.
 
     Devuelve los trazos en mm, los segmentos (dibujar / viajar) y métricas
     de tiempo estimado para el robot.
+
+    Con ``rotate`` el retrato se dibuja acostado: el lado largo del lienzo
+    pasa a ir de frente al fondo, que es el eje donde el brazo tiene 240 mm,
+    y el corto a lo ancho.
     """
     mm_per_px = float(target_width_mm) / max(1, width)
     result = VectorResult(width=width, height=height, mm_per_px=mm_per_px)
@@ -830,6 +835,13 @@ def build_trajectory(
             Stroke(points=points, length_px=_polyline_length(points), order=order)
         )
 
+    # Tamaño del lienzo en mm antes de girar y después: los puntos se giran
+    # dentro de esta caja, así que el alto se convierte en el ancho.
+    ancho_mm = float(target_width_mm)
+    alto_mm = float(height) * mm_per_px
+    box_x = alto_mm if rotate else ancho_mm
+    box_y = ancho_mm if rotate else alto_mm
+
     draw_length_mm = 0.0
     travel_length_mm = 0.0
     segments: list[dict] = []
@@ -837,6 +849,10 @@ def build_trajectory(
 
     for stroke in result.strokes:
         mm_points = to_mm(stroke.points, mm_per_px)
+        if rotate:
+            # Giro de 90 grados: arriba a la izquierda pasa a arriba a la
+            # derecha y el trazo que bajaba ahora cruza de lado a lado.
+            mm_points = np.column_stack((box_x - mm_points[:, 1], mm_points[:, 0]))
         path = resample_polyline(mm_points, spacing_mm)
         length_mm = _polyline_length(mm_points)
         draw_length_mm += length_mm
@@ -864,8 +880,8 @@ def build_trajectory(
         "travel_length_mm": round(travel_length_mm, 1),
         "total_length_mm": round(draw_length_mm + travel_length_mm, 1),
         "mm_per_px": round(mm_per_px, 4),
-        "target_width_mm": target_width_mm,
-        "height_mm": round(height * mm_per_px, 3),
+        "target_width_mm": round(box_x, 3),
+        "height_mm": round(box_y, 3),
         "speed_mm_s": speed_mm_s,
         "est_draw_seconds": round(draw_seconds, 1),
         "est_total_seconds": round(draw_seconds + travel_seconds, 1),

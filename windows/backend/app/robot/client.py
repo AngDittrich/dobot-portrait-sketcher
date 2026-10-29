@@ -305,6 +305,11 @@ class MG400Client(RobotClient):
         self._ready = False
         # El MG400 acepta un solo cliente. Dos consultas a la vez no pueden abrir dos sockets.
         self._io = asyncio.Lock()
+        # El dashboard del MG400 atiende una orden a la vez y contesta por el
+        # mismo socket. Si dos peticiones escriben a la vez, las respuestas se
+        # cruzan y el controlador corta la conexión (WinError 10053 en sendall).
+        # Todo lo que hable con el dashboard pasa por este candado.
+        self._wire = asyncio.Lock()
 
     @classmethod
     def from_env(cls) -> MG400Client:
@@ -426,6 +431,7 @@ class MG400Client(RobotClient):
         self._paper_w = width_mm
         self._paper_h = height_mm
         corners = [
+            (width_mm / 2, height_mm / 2),  # centro: punto de partida conocido
             (0.0, 0.0),
             (width_mm, 0.0),
             (width_mm, height_mm),
@@ -837,14 +843,20 @@ class MG400Client(RobotClient):
         self._close_link()
 
     async def ask(self, command: str, *, move: bool = False) -> tuple[int, str]:
-        """Manda una orden ya armada y devuelve el código y el valor, sin cerrar el socket si el robot la rechaza."""
+        """Manda una orden ya armada y devuelve el código y el valor, sin cerrar el socket si el robot la rechaza.
+
+        La orden espera su turno en `_wire`: el panel de admin pregunta por el
+        estado varias veces por segundo y el dashboard no admite dos preguntas
+        a la vez, aunque vengan de peticiones distintas.
+        """
         await self.connect()
         link = self._link
         method = link.move if move else link.dashboard  # type: ignore[attr-defined]
         try:
-            reply = await asyncio.to_thread(method, command)
-        except Exception:
-            logger.exception("consola: %s no se pudo enviar", command)
+            async with self._wire:
+                reply = await asyncio.to_thread(method, command)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("consola: %s no se pudo enviar (%s)", command, exc)
             async with self._io:
                 if self._link is link:
                     self._close_link()
@@ -960,7 +972,8 @@ class MG400Client(RobotClient):
             return
         for command in ("RobotMode()", "GetErrorID()", "GetPose()"):
             try:
-                reply = await asyncio.to_thread(dashboard, command)
+                async with self._wire:
+                    reply = await asyncio.to_thread(dashboard, command)
             except Exception as exc:  # noqa: BLE001
                 logger.error("diagnostico %s: sin respuesta (%s)", command, exc)
                 continue
@@ -986,9 +999,10 @@ class MG400Client(RobotClient):
 
         self.commands.append(command)
         try:
-            reply = await asyncio.to_thread(self._link.dashboard, command)  # type: ignore[attr-defined]
-        except Exception:
-            logger.exception("%s no se pudo enviar", command)
+            async with self._wire:
+                reply = await asyncio.to_thread(self._link.dashboard, command)  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("%s no se pudo enviar (%s)", command, exc)
             self._drop()
             raise
         logger.info("%s -> %s", command, getattr(reply, "code", "?"))

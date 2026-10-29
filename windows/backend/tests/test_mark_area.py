@@ -4,6 +4,8 @@ import asyncio
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.robot.client import MG400Client  # noqa: E402
@@ -53,7 +55,7 @@ def test_el_borde_de_la_hoja_se_recorre_con_el_lapiz_arriba():
     asyncio.run(cliente.mark_area(148.0, 210.0))
 
     movl = [orden for orden in enlace.moves if orden.startswith("MovL(")]
-    assert len(movl) == 5  # cuatro esquinas y vuelta al inicio
+    assert len(movl) == 6  # centro, cuatro esquinas y vuelta al inicio
     assert all(",-90.000," in orden for orden in movl), "ninguna orden puede ir a Z de dibujo"
     assert not any("CP=100)" in orden for orden in movl)
     # La hoja se centra en el origen y el signo de X la refleja (brazo montado al revés):
@@ -61,3 +63,19 @@ def test_el_borde_de_la_hoja_se_recorre_con_el_lapiz_arriba():
     xs = [float(orden.split("(")[1].split(",")[0]) for orden in movl]
     assert abs(min(xs) - (279.24 - 148 / 2)) < 0.01
     assert abs(max(xs) - (279.24 + 148 / 2)) < 0.01
+
+
+def test_primero_va_al_centro_de_la_hoja_y_de_ahi_empieza_el_cuadro():
+    enlace = EnlaceFalso()
+    cliente = _cliente(enlace)
+
+    asyncio.run(cliente.mark_area(148.0, 210.0))
+
+    movl = [orden for orden in enlace.moves if orden.startswith("MovL(")]
+    primera = movl[0].split("MovL(")[1].split(",")
+    # Centro del papel: el origen del robot, sin desplazarse de la hoja.
+    assert abs(float(primera[0]) - 279.24) < 0.01
+    assert abs(float(primera[1]) + 27.2) < 0.01
+    # Y el cuadro empieza en una esquina, no en el centro.
+    segunda = movl[1].split("MovL(")[1].split(",")
+    assert float(segunda[0]) != pytest.approx(279.24)
