@@ -121,7 +121,8 @@ Por defecto la API va al mismo origen. Para apuntar al PC del robot:
 | `ROBOT_BACKEND` | `mock` (no mueve nada) o `mg400`. |
 | `ROBOT_HOST` | IP del controlador (en la cabina, `192.168.10.55`). |
 | `ROBOT_Z_DRAW` / `ROBOT_Z_TRAVEL` | Altura con el plumón apoyado y levantado. **Se miden en la cabina.** |
-| `ROBOT_ORIGIN_X` / `ROBOT_ORIGIN_Y` | Centro del papel en coordenadas del robot. Con la hoja acostada el centro va en `319.24`, que es el punto medio de los 240 mm de fondo que alcanza el brazo. |
+| `ROBOT_R` | Giro de la muñeca. `90` deja la punta del marcador al frente, a 5-8 cm del centro del tool. |
+| `ROBOT_ORIGIN_X` / `ROBOT_ORIGIN_Y` | Centro del papel en coordenadas del robot. Con la hoja acostada el centro va en `319.24, -27.20`, que es el punto medio de los 240 mm de fondo que alcanza el brazo. |
 | `ROBOT_X_SIGN` / `ROBOT_Y_SIGN` | `-1` si esas coordenadas bajan al avanzar por el dibujo. |
 | `ROBOT_SPEED_FACTOR` | Porcentaje de velocidad del controlador. |
 | `ROBOT_CP_DRAW` | Suavizado de esquinas. `100`; con `0` el brazo frena en cada punto. |
@@ -165,6 +166,30 @@ Todo esto está medido contra el MG400 real, no deducido de la documentación.
 Con todo eso, el retrato completo (847 órdenes, 110 trazos) se dibujó **entero por
 primera vez** sin cortarse; el tiempo sigue por encima de los 150 s y es lo que
 se está afinando.
+
+### El área de trabajo, medida
+
+El alcance no es un rectángulo: de frente al fondo manda primero el codo y
+después el radio de 440 mm; a lo ancho sobra sitio. Estos son los números
+medidos paseando el brazo hasta que un tope lo detuvo (z = -95, R = 90), y son
+los que hay que usar como valores por defecto sin volver a calcular:
+
+| | |
+|---|---|
+| Fondo útil (X) | `199.24` a `439.24` — 240 mm |
+| A lo ancho (Y) | `-247.20` a `192.80` — 440 mm |
+| Centro de la hoja | `319.24, -27.20` |
+| A5 acostada (210 × 148) | X `214.24`→`424.24` · Y `-101.20`→`46.80` |
+| A6 acostada (148 × 105) | X `245.24`→`393.24` · Y `-79.70`→`25.30` |
+| A4 acostada (297 × 210) | no entra: mide 297 y hay 240 |
+
+La hoja y el retrato van **acostados** (girados 90°): así el lado largo cae en
+el eje donde el brazo tiene 240 mm y quedan 32 mm de aire por lado. `R = 90`
+deja la punta del marcador al frente, a 5-8 cm del centro del tool; como es un
+desfase fijo, el dibujo sale **corrido** ese tanto pero del mismo tamaño.
+
+El botón **Marcar el área** del panel recorre esas cuatro esquinas con el lápiz
+arriba: va primero al centro, después al borde y cierra el cuadro, 16 s.
 
 ---
 
