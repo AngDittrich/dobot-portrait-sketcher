@@ -12,7 +12,12 @@ export function useAdminStatus(token: string) {
 
   useEffect(() => {
     let stop = false
+    let inflight = false
     const tick = async () => {
+      // Si el sondeo anterior sigue en camino (reconexión lenta), no se lanza
+      // otro: dos consultas a la vez se pisan en el único socket del MG400.
+      if (inflight) return
+      inflight = true
       try {
         const next = await adminStatus(token)
         if (stop) return
@@ -20,6 +25,8 @@ export function useAdminStatus(token: string) {
         setPollError('')
       } catch (error) {
         if (!stop) setPollError(error instanceof Error ? error.message : 'sin respuesta')
+      } finally {
+        inflight = false
       }
     }
     void tick()

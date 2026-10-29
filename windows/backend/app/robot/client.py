@@ -385,6 +385,19 @@ class MG400Client(RobotClient):
             self.z_travel = frame.tl.z + self.lift_mm
             self.r = frame.tl.r
 
+    async def ensure(self) -> None:
+        """Deja un socket abierto para leer el estado, sin reconfigurar el robot.
+
+        El sondeo del panel pasa por aquí. `connect` limpia alarmas y fija la
+        velocidad, y hacerlo en cada reconexión del sondeo es lo que tumba el
+        enlace cada pocos segundos.
+        """
+        if self._link is not None:
+            return
+        async with self._io:
+            if self._link is None:
+                await self._open_socket()
+
     async def connect(self) -> None:
         if self._ready and self._link is not None:
             return
@@ -411,19 +424,23 @@ class MG400Client(RobotClient):
                     )
                     await self._sleep(self.connect_retry_s)
 
-    async def _abrir(self) -> None:
-        if self._link is None:
-            if self._stage_link is not None:
-                self._link = self._stage_link
-            elif self.dry_run:
-                logger.info("modo seco: no se abre socket")
-                self._link = _DryLink()
-            else:
-                from app.robot.mg400 import MG400Link
+    async def _open_socket(self) -> None:
+        if self._link is not None:
+            return
+        if self._stage_link is not None:
+            self._link = self._stage_link
+        elif self.dry_run:
+            logger.info("modo seco: no se abre socket")
+            self._link = _DryLink()
+        else:
+            from app.robot.mg400 import MG400Link
 
-                self._link = await asyncio.to_thread(
-                    MG400Link, self.host, move_timeout_s=self.move_timeout_s
-                )
+            self._link = await asyncio.to_thread(
+                MG400Link, self.host, move_timeout_s=self.move_timeout_s
+            )
+
+    async def _abrir(self) -> None:
+        await self._open_socket()
         await asyncio.to_thread(self._link.prepare, self.speed_factor)  # type: ignore[attr-defined]
         await self._dashboard(f"User({int(self.user)})")
         await self._dashboard(f"Tool({int(self.tool)})")
@@ -911,11 +928,19 @@ class MG400Client(RobotClient):
 
     async def ask(self, command: str, *, move: bool = False) -> tuple[int, str]:
         """Manda una orden ya armada y devuelve el código y el valor, sin cerrar el socket si el robot la rechaza."""
-        await self.connect()
+        await self.ensure()
         link = self._link
         method = link.move if move else link.dashboard  # type: ignore[attr-defined]
         try:
             reply = await asyncio.to_thread(method, command)
+        except OSError as exc:
+            # El controlador cerró el socket. Una línea basta: el siguiente
+            # sondeo abre otro, y el traceback de 10053 no aporta.
+            logger.warning("consola: %s se cortó (%s)", command, exc)
+            async with self._io:
+                if self._link is link:
+                    self._close_link()
+            raise
         except Exception:
             logger.exception("consola: %s no se pudo enviar", command)
             async with self._io:

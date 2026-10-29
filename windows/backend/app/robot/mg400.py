@@ -91,11 +91,15 @@ class MG400Link:
         # que hay espacio; cortar antes cierra el socket y detiene el brazo.
         self.move_timeout_s = move_timeout_s
         self.last_raw = b""
+        self._move_port = move_port
         self._dashboard_lock = threading.Lock()
         self._move_lock = threading.Lock()
-        logger.info("conectando a %s (dashboard %s, movimiento %s)", host, dashboard_port, move_port)
+        # El puerto de movimiento se abre al primer MovL. Abrirlo para el
+        # sondeo y dejarlo mudo hace que el controlador cierre el enlace a
+        # los pocos segundos, y el panel se pasa reconectando.
+        logger.info("conectando a %s (dashboard %s)", host, dashboard_port)
         self._dashboard = self._open(dashboard_port)
-        self._move = self._open(move_port)
+        self._move: socket.socket | None = None
 
     def _open(self, port: int) -> socket.socket:
         sock = socket.create_connection((self.host, port), timeout=self.timeout_s)
@@ -112,6 +116,8 @@ class MG400Link:
             except socket.timeout:
                 break
             if not chunk:
+                # El controlador cerró el socket a mitad de la orden. Seguir
+                # mandando por él solo llena la consola de 10053.
                 break
             data += chunk
             # El dashboard cierra cada respuesta con `;`. Se corta ahí en vez de
@@ -122,6 +128,8 @@ class MG400Link:
                 break
             sock.settimeout(SILENCE_S)
         self.last_raw = data
+        if not data:
+            raise ConnectionError(f"{command} sin respuesta: el controlador cerró el enlace")
         return _parse(data.decode("utf-8", errors="replace"))
 
     def dashboard(self, command: str) -> Reply:
@@ -130,6 +138,9 @@ class MG400Link:
 
     def move(self, command: str) -> Reply:
         with self._move_lock:
+            if self._move is None:
+                logger.info("conectando movimiento %s:%s", self.host, self._move_port)
+                self._move = self._open(self._move_port)
             return self._ask(self._move, command, timeout_s=self.move_timeout_s)
 
     def _step(self, command: str) -> Reply:
@@ -270,6 +281,8 @@ class MG400Link:
 
     def close(self) -> None:
         for sock in (self._dashboard, self._move):
+            if sock is None:
+                continue
             try:
                 sock.close()
             except OSError:
