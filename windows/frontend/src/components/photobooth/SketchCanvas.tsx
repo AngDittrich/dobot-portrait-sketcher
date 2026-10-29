@@ -58,7 +58,8 @@ export function SketchCanvas({ strokes, progress }: SketchCanvasProps) {
     let maxX = -Infinity
     let maxY = -Infinity
 
-    for (const stroke of strokes) {
+    for (let index = 0; index < strokes.length; index++) {
+      const stroke = strokes[index]
       starts.push(total)
       let length = 0
       const points = stroke.points
@@ -72,6 +73,14 @@ export function SketchCanvas({ strokes, progress }: SketchCanvasProps) {
       }
       lengths.push(length)
       total += length
+      // El backend también suma este viaje con el lápiz levantado al progreso
+      // del trabajo. Incluirlo mantiene la animación y la punta de la pluma
+      // al mismo ritmo que el MG400.
+      const next = strokes[index + 1]?.points
+      if (points.length > 0 && next && next.length > 0) {
+        const end = points[points.length - 1]
+        total += Math.hypot(next[0][0] - end[0], next[0][1] - end[1])
+      }
     }
 
     if (!Number.isFinite(minX)) {

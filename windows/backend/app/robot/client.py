@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.pipeline.vectorize import MEASURED_SPEED_MM_S
 from app.robot import frame as frame_ops
 from app.robot import sheet as sheet_ops
 from app.robot.frame import Frame
@@ -38,16 +39,15 @@ DEFAULT_PACE_LEAD_S = 1.0
 DEFAULT_ACC_MM_S2 = 100.0
 MAX_ACC_MM_S2 = 100.0
 MIN_ACC_MM_S2 = 1.0
-# Paso mínimo entre órdenes. Con 1.18 mm hacían falta 1706 MovL y el
-# controlador cerraba el socket a los 2-3 s; con 6 mm quedan ~1/5 y el brazo
-# acelera (10.2 mm/s medidos contra 2.4 mm/s con pasos cortos).
-DEFAULT_MIN_STEP_MM = 8.0
+# Solo se descartan puntos prácticamente repetidos. La simplificación que
+# limita el número de órdenes ocurre antes, en vectorize.py; saltar por
+# distancia aquí borra ojos, letras y bucles pequeños en el papel.
+DEFAULT_MIN_STEP_MM = 0.3
 
-# Si el final de un trazo queda a menos de esto del inicio del siguiente, el
-# lápiz no se levanta: se une con un conector corto. Cada cambio de altura
-# obliga a vaciar la cola del MG400 y cuesta ~3 s, así que encadenar es lo que
-# baja el retrato de 365 s.
-DEFAULT_JOIN_GAP_MM = 6.0
+# Solo se encadenan trazos que ya se tocan visualmente. Unir letras o rasgos
+# separados con varios milímetros de hueco dibuja rayas que no existen en el
+# boceto.
+DEFAULT_JOIN_GAP_MM = 1.0
 # Confirmación de llegada: se lee la pose hasta que el brazo está a 0.5 mm.
 ARRIVAL_TOLERANCE_MM = 0.5
 ARRIVAL_POLL_S = 0.1
@@ -160,7 +160,7 @@ class MockRobotClient(RobotClient):
 
     name = "mock"
 
-    def __init__(self, speed_mm_s: float = 80.0, time_scale: float | None = None) -> None:
+    def __init__(self, speed_mm_s: float = MEASURED_SPEED_MM_S, time_scale: float | None = None) -> None:
         self.speed_mm_s = speed_mm_s
         # `time_scale` permite acelerar la demo (0.2 = cinco veces más rápido).
         self.time_scale = (
@@ -773,9 +773,9 @@ class MG400Client(RobotClient):
                     pen_down = True
                     held = start
         for point in points[1:]:
-            # Paso mínimo: 1706 comandos de 1.18 mm matan la conexión del
-            # MG400. Con 6 mm quedan ~1/5 de las órdenes y el brazo alcanza
-            # a acelerar (10 mm/s medidos contra 2.4 mm/s con pasos cortos).
+            # Solo se elimina ruido submilimétrico. Los vértices útiles ya
+            # salen simplificados de la trayectoria y preservan los detalles
+            # que ve el visitante.
             if held is not None and _distance(held, point) < self.min_step_mm and point is not points[-1]:
                 continue
             if await self._goto(point[0], point[1], self.z_draw,  self.speed_factor, self.cp_draw):

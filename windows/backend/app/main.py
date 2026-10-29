@@ -32,7 +32,7 @@ from starlette.concurrency import run_in_threadpool  # noqa: E402
 from app.imaging import decode_data_url, encode_data_url, fit_max_side  # noqa: E402
 from app.pipeline import providers  # noqa: E402
 from app.pipeline import vectorize as vectorize_ops  # noqa: E402
-from app.pipeline.caption import CAPTION_BUDGET_S, append_caption  # noqa: E402
+from app.pipeline.caption import append_caption  # noqa: E402
 from app.pipeline.providers import DEFAULT_STYLE  # noqa: E402
 from app.pipeline.portrait import PortraitRenderer  # noqa: E402
 from app.admin_ops import (  # noqa: E402
@@ -124,6 +124,12 @@ jobs = JobStore()
 activity_totals = {"done": 0, "error": 0}
 
 
+def remaining_eta_seconds(estimated_seconds: float, started_at: float, now: float | None = None) -> float:
+    """ETA basada en el reloj real, incluidos los costes no geométricos."""
+    elapsed = time.monotonic() if now is None else float(now)
+    return max(0.0, float(estimated_seconds) - (elapsed - float(started_at)))
+
+
 async def _mark_cancelled(job: Job) -> None:
     """El dibujo se cortó a propósito: no cuenta como fallo del robot."""
     job.status = "error"
@@ -147,7 +153,6 @@ class SketchParams(BaseModel):
     use_landmarks: bool = True
     target_width_mm: float = Field(140.0, ge=20.0, le=400.0)
     rotate: bool = Field(False, description="Gira el retrato 90 grados. Apagado: arriba es la esquina enseñada")
-    spacing_mm: float = Field(1.5, ge=0.2, le=10.0)
     simplify_px: float = Field(2.5, ge=0.0, le=5.0)
     smooth_iters: int = Field(2, ge=0, le=4, description="Pasadas Chaikin antes de RDP (lineas mas rectas)")
     min_stroke_px: float = Field(12.0, ge=1.0, le=80.0)
@@ -254,11 +259,18 @@ def build_sketch(
     ordered = [stroke for stroke, _ in vectorize_ops.order_strokes(simplified)]
     # Tope de tiempo: si el retrato sale muy largo se van los trazos mas
     # cortos (textura) antes de mandar al robot.
+    # El rótulo se añade después para que no se recorte como textura, pero su
+    # coste se calcula con la misma estimación realista antes de podar la cara.
+    caption_strokes, _ = append_caption([], crop_width, crop_height)
+    caption_seconds = vectorize_ops.estimate_seconds(
+        caption_strokes, crop_width, target_width_mm=params.target_width_mm
+    )
     ordered = vectorize_ops.prune_to_budget(
         ordered,
         crop_width,
-        max_seconds=max(12.0, params.max_draw_seconds - CAPTION_BUDGET_S),
+        max_seconds=max(0.0, params.max_draw_seconds - caption_seconds),
         target_width_mm=params.target_width_mm,
+        min_strokes=0,
     )
     # El rótulo va después de podar: si entrara antes, el recorte de tiempo
     # se lo comería por ser de los trazos más cortos.
@@ -269,7 +281,6 @@ def build_sketch(
         crop_width,
         crop_height,
         target_width_mm=params.target_width_mm,
-        spacing_mm=params.spacing_mm,
         rotate=params.rotate,
     )
 
@@ -283,6 +294,7 @@ def build_sketch(
         "height": crop_height,
         "portrait_ms": portrait_ms,
         "face_detected": face_detected,
+        "caption_seconds": round(caption_seconds, 1),
         **portrait.get("lab", {}),
     }
     if ai_meta:
@@ -391,11 +403,11 @@ async def create_job(payload: JobRequest) -> dict:
         width_mm=float(sketch.stats.get("target_width_mm", 140.0)),
         height_mm=float(sketch.stats.get("height_mm", 0.0)),
     )
+    estimated_seconds = float(sketch.stats.get("est_total_seconds", 0.0))
     job = Job(id=f"job_{uuid.uuid4().hex[:10]}", sketch_id=sketch.id, status="drawing")
     jobs.put(job.id, job)
 
     async def run() -> None:
-        total = trajectory.total_length or 1.0
         started = time.monotonic()
         robot_log.info(
             "%s: inicia con %s (boceto %s, %d segmentos, %.0f x %.0f mm)",
@@ -412,7 +424,7 @@ async def create_job(payload: JobRequest) -> dict:
 
             async def on_progress(value: float, _segment: Segment) -> None:
                 job.progress = value
-                job.eta_seconds = max(0.0, (1.0 - value) * total / 80.0)
+                job.eta_seconds = remaining_eta_seconds(estimated_seconds, started)
 
             await robot.draw(trajectory, on_progress)
             job.status = "done"
@@ -444,7 +456,7 @@ async def create_job(payload: JobRequest) -> dict:
         "job_id": job.id,
         "sketch_id": sketch.id,
         "status": job.status,
-        "est_seconds": round(trajectory.draw_length / 80.0, 1),
+        "est_seconds": round(estimated_seconds, 1),
         "stats": sketch.stats,
     }
 

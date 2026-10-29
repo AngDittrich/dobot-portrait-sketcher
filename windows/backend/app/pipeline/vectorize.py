@@ -27,6 +27,12 @@ TWO_OPT_MAX_STROKES = 250
 # y el tiempo que anuncia la cabina se calculan con este número medido, no con
 # el ideal de 80 mm/s que el brazo nunca alcanza.
 MEASURED_SPEED_MM_S = 19.6
+# El tiempo de avanzar ya usa la velocidad medida, pero cada orden suma
+# procesamiento/control. La subida se solapa con la cola de movimiento: la
+# prueba física SYSCOM no respalda cargar 3 s completos por cada trazo.
+# Estos valores se revisan contra el MG400 real.
+COMMAND_OVERHEAD_S = 0.18
+PEN_LIFT_OVERHEAD_S = 0.1
 
 
 @dataclass
@@ -632,7 +638,14 @@ def estimate_seconds(
     travel_mm = 0.0
     for previous, current in zip(strokes, strokes[1:]):
         travel_mm += float(np.hypot(*(current[0] - previous[-1]))) * mm_per_px
-    return draw_mm / max(1.0, speed_mm_s) + travel_mm / max(1.0, speed_mm_s * 1.6)
+    # Cada trazo llega con sus vértices simplificados. Para estimar de forma
+    # conservadora se cuenta el viaje/bajada inicial y la subida final de
+    # cada trazo; solo los trazos que ya se tocan pueden ahorrarse ese coste
+    # en el cliente del MG400.
+    commands = sum(len(stroke) + 2 for stroke in strokes)
+    lifts = len(strokes)
+    movement = draw_mm / max(1.0, speed_mm_s) + travel_mm / max(1.0, speed_mm_s * 1.6)
+    return movement + commands * COMMAND_OVERHEAD_S + lifts * PEN_LIFT_OVERHEAD_S
 
 
 def prune_to_budget(
@@ -651,16 +664,14 @@ def prune_to_budget(
     textura (pelo, barba), no los contornos principales.
     """
     current = list(strokes)
-    if max_seconds <= 0 or not current:
-        return current
+    if max_seconds <= 0:
+        return []
+    if not current:
+        return []
     seconds = estimate_seconds(current, width, target_width_mm, speed_mm_s)
     while seconds > max_seconds and len(current) > min_strokes:
-        lengths = sorted(_polyline_length(s) for s in current)
-        cutoff = lengths[0]
-        kept = [s for s in current if _polyline_length(s) > cutoff]
-        if not kept or len(kept) == len(current):
-            break
-        current = kept
+        shortest = min(range(len(current)), key=lambda index: _polyline_length(current[index]))
+        current.pop(shortest)
         seconds = estimate_seconds(current, width, target_width_mm, speed_mm_s)
     return current
 
@@ -814,7 +825,6 @@ def build_trajectory(
     width: int,
     height: int,
     target_width_mm: float = 140.0,
-    spacing_mm: float = 1.5,
     speed_mm_s: float = MEASURED_SPEED_MM_S,
     rotate: bool = False,
 ) -> VectorResult:
@@ -853,7 +863,10 @@ def build_trajectory(
             # Giro de 90 grados: arriba a la izquierda pasa a arriba a la
             # derecha y el trazo que bajaba ahora cruza de lado a lado.
             mm_points = np.column_stack((box_x - mm_points[:, 1], mm_points[:, 0]))
-        path = resample_polyline(mm_points, spacing_mm)
+        # Los trazos ya vienen simplificados por desviación. Remuestrearlos a
+        # un paso fijo puede borrar un vértice pequeño y convertir un ojo, una
+        # O o una curva en una recta.
+        path = mm_points
         length_mm = _polyline_length(mm_points)
         draw_length_mm += length_mm
         # El viaje va antes del trazo: si se emite después, la punta sigue
@@ -874,6 +887,9 @@ def build_trajectory(
 
     draw_seconds = draw_length_mm / max(1.0, speed_mm_s)
     travel_seconds = travel_length_mm / max(1.0, speed_mm_s * 1.6)
+    estimated_total_seconds = estimate_seconds(
+        strokes, width, target_width_mm=target_width_mm, speed_mm_s=speed_mm_s
+    )
     result.stats = {
         "strokes": len(result.strokes),
         "draw_length_mm": round(draw_length_mm, 1),
@@ -884,7 +900,7 @@ def build_trajectory(
         "height_mm": round(box_y, 3),
         "speed_mm_s": speed_mm_s,
         "est_draw_seconds": round(draw_seconds, 1),
-        "est_total_seconds": round(draw_seconds + travel_seconds, 1),
+        "est_total_seconds": round(estimated_total_seconds, 1),
     }
     result.segments = segments
     return result

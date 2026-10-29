@@ -111,6 +111,39 @@ def test_un_trazo_lejano_si_levanta_el_lapiz() -> None:
     assert _subidas(enlace) >= 2
 
 
+def test_el_espacio_entre_letras_no_se_dibuja_como_conector() -> None:
+    """Un hueco de 4 mm debe mantener el lápiz arriba entre trazos distintos."""
+    enlace = EnlaceVivo()
+    cliente = MG400Client(
+        link=enlace,
+        z_draw=-167.0,
+        z_travel=-160.0,
+        r=0.0,
+        origin_x=100.0,
+        origin_y=100.0,
+        pipeline=1,
+        wait_arrival=True,
+        arrival_extra_s=0.02,
+        arrival_poll_s=0.005,
+        min_step_mm=0.0,
+    )
+    papel = Trajectory(
+        segments=[
+            Segment(type="draw", points=[[0.0, 0.0], [10.0, 0.0]]),
+            Segment(type="draw", points=[[14.0, 0.0], [24.0, 0.0]]),
+        ],
+        width_mm=140.0,
+        height_mm=140.0,
+    )
+
+    asyncio.run(cliente.draw(papel, _nada))
+
+    # El segundo trazo comienza en (14, 0), que se mapea a (156, 170) con
+    # los signos por defecto del cliente, en el
+    # enlace falso. Debe llegarse con la pluma arriba antes de bajar.
+    assert any("MovL(156.000,170.000,-160.000" in move for move in enlace.moves)
+
+
 def _dibujar_con_traslado(destino: float) -> EnlaceVivo:
     """La trayectoria real trae un segmento de traslado entre trazos."""
     enlace = EnlaceVivo()

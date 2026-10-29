@@ -14,7 +14,16 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.pipeline.vectorize import MEASURED_SPEED_MM_S, estimate_seconds  # noqa: E402
+from app.pipeline.caption import append_caption  # noqa: E402
+from app.pipeline.vectorize import (  # noqa: E402
+    COMMAND_OVERHEAD_S,
+    MEASURED_SPEED_MM_S,
+    PEN_LIFT_OVERHEAD_S,
+    estimate_seconds,
+    prune_to_budget,
+)
+from app.robot.client import MockRobotClient  # noqa: E402
+from app.main import remaining_eta_seconds  # noqa: E402
 
 
 def test_la_velocidad_es_la_medida_en_el_robot() -> None:
@@ -25,6 +34,44 @@ def test_estimate_seconds_usa_la_velocidad_medida() -> None:
     # 100 px de ancho con dos trazos de 50 px: 140 mm de tinta y 14 mm de
     # traslado entre ellos, que va 1.6 veces mas rapido.
     trazos = [np.array([[0.0, 0.0], [50.0, 0.0]]), np.array([[50.0, 10.0], [100.0, 10.0]])]
-    esperado = 140.0 / MEASURED_SPEED_MM_S + 14.0 / (MEASURED_SPEED_MM_S * 1.6)
+    esperado = (
+        140.0 / MEASURED_SPEED_MM_S
+        + 14.0 / (MEASURED_SPEED_MM_S * 1.6)
+        + 8 * COMMAND_OVERHEAD_S
+        + 2 * PEN_LIFT_OVERHEAD_S
+    )
 
     assert estimate_seconds(trazos, 100, target_width_mm=140.0) == pytest.approx(esperado, rel=0.02)
+
+
+def test_estimate_seconds_cuenta_ordenes_y_subidas_de_pluma() -> None:
+    trazos = [np.array([[0.0, 0.0], [50.0, 0.0]]), np.array([[50.0, 10.0], [100.0, 10.0]])]
+    recorrido = 140.0 / MEASURED_SPEED_MM_S + 14.0 / (MEASURED_SPEED_MM_S * 1.6)
+    # Cada trazo manda sus puntos y dos movimientos extra; cada trazo
+    # independiente incluye una subida de pluma.
+    esperado = recorrido + 8 * COMMAND_OVERHEAD_S + 2 * PEN_LIFT_OVERHEAD_S
+
+    assert estimate_seconds(trazos, 100, target_width_mm=140.0) == pytest.approx(esperado, rel=0.02)
+
+
+def test_el_simulador_usa_la_velocidad_medida_del_robot() -> None:
+    assert MockRobotClient().speed_mm_s == MEASURED_SPEED_MM_S
+
+
+def test_el_rotulo_no_agota_el_presupuesto_del_retrato() -> None:
+    """SYSCOM ROBOTICS deja tiempo para los rasgos del retrato."""
+    caption, _ = append_caption([], width=900, height=1200)
+
+    assert estimate_seconds(caption, 900, target_width_mm=90.0) < 50.0
+
+
+def test_la_eta_resta_el_tiempo_transcurrido_real() -> None:
+    # Los costes de levantadas y órdenes no se reparten por distancia: la ETA
+    # debe descontar el reloj real y no multiplicar el progreso geométrico.
+    assert remaining_eta_seconds(120.0, started_at=10.0, now=35.0) == 95.0
+
+
+def test_un_presupuesto_imposible_no_excede_su_tope() -> None:
+    strokes = [np.array([[0.0, 0.0], [10.0, 0.0]])]
+
+    assert prune_to_budget(strokes, 10, max_seconds=0.0, min_strokes=0) == []
