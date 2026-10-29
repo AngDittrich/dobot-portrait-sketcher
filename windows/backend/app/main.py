@@ -32,7 +32,7 @@ from starlette.concurrency import run_in_threadpool  # noqa: E402
 from app.imaging import decode_data_url, encode_data_url, fit_max_side  # noqa: E402
 from app.pipeline import providers  # noqa: E402
 from app.pipeline import vectorize as vectorize_ops  # noqa: E402
-from app.pipeline.caption import CAPTION_BUDGET_S, append_caption  # noqa: E402
+from app.pipeline.caption import append_caption  # noqa: E402
 from app.pipeline.providers import DEFAULT_STYLE  # noqa: E402
 from app.pipeline.portrait import PortraitRenderer  # noqa: E402
 from app.admin_ops import (  # noqa: E402
@@ -124,6 +124,12 @@ jobs = JobStore()
 activity_totals = {"done": 0, "error": 0}
 
 
+def remaining_eta_seconds(estimated_seconds: float, started_at: float, now: float | None = None) -> float:
+    """ETA basada en el reloj real, incluidos los costes no geométricos."""
+    elapsed = time.monotonic() if now is None else float(now)
+    return max(0.0, float(estimated_seconds) - (elapsed - float(started_at)))
+
+
 async def _mark_cancelled(job: Job) -> None:
     """El dibujo se cortó a propósito: no cuenta como fallo del robot."""
     job.status = "error"
@@ -147,7 +153,6 @@ class SketchParams(BaseModel):
     use_landmarks: bool = True
     target_width_mm: float = Field(140.0, ge=20.0, le=400.0)
     rotate: bool = Field(False, description="Gira el retrato 90 grados. Apagado: arriba es la esquina enseñada")
-    spacing_mm: float = Field(1.5, ge=0.2, le=10.0)
     simplify_px: float = Field(2.5, ge=0.0, le=5.0)
     smooth_iters: int = Field(2, ge=0, le=4, description="Pasadas Chaikin antes de RDP (lineas mas rectas)")
     min_stroke_px: float = Field(12.0, ge=1.0, le=80.0)
@@ -254,11 +259,18 @@ def build_sketch(
     ordered = [stroke for stroke, _ in vectorize_ops.order_strokes(simplified)]
     # Tope de tiempo: si el retrato sale muy largo se van los trazos mas
     # cortos (textura) antes de mandar al robot.
+    # El rótulo se añade después para que no se recorte como textura, pero su
+    # coste se calcula con la misma estimación realista antes de podar la cara.
+    caption_strokes, _ = append_caption([], crop_width, crop_height)
+    caption_seconds = vectorize_ops.estimate_seconds(
+        caption_strokes, crop_width, target_width_mm=params.target_width_mm
+    )
     ordered = vectorize_ops.prune_to_budget(
         ordered,
         crop_width,
-        max_seconds=max(12.0, params.max_draw_seconds - CAPTION_BUDGET_S),
+        max_seconds=max(0.0, params.max_draw_seconds - caption_seconds),
         target_width_mm=params.target_width_mm,
+        min_strokes=0,
     )
     # El rótulo va después de podar: si entrara antes, el recorte de tiempo
     # se lo comería por ser de los trazos más cortos.
@@ -269,7 +281,6 @@ def build_sketch(
         crop_width,
         crop_height,
         target_width_mm=params.target_width_mm,
-        spacing_mm=params.spacing_mm,
         rotate=params.rotate,
     )
 
@@ -283,6 +294,7 @@ def build_sketch(
         "height": crop_height,
         "portrait_ms": portrait_ms,
         "face_detected": face_detected,
+        "caption_seconds": round(caption_seconds, 1),
         **portrait.get("lab", {}),
     }
     if ai_meta:
@@ -391,11 +403,11 @@ async def create_job(payload: JobRequest) -> dict:
         width_mm=float(sketch.stats.get("target_width_mm", 140.0)),
         height_mm=float(sketch.stats.get("height_mm", 0.0)),
     )
+    estimated_seconds = float(sketch.stats.get("est_total_seconds", 0.0))
     job = Job(id=f"job_{uuid.uuid4().hex[:10]}", sketch_id=sketch.id, status="drawing")
     jobs.put(job.id, job)
 
     async def run() -> None:
-        total = trajectory.total_length or 1.0
         started = time.monotonic()
         robot_log.info(
             "%s: inicia con %s (boceto %s, %d segmentos, %.0f x %.0f mm)",
@@ -412,7 +424,7 @@ async def create_job(payload: JobRequest) -> dict:
 
             async def on_progress(value: float, _segment: Segment) -> None:
                 job.progress = value
-                job.eta_seconds = max(0.0, (1.0 - value) * total / 80.0)
+                job.eta_seconds = remaining_eta_seconds(estimated_seconds, started)
 
             await robot.draw(trajectory, on_progress)
             job.status = "done"
@@ -444,7 +456,7 @@ async def create_job(payload: JobRequest) -> dict:
         "job_id": job.id,
         "sketch_id": sketch.id,
         "status": job.status,
-        "est_seconds": round(trajectory.draw_length / 80.0, 1),
+        "est_seconds": round(estimated_seconds, 1),
         "stats": sketch.stats,
     }
 
@@ -523,6 +535,8 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
         "frame": booth_from_client(robot),
         "calibration": _calibration_of(getattr(robot, "frame", None), getattr(robot, "margin_mm", None)),
         "sheets": sheet_ops.catalog(),
+        "j4_fixed": getattr(robot, "j4_fixed", None),
+        "j4_model": getattr(robot, "r_model", None),
     }
     if robot.name != "mg400":
         snapshot["detail"] = "el backend está en simulador"
@@ -586,16 +600,54 @@ async def admin_command(
     _require_admin(x_admin_token)
     if robot.name != "mg400":
         raise HTTPException(status_code=409, detail="el backend está en simulador")
+    if body.action == "j4home":
+        if busy.active():
+            raise HTTPException(status_code=409, detail="el robot está dibujando")
+        try:
+            await robot.prepare_motion(None)  # type: ignore[attr-defined]
+            corrected = await robot.ensure_j4(lift=False)  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        value = "J4 devuelta a -50" if corrected else "J4 ya estaba en -50"
+        return {"command": "j4home", "code": 0, "value": value}
     try:
         payload = body.model_dump() if hasattr(body, "model_dump") else body.dict()
+        if body.action == "movl" and body.x is not None and body.y is not None:
+            payload["r"] = robot.r_for(float(body.x), float(body.y))  # type: ignore[attr-defined]
         command, is_move, prepare = plan(body.action, payload, busy=busy.active())
         rate = rate_for(body.action, payload) if prepare else None
     except AdminOpError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
+        if body.action == "step" and (body.axis or "")[:1] in {"X", "Y"}:
+            # RelMovL deja R igual y entonces J4 gira con la base. Un MovL
+            # absoluto con el R calculado mueve en X/Y sin tocar la muñeca.
+            _, pose_value = await robot.ask("GetPose()")  # type: ignore[attr-defined]
+            pose = _numbers(pose_value)[:3]
+            if len(pose) < 3:
+                raise HTTPException(status_code=502, detail="no se pudo leer la pose para el paso")
+            size = float(body.mm or 0.0) * (1 if (body.axis or "").endswith("+") else -1)
+            x, y, z = pose
+            if body.axis.startswith("X"):  # type: ignore[union-attr]
+                x += size
+            else:
+                y += size
+            command = robot.movl_command(x, y, z, rate or 20)  # type: ignore[attr-defined]
         if prepare:
             await robot.prepare_motion(rate)  # type: ignore[attr-defined]
         code, value = await robot.ask(command, move=is_move)  # type: ignore[attr-defined]
+        if code == 0 and (
+            (body.action == "jog" and not body.axis) or (body.action == "drag" and not body.on)
+        ):
+            # El jog cartesiano y el arrastre a mano giran J4. Al soltar se
+            # devuelve a su valor en el sitio, antes de guardar una esquina.
+            await asyncio.sleep(0.3)
+            try:
+                await robot.ensure_j4(lift=False)  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001 - la orden ya se cumplió
+                robot_log.warning("no se pudo devolver J4 tras %s", command, exc_info=True)
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if code != 0:
@@ -666,8 +718,8 @@ async def admin_goto(
             if errors:
                 raise HTTPException(status_code=409, detail=errors[0])
             x, y, z, _r = frame.named(str(body.get("corner") or ""))
-            # La muñeca no gira al ir de una esquina a otra: R fijo, el de arriba a la izquierda.
-            r = frame.tl.r
+        # R lo calcula el cliente para que J4 se quede en -50; la R enseñada no se usa.
+        r = robot.r_for(x, y)  # type: ignore[attr-defined]
     except (FrameError, KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:

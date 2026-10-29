@@ -102,6 +102,10 @@ export interface AdminStatus {
   frame?: Partial<BoothSettings>
   calibration?: Calibration | null
   sheets?: AdminSheet[]
+  /** Ángulo en el que la muñeca se queda siempre (-50). */
+  j4_fixed?: number | null
+  /** Cómo se calcula R: "j1+j4" (lo normal en el MG400) o "j4". */
+  j4_model?: string | null
 }
 
 export interface AdminSheet {

@@ -13,9 +13,6 @@ import math
 import numpy as np
 
 CAPTION_TEXT = "SYSCOM ROBOTICS"
-# Segundos que se reservan al podar el retrato, para que las letras quepan
-# dentro de los 150 s junto con la cara.
-CAPTION_BUDGET_S = 8.0
 
 # Alto de diseño de cada letra. El avance incluye el aire hasta la siguiente.
 _CAP = 6.0

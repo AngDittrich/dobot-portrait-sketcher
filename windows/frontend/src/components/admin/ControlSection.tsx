@@ -81,6 +81,10 @@ export function ControlSection({
       ],
     },
     {
+      title: 'Muñeca',
+      actions: [{ label: 'J4 a -50', command: { action: 'j4home' } }],
+    },
+    {
       title: 'Diagnóstico',
       actions: [
         { label: 'Limpiar alarma', command: { action: 'clear' } },
@@ -151,7 +155,7 @@ export function ControlSection({
           </div>
           <div className="admin-nudge-axes">
             {Object.values(sticks).flatMap((stick) =>
-              [stick.axes.up, stick.axes.down, stick.axes.left, stick.axes.right].map((axis) => (
+              [stick.axes.up, stick.axes.down, stick.axes.left, stick.axes.right].filter(Boolean).map((axis) => (
                 <button
                   key={axis}
                   type="button"

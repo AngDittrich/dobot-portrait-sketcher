@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { adminArea, adminCalibration, adminGoto, adminTestDraw, saveAdminBooth } from '../../lib/api'
+import { Loader2, Navigation, Save } from 'lucide-react'
+import { adminArea, adminCalibration, adminCommand, adminGoto, adminTestDraw, saveAdminBooth } from '../../lib/api'
 import type { AdminSheet, AdminStatus, Calibration, CornerId, CornerPose, Corners, SpotId } from '../../lib/api'
 import { ReachMap } from './ReachMap'
 
@@ -138,6 +139,23 @@ function mm(value: number): string {
   return value.toFixed(1)
 }
 
+const J4_FIXED = -50
+
+/** X, Y, Z y R en chips de color para leerlos de un vistazo. */
+function Coords({ values, prefix }: { values: number[]; prefix?: string }) {
+  return (
+    <div className="admin-coords">
+      {prefix ? <span className="admin-coords-prefix">{prefix}</span> : null}
+      {(['x', 'y', 'z', 'r'] as const).map((axis, index) => (
+        <span key={axis} className={`admin-coord admin-coord--${axis}`}>
+          <b>{axis.toUpperCase()}</b>
+          {mm(values[index])}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export function ConfigSection({
   status,
   token,
@@ -159,8 +177,11 @@ export function ConfigSection({
   const [testing, setTesting] = useState(false)
   const [tracing, setTracing] = useState(false)
   const [moving, setMoving] = useState<string>('')
+  const [homing, setHoming] = useState(false)
   const busy = Boolean(status?.busy)
   const live = status?.pose ?? []
+  const j4 = status?.angles?.[3]
+  const j4Off = typeof j4 === 'number' && Math.abs(j4 - J4_FIXED) > 1
   const papers = status?.sheets ?? []
   const hasPose = live.length >= 4
 
@@ -219,6 +240,19 @@ export function ConfigSection({
     const pose: CornerPose = { x: live[0], y: live[1], z: live[2], r: live[3] }
     setCorners((state) => ({ ...state, [id]: pose }))
     onNotice(`Esquina ${CORNER_INFO.find((item) => item.id === id)?.label.toLowerCase()} guardada. Falta Guardar cabina.`)
+  }
+
+  async function homeJ4() {
+    if (homing || busy) return
+    setHoming(true)
+    try {
+      const result = await adminCommand(token, { action: 'j4home' })
+      onNotice(result.value || '')
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : 'no se pudo poner J4 en -50')
+    } finally {
+      setHoming(false)
+    }
   }
 
   async function go(target: SpotId) {
@@ -432,41 +466,83 @@ export function ConfigSection({
             <h3>Esquinas de la hoja</h3>
             <span className="admin-card-hint">El lápiz debe tocar el papel al guardar cada pose</span>
           </div>
+          <div className={`admin-j4${j4Off ? ' is-off' : ''}`}>
+            <span>
+              J4 <strong>{typeof j4 === 'number' ? mm(j4) : '—'}</strong> · fija en {J4_FIXED}
+            </span>
+            {j4Off ? <span className="admin-j4-warn">Pon J4 en {J4_FIXED} antes de guardar la pose</span> : null}
+            <button
+              type="button"
+              className="admin-press"
+              disabled={busy || homing || status?.backend !== 'mg400'}
+              onClick={() => void homeJ4()}
+            >
+              {homing ? 'Girando…' : `J4 a ${J4_FIXED}`}
+            </button>
+          </div>
           <div className="admin-corners">
             {CORNER_INFO.map((item) => {
               const pose = corners[item.id]
               return (
                 <div key={item.id} className={`admin-corner is-${item.id}${pose ? ' is-set' : ''}`}>
-                  <span className="admin-corner-glyph" aria-hidden="true" />
-                  <strong>{item.label}</strong>
-                  <p>{pose ? `X ${mm(pose.x)}  Y ${mm(pose.y)}  Z ${mm(pose.z)}  R ${mm(pose.r)}` : item.hint}</p>
+                  <div className="admin-corner-info">
+                    <span className="admin-corner-glyph" aria-hidden="true" />
+                    <strong>{item.label}</strong>
+                    {pose ? <Coords values={[pose.x, pose.y, pose.z, pose.r]} /> : <p>{item.hint}</p>}
+                  </div>
                   <div className="admin-corner-actions">
-                    <button type="button" className="admin-press" disabled={!hasPose || busy} onClick={() => teach(item.id)}>
-                      Guardar pose
+                    <button
+                      type="button"
+                      className="admin-icon-btn"
+                      aria-label={`Guardar pose en ${item.label.toLowerCase()}`}
+                      title="Guardar pose"
+                      disabled={!hasPose || busy}
+                      onClick={() => teach(item.id)}
+                    >
+                      <Save size={20} aria-hidden="true" />
                     </button>
                     <button
                       type="button"
-                      className="admin-press"
+                      className="admin-icon-btn"
+                      aria-label={`Ir a ${item.label.toLowerCase()}`}
+                      title="Ir aquí"
                       disabled={!pose || busy || Boolean(moving)}
                       onClick={() => void go(item.id)}
                     >
-                      {moving === item.id ? 'Yendo…' : 'Ir aquí'}
+                      {moving === item.id ? (
+                        <Loader2 size={20} className="admin-spin" aria-hidden="true" />
+                      ) : (
+                        <Navigation size={20} aria-hidden="true" />
+                      )}
                     </button>
                   </div>
                 </div>
               )
             })}
             <div className={`admin-corner is-br${ready ? ' is-set' : ''}`}>
-              <span className="admin-corner-glyph" aria-hidden="true" />
-              <strong>Inferior derecha</strong>
-              <p>
-                {calibration
-                  ? `Calculada: X ${mm(calibration.points.br[0])}  Y ${mm(calibration.points.br[1])}  Z ${mm(calibration.points.br[2])}  R ${mm(calibration.points.br[3])}`
-                  : 'Se calcula con las otras tres.'}
-              </p>
+              <div className="admin-corner-info">
+                <span className="admin-corner-glyph" aria-hidden="true" />
+                <strong>Inferior derecha</strong>
+                {calibration ? (
+                  <Coords values={calibration.points.br} prefix="Calculada" />
+                ) : (
+                  <p>Se calcula con las otras tres.</p>
+                )}
+              </div>
               <div className="admin-corner-actions">
-                <button type="button" className="admin-press" disabled={!ready || busy || Boolean(moving)} onClick={() => void go('br')}>
-                  {moving === 'br' ? 'Yendo…' : 'Ir aquí'}
+                <button
+                  type="button"
+                  className="admin-icon-btn"
+                  aria-label="Ir a inferior derecha"
+                  title="Ir aquí"
+                  disabled={!ready || busy || Boolean(moving)}
+                  onClick={() => void go('br')}
+                >
+                  {moving === 'br' ? (
+                    <Loader2 size={20} className="admin-spin" aria-hidden="true" />
+                  ) : (
+                    <Navigation size={20} aria-hidden="true" />
+                  )}
                 </button>
               </div>
             </div>

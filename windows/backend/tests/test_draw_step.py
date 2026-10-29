@@ -90,6 +90,46 @@ def test_los_puntos_pegados_se_colapsan():
     assert len(movimientos) <= 4
 
 
+def test_un_bucle_pequeno_conserva_todos_sus_lados() -> None:
+    """Un ojo o una O no puede colapsarse en un punto por medir menos de 8 mm."""
+    enlace = Enlace()
+    cliente = MG400Client(
+        link=enlace,
+        z_draw=-167.0,
+        z_travel=-160.0,
+        r=0.0,
+        origin_x=100.0,
+        origin_y=100.0,
+        x_sign=1,
+        y_sign=1,
+        queue_retry_s=0.0,
+        pace_lead_s=0.0,
+        pipeline=1,
+    )
+    papel = Trajectory(
+        segments=[
+            Segment(
+                type="draw",
+                points=[[0.0, 0.0], [5.0, 0.0], [5.0, 5.0], [0.0, 5.0], [0.0, 0.0]],
+            )
+        ],
+        width_mm=40.0,
+        height_mm=40.0,
+    )
+
+    async def correr() -> None:
+        async def progreso(_valor: float, _segmento: Segment) -> None:
+            return None
+
+        await cliente.draw(papel, progreso)
+
+    asyncio.run(correr())
+
+    # La bajada inicial tiene CP=1; cada lado escrito usa CP=100.
+    movimientos = [move for move in enlace.moves if "CP=100" in move]
+    assert len(movimientos) == 4
+
+
 def test_el_dibujo_termina_sin_sync():
     enlace = Enlace()
     puntos = [[i * 6.0, 0.0] for i in range(4)]

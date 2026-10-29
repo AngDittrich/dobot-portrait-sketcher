@@ -18,7 +18,6 @@ def test_el_viaje_precede_al_trazo_siguiente():
         width=100,
         height=100,
         target_width_mm=100.0,
-        spacing_mm=10.0,
     )
 
     tipos = [segmento["type"] for segmento in result.segments]
@@ -32,5 +31,15 @@ def test_el_viaje_precede_al_trazo_siguiente():
 
 def test_un_solo_trazo_no_tiene_viaje():
     linea = np.array([[0.0, 0.0], [10.0, 0.0]], dtype=np.float32)
-    result = build_trajectory([linea], width=100, height=40, target_width_mm=100.0, spacing_mm=10.0)
+    result = build_trajectory([linea], width=100, height=40, target_width_mm=100.0)
     assert [segmento["type"] for segmento in result.segments] == ["draw"]
+
+
+def test_la_trayectoria_conserva_el_vertice_de_un_trazo_corto() -> None:
+    """El remuestreo no puede convertir una V pequeña en una recta."""
+    v = np.array([[0.0, 0.0], [4.0, 4.0], [8.0, 0.0]], dtype=np.float32)
+
+    result = build_trajectory([v], width=8, height=4, target_width_mm=8.0)
+
+    points = result.segments[0]["points"]
+    assert [4.0, 4.0] in points
