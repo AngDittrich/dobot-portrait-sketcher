@@ -20,21 +20,26 @@ _ADVANCE = 5.15
 _SPACE = 2.5
 _I_ADVANCE = 3.2
 
+def _arc(
+    cx: float, cy: float, rx: float, ry: float, start: float, sweep: float, steps: int
+) -> list[tuple[float, float]]:
+    """Arco con Y hacia abajo. `sweep` positivo gira en sentido horario visual."""
+    return [
+        (
+            cx + rx * math.cos(start + sweep * index / steps),
+            cy + ry * math.sin(start + sweep * index / steps),
+        )
+        for index in range(steps + 1)
+    ]
+
+
 # Trazos en coordenadas de diseño: x a la derecha, y hacia abajo.
 _GLYPHS: dict[str, tuple[float, list[list[tuple[float, float]]]]] = {
     "S": (
         _ADVANCE,
         [[
-            (3.45, 1.05),
-            (2.15, 0.35),
-            (0.7, 1.05),
-            (0.55, 2.15),
-            (1.45, 2.9),
-            (2.7, 3.2),
-            (3.5, 4.05),
-            (3.35, 5.15),
-            (2.05, 5.7),
-            (0.6, 5.15),
+            *_arc(2.05, 1.75, 1.4, 1.15, 0.35, math.pi + 0.9, 14),
+            *_arc(2.05, 4.35, 1.4, 1.15, math.pi + 0.55, math.pi + 0.7, 14)[1:],
         ]],
     ),
     "Y": (
@@ -46,29 +51,11 @@ _GLYPHS: dict[str, tuple[float, list[list[tuple[float, float]]]]] = {
     ),
     "C": (
         _ADVANCE,
-        [[
-            (3.4, 1.15),
-            (2.05, 0.4),
-            (0.75, 1.2),
-            (0.45, 3.0),
-            (0.75, 4.85),
-            (2.05, 5.6),
-            (3.4, 4.85),
-        ]],
+        [_arc(2.05, 3.0, 1.45, 2.45, -0.85, -(2 * math.pi - 1.7), 16)],
     ),
     "O": (
         _ADVANCE,
-        [[
-            (2.05, 0.4),
-            (3.35, 1.15),
-            (3.6, 3.0),
-            (3.35, 4.9),
-            (2.05, 5.6),
-            (0.75, 4.9),
-            (0.45, 3.0),
-            (0.75, 1.15),
-            (2.05, 0.4),
-        ]],
+        [_arc(2.05, 3.0, 1.5, 2.5, -math.pi / 2, 2 * math.pi, 16)],
     ),
     "M": (
         _ADVANCE,
@@ -79,14 +66,11 @@ _GLYPHS: dict[str, tuple[float, list[list[tuple[float, float]]]]] = {
         [
             [
                 (0.5, 5.55),
-                (0.5, 0.5),
-                (2.35, 0.5),
-                (3.4, 1.3),
-                (3.4, 2.25),
-                (2.3, 3.05),
-                (0.5, 3.05),
+                (0.5, 0.55),
+                *_arc(1.7, 1.75, 1.55, 1.2, math.pi, -math.pi, 12)[1:],
+                (0.5, 2.95),
             ],
-            [(1.75, 3.05), (3.6, 5.55)],
+            [(1.55, 2.95), (3.6, 5.55)],
         ],
     ),
     "B": (
@@ -95,18 +79,11 @@ _GLYPHS: dict[str, tuple[float, list[list[tuple[float, float]]]]] = {
             [
                 (0.5, 5.55),
                 (0.5, 0.5),
-                (2.25, 0.5),
-                (3.35, 1.25),
-                (3.3, 2.15),
-                (2.2, 2.9),
-                (0.5, 2.9),
+                *_arc(1.55, 1.7, 1.6, 1.2, math.pi, -math.pi, 12)[1:],
             ],
             [
                 (0.5, 2.9),
-                (2.4, 2.9),
-                (3.5, 3.75),
-                (3.45, 4.75),
-                (2.25, 5.55),
+                *_arc(1.55, 4.25, 1.7, 1.3, math.pi, -math.pi, 12)[1:],
                 (0.5, 5.55),
             ],
         ],

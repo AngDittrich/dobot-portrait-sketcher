@@ -27,12 +27,10 @@ TWO_OPT_MAX_STROKES = 250
 # y el tiempo que anuncia la cabina se calculan con este número medido, no con
 # el ideal de 80 mm/s que el brazo nunca alcanza.
 MEASURED_SPEED_MM_S = 19.6
-# El tiempo de avanzar ya usa la velocidad medida, pero cada orden suma
-# procesamiento/control. La subida se solapa con la cola de movimiento: la
-# prueba física SYSCOM no respalda cargar 3 s completos por cada trazo.
-# Estos valores se revisan contra el MG400 real.
-COMMAND_OVERHEAD_S = 0.18
-PEN_LIFT_OVERHEAD_S = 0.1
+# Cada MovL tarda al menos esto: 0.51 s medidos por orden, con 3 en vuelo.
+MIN_COMMAND_S = 0.17
+# Vaciar la cola al subir y bajar la pluma. Medido en el MG400.
+PEN_LIFT_S = 3.0
 
 
 @dataclass
@@ -129,7 +127,9 @@ def strokes_from_mask(
     return strokes
 
 
-def trim_to_ink(mask: np.ndarray, margin_ratio: float = 0.05) -> np.ndarray:
+def trim_to_ink(
+    mask: np.ndarray, margin_ratio: float = 0.05
+) -> tuple[np.ndarray, tuple[int, int]]:
     """Recorta el papel sobrante alrededor de la tinta.
 
     La IA devuelve un lienzo 3:4 con aire arriba y abajo. Si eso se manda tal
@@ -139,15 +139,20 @@ def trim_to_ink(mask: np.ndarray, margin_ratio: float = 0.05) -> np.ndarray:
     """
     ys, xs = np.nonzero(mask)
     if ys.size == 0:
-        return mask
+        return mask, (0, 0)
     height, width = mask.shape[:2]
     top, bottom = int(ys.min()), int(ys.max()) + 1
     left, right = int(xs.min()), int(xs.max()) + 1
     margin = int(round(max(bottom - top, right - left) * max(0.0, margin_ratio)))
-    return mask[
-        max(0, top - margin) : min(height, bottom + margin),
-        max(0, left - margin) : min(width, right + margin),
-    ]
+    origin_y = max(0, top - margin)
+    origin_x = max(0, left - margin)
+    return (
+        mask[
+            origin_y : min(height, bottom + margin),
+            origin_x : min(width, right + margin),
+        ],
+        (origin_x, origin_y),
+    )
 
 
 def skeletonize(mask: np.ndarray) -> np.ndarray:
@@ -634,18 +639,18 @@ def estimate_seconds(
     if not strokes:
         return 0.0
     mm_per_px = float(target_width_mm) / max(1, width)
-    draw_mm = sum(_polyline_length(s) for s in strokes) * mm_per_px
-    travel_mm = 0.0
+    draw_s = 0.0
+    for stroke in strokes:
+        length_mm = _polyline_length(stroke) * mm_per_px
+        edges = max(1, len(stroke) - 1)
+        draw_s += max(length_mm / max(1.0, speed_mm_s), MIN_COMMAND_S * edges)
+        draw_s += MIN_COMMAND_S
+    travel_s = 0.0
     for previous, current in zip(strokes, strokes[1:]):
-        travel_mm += float(np.hypot(*(current[0] - previous[-1]))) * mm_per_px
-    # Cada trazo llega con sus vértices simplificados. Para estimar de forma
-    # conservadora se cuenta el viaje/bajada inicial y la subida final de
-    # cada trazo; solo los trazos que ya se tocan pueden ahorrarse ese coste
-    # en el cliente del MG400.
-    commands = sum(len(stroke) + 2 for stroke in strokes)
-    lifts = len(strokes)
-    movement = draw_mm / max(1.0, speed_mm_s) + travel_mm / max(1.0, speed_mm_s * 1.6)
-    return movement + commands * COMMAND_OVERHEAD_S + lifts * PEN_LIFT_OVERHEAD_S
+        travel_mm = float(np.hypot(*(current[0] - previous[-1]))) * mm_per_px
+        travel_s += max(travel_mm / max(1.0, speed_mm_s * 1.6), MIN_COMMAND_S)
+    lifts = max(0, len(strokes) - 1)
+    return draw_s + travel_s + lifts * PEN_LIFT_S
 
 
 def prune_to_budget(

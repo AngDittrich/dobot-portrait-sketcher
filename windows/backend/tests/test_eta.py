@@ -16,9 +16,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.pipeline.caption import append_caption  # noqa: E402
 from app.pipeline.vectorize import (  # noqa: E402
-    COMMAND_OVERHEAD_S,
     MEASURED_SPEED_MM_S,
-    PEN_LIFT_OVERHEAD_S,
+    MIN_COMMAND_S,
+    PEN_LIFT_S,
     estimate_seconds,
     prune_to_budget,
 )
@@ -35,21 +35,11 @@ def test_estimate_seconds_usa_la_velocidad_medida() -> None:
     # traslado entre ellos, que va 1.6 veces mas rapido.
     trazos = [np.array([[0.0, 0.0], [50.0, 0.0]]), np.array([[50.0, 10.0], [100.0, 10.0]])]
     esperado = (
-        140.0 / MEASURED_SPEED_MM_S
-        + 14.0 / (MEASURED_SPEED_MM_S * 1.6)
-        + 8 * COMMAND_OVERHEAD_S
-        + 2 * PEN_LIFT_OVERHEAD_S
+        2 * max(70.0 / MEASURED_SPEED_MM_S, MIN_COMMAND_S)
+        + 2 * MIN_COMMAND_S
+        + max(14.0 / (MEASURED_SPEED_MM_S * 1.6), MIN_COMMAND_S)
+        + PEN_LIFT_S
     )
-
-    assert estimate_seconds(trazos, 100, target_width_mm=140.0) == pytest.approx(esperado, rel=0.02)
-
-
-def test_estimate_seconds_cuenta_ordenes_y_subidas_de_pluma() -> None:
-    trazos = [np.array([[0.0, 0.0], [50.0, 0.0]]), np.array([[50.0, 10.0], [100.0, 10.0]])]
-    recorrido = 140.0 / MEASURED_SPEED_MM_S + 14.0 / (MEASURED_SPEED_MM_S * 1.6)
-    # Cada trazo manda sus puntos y dos movimientos extra; cada trazo
-    # independiente incluye una subida de pluma.
-    esperado = recorrido + 8 * COMMAND_OVERHEAD_S + 2 * PEN_LIFT_OVERHEAD_S
 
     assert estimate_seconds(trazos, 100, target_width_mm=140.0) == pytest.approx(esperado, rel=0.02)
 
@@ -62,7 +52,9 @@ def test_el_rotulo_no_agota_el_presupuesto_del_retrato() -> None:
     """SYSCOM ROBOTICS deja tiempo para los rasgos del retrato."""
     caption, _ = append_caption([], width=900, height=1200)
 
-    assert estimate_seconds(caption, 900, target_width_mm=90.0) < 50.0
+    segundos = estimate_seconds(caption, 900, target_width_mm=90.0)
+    assert segundos < 120.0
+    assert 240.0 - segundos > 120.0
 
 
 def test_la_eta_resta_el_tiempo_transcurrido_real() -> None:
