@@ -15,6 +15,7 @@ interface DrawingScreenProps {
   job: RobotJob | null
   sketch: string | null
   strokes: SketchStroke[]
+  onCancel?: () => void
 }
 
 function clock(seconds: number): string {
@@ -24,7 +25,7 @@ function clock(seconds: number): string {
   return `${minutes}:${rest.toString().padStart(2, '0')}`
 }
 
-export function DrawingScreen({ job, sketch, strokes }: DrawingScreenProps) {
+export function DrawingScreen({ job, sketch, strokes, onCancel }: DrawingScreenProps) {
   const drawing = job === null || job.status === 'queued' || job.status === 'drawing'
   const progress = job === null ? null : job.progress
 
@@ -81,6 +82,11 @@ export function DrawingScreen({ job, sketch, strokes }: DrawingScreenProps) {
           )}
           {!drawing && <span className="booth-clock-rest">terminado en {clock(elapsed)}</span>}
         </p>
+        {drawing && onCancel && (
+          <button type="button" className="booth-cancel" onClick={onCancel}>
+            Cancelar
+          </button>
+        )}
       </div>
     </motion.section>
   )

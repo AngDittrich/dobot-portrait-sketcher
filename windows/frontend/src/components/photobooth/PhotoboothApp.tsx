@@ -206,7 +206,13 @@ export function PhotoboothApp({ onOpenAdmin }: { onOpenAdmin: () => void }) {
           )}
 
           {booth.status === 'drawing' && (
-            <DrawingScreen key="drawing" job={booth.robotJob} sketch={booth.sketch} strokes={booth.strokes} />
+            <DrawingScreen
+              key="drawing"
+              job={booth.robotJob}
+              sketch={booth.sketch}
+              strokes={booth.strokes}
+              onCancel={() => void booth.cancelDrawing()}
+            />
           )}
           {booth.status === 'thanks' && <ThanksScreen key="thanks" />}
           {booth.status === 'robotError' && <RobotErrorScreen key="robot-error" />}

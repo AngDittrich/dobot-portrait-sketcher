@@ -105,6 +105,8 @@ Wizard de una sola pantalla, sin scroll. Estados en `src/hooks/usePhotobooth.ts`
 - `AdminArea` (`src/components/admin/AdminArea.tsx`) es la dueña de `/admin`: lee la sección de la URL, completa `/admin` → `/admin/estado` y corrige una sección que no existe, siempre con `replaceState` (sin apilar historial por cada clic en la barra).
 - El token del PIN se guarda en `sessionStorage` (`src/lib/adminSession.ts`), así que una recarga normal no lo pierde: el panel reabre en la misma pestaña sin pedir el PIN otra vez. Si el backend lo rechaza (401, porque uvicorn se reinició y `app/admin_ops.py` olvida los tokens en memoria) se borra el token y se vuelve a pedir el PIN, pero la URL de la sección no se toca. Pulsar **Salir** sí borra el token y navega a `/`.
 - Rutas que no son `/` ni empiezan con `/admin` caen en `/` (typos, enlaces viejos). El wizard del visitante (`usePhotobooth`) no vive en la URL: sus pasos siguen reiniciándose a `attract` por diseño (inactividad, `THANKS_MS`, etc.), eso no cambió.
+- El logo de SYSCOM, arriba a la izquierda del encabezado del panel, abre el demo (`/`) y deja el token: el botón Admin de la cabina vuelve al panel sin pedir el PIN. **Salir** sigue borrando el token.
+- Con un dibujo en curso hay **Cancelar** en Actividad y en la pantalla de la cabina. `POST /api/jobs/cancel` pausa el brazo por el dashboard; el lazo sale sin contarlo como error y luego manda `Stop()`, `Continue()` y sube el lápiz. **Logs** y **Borrar**, junto al paro, abren la bitácora y borran los trabajos ya cerrados (`DELETE /api/admin/jobs`). El que sigue dibujando no se borra.
 
 ## Calibración de la hoja (`windows/backend/app/robot/frame.py`)
 

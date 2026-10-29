@@ -58,6 +58,17 @@ class _BoundedStore:
         """Los más recientes primero (el OrderedDict crece hacia el final)."""
         return list(reversed(self._items.values()))[:count]
 
+    def drop_settled(self) -> int:
+        """Quita lo ya terminado. Un dibujo en curso o en cola se queda."""
+        keys = [
+            key
+            for key, job in self._items.items()
+            if getattr(job, "status", "") not in {"drawing", "queued"}
+        ]
+        for key in keys:
+            del self._items[key]
+        return len(keys)
+
 
 class SketchStore(_BoundedStore):
     pass

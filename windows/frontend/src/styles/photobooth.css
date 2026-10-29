@@ -1560,3 +1560,23 @@
   font-size: 0.92rem;
   color: rgba(255, 255, 255, 0.55);
 }
+
+.booth-cancel {
+  margin-top: 1.15rem;
+  min-height: 64px;
+  padding: 0 1.8rem;
+  border: 0;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ef4444, #b91c1c);
+  color: #fff;
+  font-weight: 800;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(185, 28, 28, 0.35);
+}
+
+.booth-cancel:active {
+  transform: translateY(1px) scale(0.98);
+}

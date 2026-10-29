@@ -114,6 +114,7 @@ export function AdminArea({
       onSection={(id) => navigate(`/admin/${id}`, { replace: true })}
       onClose={close}
       onExpired={onExpired}
+      onDemo={() => navigate('/')}
     />,
     document.body,
   )

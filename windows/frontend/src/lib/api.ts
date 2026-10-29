@@ -78,6 +78,11 @@ export async function postJob(sketchId?: string | null): Promise<JobResponse> {
   })
 }
 
+/** Corta el dibujo que está en curso. Lo usa la cabina, sin PIN. */
+export async function cancelActiveJob(): Promise<{ cancelled: boolean }> {
+  return request<{ cancelled: boolean }>('/api/jobs/cancel', { method: 'POST' })
+}
+
 /** Progreso del trabajo de dibujo. */
 export async function getJob(jobId: string): Promise<JobStatus> {
   return request<JobStatus>(`/api/jobs/${jobId}`)
@@ -285,6 +290,14 @@ export interface AdminActivity {
 /** Dibujos recientes, contadores y proveedor de IA (sección Actividad). */
 export function adminActivity(token: string): Promise<AdminActivity> {
   return request<AdminActivity>('/api/admin/activity', { headers: adminHeaders(token) })
+}
+
+/** Borra los dibujos ya cerrados de la bitácora. El que está en curso se queda. */
+export function adminClearJobs(token: string): Promise<{ removed: number }> {
+  return request<{ removed: number }>('/api/admin/jobs', {
+    method: 'DELETE',
+    headers: adminHeaders(token),
+  })
 }
 
 /** Las `<img>` no mandan headers: el token viaja en la query para la miniatura. */

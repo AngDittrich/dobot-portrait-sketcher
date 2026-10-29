@@ -128,6 +128,10 @@ class Trajectory:
 ProgressCallback = Callable[[float, Segment], Awaitable[None]]
 
 
+class DrawCancelled(Exception):
+    """El visitante o el panel cortaron el dibujo antes de que terminara."""
+
+
 class RobotClient:
     """Interfaz común de los clientes de robot."""
 
@@ -157,9 +161,16 @@ class MockRobotClient(RobotClient):
         self.time_scale = (
             time_scale if time_scale is not None else float(os.environ.get("ROBOT_TIME_SCALE", "1.0"))
         )
+        self._cancel = False
 
     async def connect(self) -> None:
         return None
+
+    async def cancel(self) -> None:
+        self._cancel = True
+
+    async def finish_cancel(self) -> None:
+        self._cancel = False
 
     async def draw(
         self,
@@ -172,16 +183,25 @@ class MockRobotClient(RobotClient):
         total = trajectory.total_length or 1.0
         done = 0.0
         for segment in trajectory.segments:
+            if self._cancel:
+                raise DrawCancelled()
             length = segment.length
             if segment.type == "draw":
                 duration = length / max(1.0, self.speed_mm_s)
             else:
                 # Los viajes con el lápiz arriba son más rápidos.
                 duration = length / max(1.0, self.speed_mm_s * 1.6)
-            if duration > 0:
-                await asyncio.sleep(duration * self.time_scale)
+            remaining = duration * self.time_scale
+            while remaining > 0:
+                if self._cancel:
+                    raise DrawCancelled()
+                step = min(0.1, remaining)
+                await asyncio.sleep(step)
+                remaining -= step
             done += length
             await on_progress(min(1.0, done / total), segment)
+        if self._cancel:
+            raise DrawCancelled()
 
 
 class _DryLink:
@@ -328,6 +348,7 @@ class MG400Client(RobotClient):
             self.set_frame(frame, lift_mm, margin_mm)
         self.commands: list[str] = []
         self._ready = False
+        self._cancel = False
         # El MG400 acepta un solo cliente. Dos consultas a la vez no pueden abrir dos sockets.
         self._io = asyncio.Lock()
         # El dashboard del MG400 atiende una orden a la vez y contesta por el
@@ -503,6 +524,56 @@ class MG400Client(RobotClient):
             await self._goto(x, y, self.z_travel, self.speed_travel, 0)
         await self._drain()
 
+    async def cancel(self) -> None:
+        """Corta el dibujo: la pausa va por el dashboard, así no se cruza con el MovL."""
+        self._cancel = True
+        link = self._link
+        dashboard = getattr(link, "dashboard", None)
+        if dashboard is None:
+            return
+        try:
+            async with self._wire:
+                await asyncio.to_thread(dashboard, "Pause()")
+        except Exception:
+            logger.warning("pausa al cancelar no respondió", exc_info=True)
+
+    async def finish_cancel(self) -> None:
+        """Vacía la cola, sale de la pausa y levanta el lápiz donde se quedó."""
+        link = self._link
+        if link is not None:
+            move = getattr(link, "move", None)
+            dashboard = getattr(link, "dashboard", None)
+            if move is not None:
+                try:
+                    await asyncio.to_thread(move, "Stop()")
+                except Exception:
+                    logger.warning("Stop() al cancelar no respondió", exc_info=True)
+            if dashboard is not None:
+                try:
+                    async with self._wire:
+                        await asyncio.to_thread(dashboard, "Continue()")
+                except Exception:
+                    logger.warning("Continue() al cancelar no respondió", exc_info=True)
+            pose = getattr(link, "pose", None)
+            if move is not None and pose is not None:
+                try:
+                    actual = await asyncio.to_thread(pose)
+                    await asyncio.to_thread(
+                        move,
+                        self._movl(
+                            float(actual[0]),
+                            float(actual[1]),
+                            self.z_travel,
+                            self.r,
+                            self.speed_travel,
+                            0,
+                        ),
+                    )
+                except Exception:
+                    logger.warning("no se pudo levantar el lápiz al cancelar", exc_info=True)
+        self._pending = []
+        self._cancel = False
+
     async def draw(
         self,
         trajectory: Trajectory,
@@ -551,6 +622,8 @@ class MG400Client(RobotClient):
         last = Segment(type="travel")
 
         for segment in trajectory.segments:
+            if self._cancel:
+                raise DrawCancelled()
             points = segment.points
             if not points:
                 continue
@@ -562,9 +635,13 @@ class MG400Client(RobotClient):
             done += segment.length
             await on_progress(min(1.0, done / total), segment)
 
+        if self._cancel:
+            raise DrawCancelled()
         if pen_down and held is not None:
             await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
         await self._drain()
+        if self._cancel:
+            raise DrawCancelled()
         await on_progress(1.0, last)
 
     async def _draw_segment(
@@ -649,6 +726,8 @@ class MG400Client(RobotClient):
         cp: int,
     ) -> bool:
         """Manda el punto. False si quedó fuera del brazo y se saltó para seguir dibujando."""
+        if self._cancel:
+            raise DrawCancelled()
         robot_x, robot_y, real_z, rotation = self._map(x, y, z)
         if self._mas_adentro(robot_x, robot_y):
             logger.warning(
@@ -757,6 +836,8 @@ class MG400Client(RobotClient):
         mejor = float("inf")
         inicial: float | None = None
         while time.monotonic() < limite:
+            if self._cancel:
+                raise DrawCancelled()
             try:
                 actual = await asyncio.to_thread(pose)
             except Exception:  # noqa: BLE001 - sin lectura seguimos dibujando
