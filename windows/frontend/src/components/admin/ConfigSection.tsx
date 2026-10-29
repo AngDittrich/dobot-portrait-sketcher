@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
-import { adminArea, saveAdminBooth } from '../../lib/api'
-import type { AdminStatus } from '../../lib/api'
+import { useEffect, useState } from 'react'
+import { adminArea, adminCalibration, adminGoto, saveAdminBooth } from '../../lib/api'
+import type { AdminStatus, Calibration, CornerId, CornerPose, Corners, SpotId } from '../../lib/api'
+import { ReachMap } from './ReachMap'
 
 /**
- * Calibración de la cabina, agrupada por tema. Al guardar, los valores quedan
- * en `data/robot.json` y mandan sobre el `.env` desde el siguiente dibujo.
+ * Calibración de la cabina como asistente: se enseñan tres esquinas de la
+ * hoja con el lápiz tocando el papel, se revisan en el mapa y se guardan en
+ * `data/robot.json`. El retrato se ajusta solo a esa hoja.
  */
 
 type BoothForm = {
@@ -13,47 +15,47 @@ type BoothForm = {
   dry_run: boolean
   user: string
   tool: string
-  z_draw: string
-  z_travel: string
-  r: string
-  r_far: string
-  far_x: string
-  far_y: string
   speed_factor: string
-  origin_x: string
-  origin_y: string
-  x_sign: string
-  y_sign: string
   cp_draw: string
-  sheet: string
+  lift_mm: string
+  margin_mm: string
 }
 
-function fieldText(value: unknown): string {
-  if (value === null || value === undefined || value === '') return ''
+const CORNER_INFO: { id: CornerId; label: string; hint: string }[] = [
+  { id: 'tl', label: 'Superior izquierda', hint: 'Donde empieza el dibujo: arriba a la izquierda, mirando la hoja de frente.' },
+  { id: 'tr', label: 'Superior derecha', hint: 'Sobre el mismo borde de arriba, del otro lado.' },
+  { id: 'bl', label: 'Inferior izquierda', hint: 'Bajando por el borde izquierdo.' },
+]
+
+function text(value: unknown, fallback: string): string {
+  if (value === null || value === undefined || value === '') return fallback
   return String(value)
 }
 
-function boothFromFrame(frame: Record<string, number | string | boolean | null>): BoothForm {
+function formFrom(frame: NonNullable<AdminStatus['frame']>): BoothForm {
   return {
-    backend: fieldText(frame.backend) || 'mg400',
-    host: fieldText(frame.host),
-    dry_run: frame.dry_run === true || frame.dry_run === 'true' || frame.dry_run === 1,
-    user: fieldText(frame.user ?? 0),
-    tool: fieldText(frame.tool ?? 0),
-    z_draw: fieldText(frame.z_draw),
-    z_travel: fieldText(frame.z_travel),
-    r: fieldText(frame.r),
-    r_far: fieldText(frame.r_far),
-    far_x: fieldText(frame.far_x),
-    far_y: fieldText(frame.far_y),
-    speed_factor: fieldText(frame.speed_factor ?? 20),
-    origin_x: fieldText(frame.origin_x),
-    origin_y: fieldText(frame.origin_y),
-    x_sign: fieldText(frame.x_sign ?? -1),
-    y_sign: fieldText(frame.y_sign ?? -1),
-    cp_draw: fieldText(frame.cp_draw ?? 0),
-    sheet: fieldText(frame.sheet) || 'a5',
+    backend: text(frame.backend, 'mg400'),
+    host: text(frame.host, ''),
+    dry_run: frame.dry_run === true,
+    user: text(frame.user, '0'),
+    tool: text(frame.tool, '0'),
+    speed_factor: text(frame.speed_factor, '20'),
+    cp_draw: text(frame.cp_draw, '0'),
+    lift_mm: text(frame.lift_mm, '8'),
+    margin_mm: text(frame.margin_mm, '8'),
   }
+}
+
+// Borrador sin guardar. Para mover el brazo hay que ir a Control y volver:
+// sin esto, cambiar de sección borraba las esquinas recién enseñadas.
+let draft: { booth: BoothForm; corners: Partial<Corners> } | null = null
+
+function complete(corners: Partial<Corners>): corners is Corners {
+  return Boolean(corners.tl && corners.tr && corners.bl)
+}
+
+function mm(value: number): string {
+  return value.toFixed(1)
 }
 
 export function ConfigSection({
@@ -65,44 +67,94 @@ export function ConfigSection({
   token: string
   onNotice: (message: string) => void
 }) {
-  const [booth, setBooth] = useState<BoothForm | null>(null)
-  const boothReady = useRef(false)
+  const [booth, setBooth] = useState<BoothForm | null>(() => draft?.booth ?? null)
+  const [corners, setCorners] = useState<Partial<Corners>>(() => draft?.corners ?? {})
+  const [preview, setPreview] = useState<{ key: string; calibration: Calibration | null; error: string }>({
+    key: '',
+    calibration: null,
+    error: '',
+  })
   const [saving, setSaving] = useState(false)
+  const [moving, setMoving] = useState<string>('')
   const busy = Boolean(status?.busy)
   const live = status?.pose ?? []
-  const papers = status?.sheets ?? []
+  const hasPose = live.length >= 4
 
-  useEffect(() => {
-    const frame = status?.frame
-    if (boothReady.current || !frame || (frame.origin_x == null && frame.host == null)) return
-    boothReady.current = true
-    setBooth(boothFromFrame(frame))
-  }, [status])
-
-  function patch<K extends keyof BoothForm>(key: K, value: BoothForm[K]) {
-    setBooth((current) => current && { ...current, [key]: value })
+  // Se siembra una sola vez con lo guardado: el sondeo de 800 ms no pisa lo que se edita.
+  const seed = status?.frame
+  if (booth === null && seed?.backend) {
+    setBooth(formFrom(seed))
+    if (seed.corners) setCorners(seed.corners)
   }
 
-  function teach(which: 'origin' | 'far') {
-    if (live.length < 4) return
-    setBooth((current) => {
-      if (!current) return current
-      if (which === 'origin') {
-        return {
-          ...current,
-          origin_x: String(live[0]),
-          origin_y: String(live[1]),
-          z_draw: String(live[2]),
-          r: String(live[3]),
-        }
+  useEffect(() => {
+    draft = booth ? { booth, corners } : null
+  }, [booth, corners])
+
+  const ready = complete(corners)
+  const margin = Number(booth?.margin_mm ?? 8)
+  const previewKey = ready ? JSON.stringify([corners, margin]) : ''
+
+  useEffect(() => {
+    if (!previewKey || !complete(corners)) return
+    let stop = false
+    const timer = window.setTimeout(() => {
+      adminCalibration(token, corners, Number.isFinite(margin) ? margin : 8)
+        .then((calibration) => {
+          if (!stop) setPreview({ key: previewKey, calibration, error: '' })
+        })
+        .catch((error: unknown) => {
+          if (!stop) {
+            setPreview({
+              key: previewKey,
+              calibration: null,
+              error: error instanceof Error ? error.message : 'las esquinas no forman una hoja',
+            })
+          }
+        })
+    }, 250)
+    return () => {
+      stop = true
+      window.clearTimeout(timer)
+    }
+    // corners y margin ya van dentro de previewKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewKey, token])
+
+  const current = preview.key === previewKey ? preview : { calibration: null, error: '' }
+  const calibration = current.calibration
+  const problems = calibration?.errors ?? []
+  const shapeError = current.error
+
+  function patch<K extends keyof BoothForm>(key: K, value: BoothForm[K]) {
+    setBooth((state) => state && { ...state, [key]: value })
+  }
+
+  function teach(id: CornerId) {
+    if (!hasPose) return
+    const pose: CornerPose = { x: live[0], y: live[1], z: live[2], r: live[3] }
+    setCorners((state) => ({ ...state, [id]: pose }))
+    onNotice(`Esquina ${CORNER_INFO.find((item) => item.id === id)?.label.toLowerCase()} guardada. Falta Guardar cabina.`)
+  }
+
+  async function go(target: SpotId) {
+    if (moving || busy) return
+    const lift = Number(booth?.lift_mm ?? 8)
+    setMoving(target)
+    try {
+      if (complete(corners)) {
+        await adminGoto(token, { corner: target, corners }, lift)
+      } else {
+        const point = target === 'tl' || target === 'tr' || target === 'bl' ? corners[target] : undefined
+        if (!point) throw new Error('enseña esa esquina primero')
+        await adminGoto(token, { point }, lift)
       }
-      return {
-        ...current,
-        far_x: String(live[0]),
-        far_y: String(live[1]),
-        r_far: String(live[3]),
-      }
-    })
+      onNotice('')
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : 'el brazo no pudo ir a ese punto')
+    } finally {
+      setMoving('')
+    }
   }
 
   async function markArea() {
@@ -110,7 +162,7 @@ export function ConfigSection({
     setSaving(true)
     try {
       const area = await adminArea(token)
-      onNotice(`Área marcada: ${area.width_mm} × ${area.height_mm} mm. El lápiz va arriba.`)
+      onNotice(`Área recorrida: ${Math.round(area.width_mm)} × ${Math.round(area.height_mm)} mm con el lápiz arriba.`)
     } catch (error) {
       onNotice(error instanceof Error ? error.message : 'no se pudo marcar el área')
     } finally {
@@ -121,29 +173,21 @@ export function ConfigSection({
   async function saveBooth() {
     if (!booth || saving) return
     setSaving(true)
-    const number = (value: string) => Number(value)
     try {
       await saveAdminBooth(token, {
         backend: booth.backend,
         host: booth.host.trim(),
         dry_run: booth.dry_run,
-        user: number(booth.user),
-        tool: number(booth.tool),
-        z_draw: number(booth.z_draw),
-        z_travel: number(booth.z_travel),
-        r: number(booth.r),
-        r_far: number(booth.r_far),
-        far_x: number(booth.far_x),
-        far_y: number(booth.far_y),
-        speed_factor: number(booth.speed_factor),
-        origin_x: number(booth.origin_x),
-        origin_y: number(booth.origin_y),
-        x_sign: number(booth.x_sign),
-        y_sign: number(booth.y_sign),
-        cp_draw: number(booth.cp_draw),
-        sheet: booth.sheet,
+        user: Number(booth.user),
+        tool: Number(booth.tool),
+        speed_factor: Number(booth.speed_factor),
+        cp_draw: Number(booth.cp_draw),
+        corners: complete(corners) ? corners : null,
+        lift_mm: Number(booth.lift_mm),
+        margin_mm: Number(booth.margin_mm),
       })
-      onNotice('Cabina guardada. El siguiente dibujo usa estos valores.')
+      onNotice('Cabina guardada. El siguiente dibujo usa esta hoja.')
+      draft = null
     } catch (error) {
       onNotice(error instanceof Error ? error.message : 'no se pudo guardar la cabina')
     } finally {
@@ -159,7 +203,9 @@ export function ConfigSection({
     )
   }
 
-  const chosen = papers.find((paper) => paper.id === booth.sheet)
+  const isRobot = booth.backend === 'mg400'
+  const blocked = isRobot && (!ready || Boolean(shapeError) || problems.length > 0)
+  const taught = CORNER_INFO.filter((item) => corners[item.id]).length
 
   return (
     <div className="admin-section">
@@ -170,6 +216,129 @@ export function ConfigSection({
           void saveBooth()
         }}
       >
+        <section className="admin-card admin-card--wide admin-calib">
+          <div className="admin-calib-map">
+            <ReachMap calibration={calibration} corners={corners} live={live} />
+          </div>
+          <div className="admin-calib-side">
+            <h3>Hoja</h3>
+            {calibration ? (
+              <>
+                <p className="admin-calib-size">
+                  {Math.round(calibration.width_mm)} × {Math.round(calibration.height_mm)} mm
+                  <span>
+                    {calibration.orientation}
+                    {calibration.paper ? `, ${calibration.paper.matches ? 'es' : 'parece'} ${calibration.paper.label}` : ''}
+                  </span>
+                </p>
+                <p className="admin-card-note">
+                  El retrato ocupa {Math.round(calibration.draw_width_mm)} × {Math.round(calibration.draw_height_mm)} mm,
+                  centrado y con {booth.margin_mm} mm de aire al borde. En el mapa es el rectángulo claro dentro de la hoja.
+                </p>
+              </>
+            ) : (
+              <p className="admin-card-note">
+                {taught === 0
+                  ? 'Mueve el brazo desde Control hasta que la punta toque una esquina de la hoja y pulsa Guardar pose en esa esquina.'
+                  : `Llevas ${taught} de 3 esquinas.`}
+              </p>
+            )}
+            {shapeError && <p className="admin-alert">{shapeError}</p>}
+            {problems.map((problem) => (
+              <p key={problem} className="admin-alert">
+                {problem}
+              </p>
+            ))}
+            {calibration?.warnings.map((warning) => (
+              <p key={warning} className="admin-note">
+                {warning}
+              </p>
+            ))}
+            <div className="admin-card-actions">
+              <button type="button" className="admin-press" disabled={!ready || busy || Boolean(moving)} onClick={() => void go('center')}>
+                {moving === 'center' ? 'Yendo…' : 'Ir al centro'}
+              </button>
+              <button
+                type="button"
+                className="admin-press"
+                disabled={busy || saving || !status?.calibration}
+                title={status?.calibration ? '' : 'guarda las esquinas primero'}
+                onClick={() => void markArea()}
+              >
+                Recorrer el borde guardado
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="admin-card admin-card--wide">
+          <div className="admin-card-head">
+            <h3>Esquinas de la hoja</h3>
+            <span className="admin-card-hint">El lápiz debe tocar el papel al guardar cada pose</span>
+          </div>
+          <div className="admin-corners">
+            {CORNER_INFO.map((item) => {
+              const pose = corners[item.id]
+              return (
+                <div key={item.id} className={`admin-corner is-${item.id}${pose ? ' is-set' : ''}`}>
+                  <span className="admin-corner-glyph" aria-hidden="true" />
+                  <strong>{item.label}</strong>
+                  <p>{pose ? `X ${mm(pose.x)}  Y ${mm(pose.y)}  Z ${mm(pose.z)}  R ${mm(pose.r)}` : item.hint}</p>
+                  <div className="admin-corner-actions">
+                    <button type="button" className="admin-press" disabled={!hasPose || busy} onClick={() => teach(item.id)}>
+                      Guardar pose
+                    </button>
+                    <button
+                      type="button"
+                      className="admin-press"
+                      disabled={!pose || busy || Boolean(moving)}
+                      onClick={() => void go(item.id)}
+                    >
+                      {moving === item.id ? 'Yendo…' : 'Ir aquí'}
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+            <div className={`admin-corner is-br${ready ? ' is-set' : ''}`}>
+              <span className="admin-corner-glyph" aria-hidden="true" />
+              <strong>Inferior derecha</strong>
+              <p>
+                {calibration
+                  ? `Calculada: X ${mm(calibration.points.br[0])}  Y ${mm(calibration.points.br[1])}`
+                  : 'Se calcula con las otras tres.'}
+              </p>
+              <div className="admin-corner-actions">
+                <button type="button" className="admin-press" disabled={!ready || busy || Boolean(moving)} onClick={() => void go('br')}>
+                  {moving === 'br' ? 'Yendo…' : 'Ir aquí'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="admin-card">
+          <h3>Dibujo</h3>
+          <div className="admin-fields">
+            <label>
+              Levantar lápiz (mm)
+              <input inputMode="decimal" value={booth.lift_mm} onChange={(event) => patch('lift_mm', event.target.value)} />
+            </label>
+            <label>
+              Margen al borde (mm)
+              <input inputMode="decimal" value={booth.margin_mm} onChange={(event) => patch('margin_mm', event.target.value)} />
+            </label>
+            <label>
+              Velocidad (1–100)
+              <input inputMode="decimal" value={booth.speed_factor} onChange={(event) => patch('speed_factor', event.target.value)} />
+            </label>
+            <label>
+              Suavizado CP (0–100)
+              <input inputMode="decimal" value={booth.cp_draw} onChange={(event) => patch('cp_draw', event.target.value)} />
+            </label>
+          </div>
+        </section>
+
         <section className="admin-card">
           <h3>Conexión</h3>
           <div className="admin-fields">
@@ -185,142 +354,28 @@ export function ConfigSection({
               <input value={booth.host} onChange={(event) => patch('host', event.target.value)} />
             </label>
             <label className="admin-check">
-              <input
-                type="checkbox"
-                checked={booth.dry_run}
-                onChange={(event) => patch('dry_run', event.target.checked)}
-              />
+              <input type="checkbox" checked={booth.dry_run} onChange={(event) => patch('dry_run', event.target.checked)} />
               Sin mover (simula el dibujo)
             </label>
           </div>
-        </section>
-
-        <section className="admin-card">
-          <h3>Papel</h3>
-          <div className="admin-sheets">
-            {papers.map((paper) => (
-              <button
-                key={paper.id}
-                type="button"
-                className="admin-press admin-sheet"
-                aria-pressed={booth.sheet === paper.id}
-                disabled={!paper.fits}
-                title={
-                  paper.reason ||
-                  `el retrato se dibuja a ${Math.round(paper.draw_width_mm)} mm de ancho`
-                }
-                onClick={() => patch('sheet', paper.id)}
-              >
-                {paper.label}
-                <span className="admin-sheet-size">
-                  {paper.width_mm}×{paper.height_mm}
-                </span>
-              </button>
-            ))}
-          </div>
-          {chosen && !chosen.fits ? <p className="admin-note">{chosen.reason}</p> : null}
-          <div className="admin-card-actions">
-            <button
-              type="button"
-              className="admin-press"
-              disabled={busy || saving || !chosen?.fits}
-              onClick={() => void markArea()}
-            >
-              Marcar el área con el lápiz arriba
-            </button>
-          </div>
-        </section>
-
-        <section className="admin-card">
-          <h3>Hoja y calibración</h3>
-          <div className="admin-fields">
-            <label>
-              Centro X
-              <input inputMode="decimal" value={booth.origin_x} onChange={(event) => patch('origin_x', event.target.value)} />
-            </label>
-            <label>
-              Centro Y
-              <input inputMode="decimal" value={booth.origin_y} onChange={(event) => patch('origin_y', event.target.value)} />
-            </label>
-            <label>
-              Z dibujo
-              <input inputMode="decimal" value={booth.z_draw} onChange={(event) => patch('z_draw', event.target.value)} />
-            </label>
-            <label>
-              Z viaje
-              <input inputMode="decimal" value={booth.z_travel} onChange={(event) => patch('z_travel', event.target.value)} />
-            </label>
-            <label>
-              R origen
-              <input inputMode="decimal" value={booth.r} onChange={(event) => patch('r', event.target.value)} />
-            </label>
-            <label>
-              Esquina X
-              <input inputMode="decimal" value={booth.far_x} onChange={(event) => patch('far_x', event.target.value)} />
-            </label>
-            <label>
-              Esquina Y
-              <input inputMode="decimal" value={booth.far_y} onChange={(event) => patch('far_y', event.target.value)} />
-            </label>
-            <label>
-              R esquina
-              <input inputMode="decimal" value={booth.r_far} onChange={(event) => patch('r_far', event.target.value)} />
-            </label>
-          </div>
-          <div className="admin-card-actions">
-            <button type="button" className="admin-press" disabled={live.length < 4} onClick={() => teach('origin')}>
-              Pose como centro
-            </button>
-            <button type="button" className="admin-press" disabled={live.length < 4} onClick={() => teach('far')}>
-              Pose como esquina
-            </button>
-          </div>
-        </section>
-
-        <section className="admin-card">
-          <h3>Cinemática</h3>
-          <div className="admin-fields">
-            <label>
-              Usuario
-              <input inputMode="decimal" value={booth.user} onChange={(event) => patch('user', event.target.value)} />
-            </label>
-            <label>
-              Herramienta
-              <input inputMode="decimal" value={booth.tool} onChange={(event) => patch('tool', event.target.value)} />
-            </label>
-            <label>
-              Signo X
-              <select value={booth.x_sign} onChange={(event) => patch('x_sign', event.target.value)}>
-                <option value="-1">-1</option>
-                <option value="1">1</option>
-              </select>
-            </label>
-            <label>
-              Signo Y
-              <select value={booth.y_sign} onChange={(event) => patch('y_sign', event.target.value)}>
-                <option value="-1">-1</option>
-                <option value="1">1</option>
-              </select>
-            </label>
-          </div>
-        </section>
-
-        <section className="admin-card">
-          <h3>Dibujo</h3>
-          <div className="admin-fields">
-            <label>
-              Velocidad
-              <input inputMode="decimal" value={booth.speed_factor} onChange={(event) => patch('speed_factor', event.target.value)} />
-            </label>
-            <label>
-              CP
-              <input inputMode="decimal" value={booth.cp_draw} onChange={(event) => patch('cp_draw', event.target.value)} />
-            </label>
-          </div>
+          <details className="admin-advanced">
+            <summary>Avanzado</summary>
+            <div className="admin-fields">
+              <label>
+                Usuario
+                <input inputMode="numeric" value={booth.user} onChange={(event) => patch('user', event.target.value)} />
+              </label>
+              <label>
+                Herramienta
+                <input inputMode="numeric" value={booth.tool} onChange={(event) => patch('tool', event.target.value)} />
+              </label>
+            </div>
+          </details>
         </section>
 
         <div className="admin-config-save">
-          <button type="submit" className="admin-press admin-press--primary" disabled={busy || saving}>
+          {blocked && <span className="admin-card-hint">{ready ? 'Corrige la hoja para guardar' : 'Faltan esquinas por enseñar'}</span>}
+          <button type="submit" className="admin-press admin-press--primary" disabled={busy || saving || blocked}>
             {saving ? 'Guardando…' : 'Guardar cabina'}
           </button>
         </div>

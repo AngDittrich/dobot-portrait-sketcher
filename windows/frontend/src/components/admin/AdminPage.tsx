@@ -60,6 +60,12 @@ export function AdminPage({ token, onClose }: { token: string; onClose: () => vo
     }
   }, [token])
 
+  // El token vive en la memoria del servidor: si uvicorn se reinicia, el
+  // sondeo recibe 401 para siempre. Se vuelve al PIN en vez de quedarse mudo.
+  useEffect(() => {
+    if (pollError.startsWith('Backend 401')) onClose()
+  }, [pollError, onClose])
+
   const send = useCallback(
     async (command: AdminCommand) => {
       try {

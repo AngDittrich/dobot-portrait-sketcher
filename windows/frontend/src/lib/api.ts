@@ -94,19 +94,45 @@ export interface AdminStatus {
   angles?: number[]
   alarms?: string
   alarm_text?: string
-  frame?: Record<string, number | string | boolean | null>
-  sheet?: string
+  frame?: Partial<BoothSettings>
+  calibration?: Calibration | null
   sheets?: AdminSheet[]
 }
 
 export interface AdminSheet {
   id: string
   label: string
+  short_mm: number
+  long_mm: number
+}
+
+/** Pose enseñada de una esquina de la hoja, en coordenadas del robot. */
+export interface CornerPose {
+  x: number
+  y: number
+  z: number
+  r: number
+}
+
+export type CornerId = 'tl' | 'tr' | 'bl'
+export type SpotId = CornerId | 'br' | 'center'
+export type Corners = Record<CornerId, CornerPose>
+
+/** Lo que el servidor calcula de unas esquinas: medida, retrato y avisos. */
+export interface Calibration {
   width_mm: number
   height_mm: number
+  orientation: 'horizontal' | 'vertical'
+  angle_deg: number
+  paper: { id: string; label: string; diff_mm: number; matches: boolean } | null
   draw_width_mm: number
-  fits: boolean
-  reason: string
+  draw_height_mm: number
+  /** [x, y, z, r] de las esquinas y el centro. */
+  points: Record<SpotId, number[]>
+  /** Cuatro esquinas [x, y] de donde cae el retrato. */
+  draw_box: number[][]
+  errors: string[]
+  warnings: string[]
 }
 
 export interface AdminCommand {
@@ -146,19 +172,11 @@ export interface BoothSettings {
   dry_run: boolean
   user: number
   tool: number
-  z_draw: number
-  z_travel: number
-  r: number
-  r_far: number
-  far_x: number
-  far_y: number
   speed_factor: number
-  origin_x: number
-  origin_y: number
-  x_sign: number
-  y_sign: number
   cp_draw: number
-  sheet: string
+  corners: Corners | null
+  lift_mm: number
+  margin_mm: number
 }
 
 export function saveAdminBooth(token: string, booth: BoothSettings): Promise<BoothSettings> {
@@ -169,11 +187,38 @@ export function saveAdminBooth(token: string, booth: BoothSettings): Promise<Boo
   })
 }
 
-/** Recorre el borde de la hoja con el lápiz arriba para ubicar el papel. */
-export function adminArea(
-  token: string,
-): Promise<{ sheet: string; width_mm: number; height_mm: number }> {
+/** Recorre el borde de la hoja enseñada con el lápiz arriba. */
+export function adminArea(token: string): Promise<{ width_mm: number; height_mm: number }> {
   return request('/api/admin/area', { method: 'POST', headers: adminHeaders(token) })
+}
+
+/** Medida y avisos de unas esquinas todavía sin guardar. */
+export function adminCalibration(
+  token: string,
+  corners: Corners,
+  marginMm: number,
+): Promise<Calibration> {
+  return request<Calibration>('/api/admin/calibration', {
+    method: 'POST',
+    headers: adminHeaders(token),
+    body: JSON.stringify({ corners, margin_mm: marginMm }),
+  })
+}
+
+/**
+ * Lleva el brazo con el lápiz arriba a una esquina o al centro de la hoja
+ * (`corners` completas) o a una esquina suelta (`point`) antes de tener las tres.
+ */
+export function adminGoto(
+  token: string,
+  target: { corner: SpotId; corners: Corners } | { point: CornerPose },
+  liftMm: number,
+): Promise<{ x: number; y: number; z: number; r: number }> {
+  return request('/api/admin/goto', {
+    method: 'POST',
+    headers: adminHeaders(token),
+    body: JSON.stringify({ ...target, lift_mm: liftMm }),
+  })
 }
 
 export function adminCommand(
