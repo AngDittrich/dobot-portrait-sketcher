@@ -47,7 +47,7 @@ DEFAULT_MIN_STEP_MM = 8.0
 # lápiz no se levanta: se une con un conector corto. Cada cambio de altura
 # obliga a vaciar la cola del MG400 y cuesta ~3 s, así que encadenar es lo que
 # baja el retrato de 365 s.
-DEFAULT_JOIN_GAP_MM = 6.0
+DEFAULT_JOIN_GAP_MM = 8.0
 # Confirmación de llegada: se lee la pose hasta que el brazo está a 0.5 mm.
 ARRIVAL_TOLERANCE_MM = 0.5
 ARRIVAL_POLL_S = 0.1
