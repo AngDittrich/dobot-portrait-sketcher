@@ -104,6 +104,14 @@ export interface AdminSheet {
   label: string
   short_mm: number
   long_mm: number
+  /** Izquierda a derecha, con la hoja horizontal. */
+  width_mm: number
+  /** De frente al fondo. */
+  height_mm: number
+  draw_width_mm: number
+  draw_height_mm: number
+  fits: boolean
+  reason: string
 }
 
 /** Pose enseñada de una esquina de la hoja, en coordenadas del robot. */
@@ -177,6 +185,7 @@ export interface BoothSettings {
   corners: Corners | null
   lift_mm: number
   margin_mm: number
+  sheet: string
 }
 
 export function saveAdminBooth(token: string, booth: BoothSettings): Promise<BoothSettings> {

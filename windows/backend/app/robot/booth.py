@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.robot import frame as frame_ops
+from app.robot import sheet as sheet_ops
 from app.robot.client import MG400Client, MockRobotClient, RobotClient
 from app.robot.frame import Frame, FrameError
 
@@ -37,6 +38,7 @@ class Booth:
     corners: dict | None = None
     lift_mm: float = frame_ops.DEFAULT_LIFT_MM
     margin_mm: float = frame_ops.DEFAULT_MARGIN_MM
+    sheet: str = sheet_ops.DEFAULT
 
     @property
     def frame(self) -> Frame | None:
@@ -54,6 +56,7 @@ class Booth:
             "corners": self.corners,
             "lift_mm": self.lift_mm,
             "margin_mm": self.margin_mm,
+            "sheet": self.sheet,
         }
 
 
@@ -108,6 +111,9 @@ def parse_booth(payload: dict) -> Booth:
     margin = _float(payload.get("margin_mm", frame_ops.DEFAULT_MARGIN_MM), "margen")
     if margin < 0 or margin > 40:
         raise BoothError("el margen va de 0 a 40 mm")
+    hoja = str(payload.get("sheet") or sheet_ops.DEFAULT).strip().lower()
+    if not sheet_ops.known(hoja):
+        raise BoothError("esa hoja no existe: elige A6, A5, media carta, A4 o carta")
     return Booth(
         backend=backend,
         host=host,
@@ -119,6 +125,7 @@ def parse_booth(payload: dict) -> Booth:
         corners=parse_corners(payload.get("corners")),
         lift_mm=lift,
         margin_mm=margin,
+        sheet=hoja,
     )
 
 
@@ -130,9 +137,10 @@ def client_from_booth(payload: dict) -> RobotClient:
         # Sin esquinas todavía: centro y signos del `.env`, con la conexión del panel.
         client = MG400Client.from_env()
         _copy_connection(client, booth)
+        client.sheet = booth.sheet
         return client
     frame = booth.frame
-    return MG400Client(
+    client = MG400Client(
         host=booth.host,
         user=booth.user,
         tool=booth.tool,
@@ -146,6 +154,8 @@ def client_from_booth(payload: dict) -> RobotClient:
         lift_mm=booth.lift_mm,
         margin_mm=booth.margin_mm,
     )
+    client.sheet = booth.sheet
+    return client
 
 
 def booth_from_client(robot: RobotClient) -> dict:
@@ -170,6 +180,7 @@ def booth_from_client(robot: RobotClient) -> dict:
         "corners": frame.as_dict() if frame is not None else None,
         "lift_mm": float(getattr(robot, "lift_mm", frame_ops.DEFAULT_LIFT_MM)),
         "margin_mm": float(getattr(robot, "margin_mm", frame_ops.DEFAULT_MARGIN_MM)),
+        "sheet": getattr(robot, "sheet", sheet_ops.DEFAULT),
     }
 
 
@@ -188,6 +199,7 @@ def _copy_connection(robot: MG400Client, booth: Booth) -> None:
     robot.speed_travel = min(100, max(1, booth.speed_factor * 2))
     robot.dry_run = booth.dry_run
     robot.cp_draw = booth.cp_draw
+    robot.sheet = booth.sheet
 
 
 def _float(value: object, label: str) -> float:

@@ -121,14 +121,15 @@ Por defecto la API va al mismo origen. Para apuntar al PC del robot:
 | `ROBOT_BACKEND` | `mock` (no mueve nada) o `mg400`. |
 | `ROBOT_HOST` | IP del controlador (en la cabina, `192.168.10.55`). |
 | `ROBOT_Z_DRAW` / `ROBOT_Z_TRAVEL` | Altura con el plumón apoyado y levantado. **Se miden en la cabina.** |
-| `ROBOT_ORIGIN_X` / `ROBOT_ORIGIN_Y` | Centro del papel en coordenadas del robot. |
+| `ROBOT_R` | Giro de la muñeca. `90` deja la punta del marcador al frente, a 5-8 cm del centro del tool. |
+| `ROBOT_ORIGIN_X` / `ROBOT_ORIGIN_Y` | Solo antes de enseñar las esquinas. El centro de la banda útil es `319.24, -27.20`. |
 | `ROBOT_X_SIGN` / `ROBOT_Y_SIGN` | `-1` si esas coordenadas bajan al avanzar por el dibujo. |
 | `ROBOT_SPEED_FACTOR` | Porcentaje de velocidad del controlador. |
 | `ROBOT_CP_DRAW` | Suavizado de esquinas. `100`; con `0` el brazo frena en cada punto. |
 | `ROBOT_ACC_MM_S2` | Aceleración. Techo del firmware: `100` (más da `-40005`). |
 | `ROBOT_STEP_MM` | Paso mínimo entre puntos de un trazo (8). |
 | `ROBOT_JOIN_MM` | Une trazos más cercanos que esto sin levantar el lápiz (6). |
-| `ROBOT_SHEET` | Hoja de papel: `a6`, `a5` o `a4`. Fija el tamaño del retrato (`a5`). |
+| `ROBOT_SHEET` | Hoja horizontal: `a6`, `a5`, `media_carta`, `a4` o `carta`. El lado largo va de izquierda a derecha. Las esquinas enseñadas mandan en el tamaño. |
 | `ROBOT_PIPELINE` | Órdenes en vuelo (3). |
 | `ROBOT_DRY_RUN` | Arma los `MovL` sin abrir socket. |
 | `ROBOT_LOG_LEVEL` | `INFO` imprime cada paso; `DEBUG`, todos. |
@@ -165,6 +166,30 @@ Todo esto está medido contra el MG400 real, no deducido de la documentación.
 Con todo eso, el retrato completo (847 órdenes, 110 trazos) se dibujó **entero por
 primera vez** sin cortarse; el tiempo sigue por encima de los 150 s y es lo que
 se está afinando.
+
+### El área de trabajo, medida
+
+El alcance no es un rectángulo: de frente al fondo manda primero el codo y
+después el radio de 440 mm; a lo ancho sobra sitio. Estos son los números
+medidos paseando el brazo hasta que un tope lo detuvo (z = -95, R = 90), y son
+los que hay que usar como valores por defecto sin volver a calcular:
+
+| | |
+|---|---|
+| Fondo útil (X) | `199.24` a `439.24` — 240 mm |
+| A lo ancho (Y) | `-247.20` a `192.80` — 440 mm |
+| Centro de la hoja | `319.24, -27.20` |
+| A5 horizontal (210 × 148) | lado largo a lo ancho, lado corto de frente al fondo |
+| A4 horizontal (297 × 210) | entra: 210 mm de fondo caben en 240 |
+
+La hoja va **horizontal** y el retrato se queda de pie: arriba es la esquina
+que se enseña en el panel, así que no se gira 90°. Con el lado largo de frente
+al fondo A4 no entraría (297 mm en un fondo de 240). `R = 90` deja la punta
+del marcador al frente, a 5-8 cm del centro del tool; como es un desfase fijo,
+el dibujo sale **corrido** ese tanto pero del mismo tamaño.
+
+El botón **Marcar el área** del panel recorre esas cuatro esquinas con el lápiz
+arriba: va primero al centro, después al borde y cierra el cuadro, 16 s.
 
 ---
 

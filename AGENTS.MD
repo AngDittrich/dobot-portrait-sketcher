@@ -69,6 +69,22 @@ Trampas que cuestan tiempo:
 - `TARGET_PX = 900` y la salida de los ONNX se recorta a múltiplos de 4 (si no, el dibujo se desplaza unos píxeles).
 - Todo el pipeline trabaja en px del recorte; los mm solo aparecen en `build_trajectory`. La vista previa se dibuja con los mismos trazos que recibe el robot.
 
+## Área del robot: valores medidos, no los recalcules
+
+Medido paseando el brazo hasta que un tope lo detuvo (z = -95, R = 90):
+
+| | |
+|---|---|
+| Fondo útil (X) | `199.24` → `439.24` (240 mm) |
+| A lo ancho (Y) | `-247.20` → `192.80` (440 mm) |
+| Centro de esa banda | `319.24, -27.20` |
+
+- La hoja va **horizontal**: el lado largo de izquierda a derecha. A5 queda 210 × 148 y A4 entra (297 × 210), porque el lado corto (210) cabe en los 240 mm de fondo. Con el lado largo de frente al fondo A4 no entra.
+- El retrato se queda **de pie** respecto a las esquinas enseñadas. No se gira 90°: arriba es la esquina superior que se enseñó. `build_trajectory(rotate=True)` existe, pero `SketchParams.rotate` viene apagado.
+- El tamaño lo marcan las esquinas. El selector de hoja (A6, A5, media carta, A4, carta) dice si ese tamaño cabe en la caja de arriba y cuánto ocupa el retrato.
+- **Recorrer el borde** va primero al centro de la hoja enseñada y después a las cuatro esquinas, con el lápiz arriba.
+- El dashboard atiende una orden a la vez (`MG400Client._wire`). El sondeo del panel no dispara otra consulta hasta que la anterior contestó, y no reconfigura el robot al reconectar.
+
 ## Wizard de la cabina (`windows/`)
 
 Wizard de una sola pantalla, sin scroll. Estados en `src/hooks/usePhotobooth.ts`:

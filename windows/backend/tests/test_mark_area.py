@@ -68,7 +68,8 @@ def test_el_borde_de_la_hoja_se_recorre_con_el_lapiz_arriba():
     asyncio.run(_cliente(enlace, _hoja()).mark_area())
 
     puntos = _movl(enlace)
-    assert len(puntos) == 5  # cuatro esquinas y vuelta al inicio
+    assert len(puntos) == 6  # centro, cuatro esquinas y vuelta al inicio
+    assert puntos[0][:2] == pytest.approx((246.0, 0.0), abs=0.01)
     assert all(z == pytest.approx(-57.0) for _, _, z in puntos), "el lápiz va 8 mm arriba de la hoja"
     assert not any("CP=100)" in orden for orden in enlace.moves)
     xs = [x for x, _, _ in puntos]

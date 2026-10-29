@@ -19,6 +19,7 @@ type BoothForm = {
   cp_draw: string
   lift_mm: string
   margin_mm: string
+  sheet: string
 }
 
 const CORNER_INFO: { id: CornerId; label: string; hint: string }[] = [
@@ -43,6 +44,7 @@ function formFrom(frame: NonNullable<AdminStatus['frame']>): BoothForm {
     cp_draw: text(frame.cp_draw, '0'),
     lift_mm: text(frame.lift_mm, '8'),
     margin_mm: text(frame.margin_mm, '8'),
+    sheet: text(frame.sheet, 'a5'),
   }
 }
 
@@ -78,6 +80,7 @@ export function ConfigSection({
   const [moving, setMoving] = useState<string>('')
   const busy = Boolean(status?.busy)
   const live = status?.pose ?? []
+  const papers = status?.sheets ?? []
   const hasPose = live.length >= 4
 
   // Se siembra una sola vez con lo guardado: el sondeo de 800 ms no pisa lo que se edita.
@@ -185,6 +188,7 @@ export function ConfigSection({
         corners: complete(corners) ? corners : null,
         lift_mm: Number(booth.lift_mm),
         margin_mm: Number(booth.margin_mm),
+        sheet: booth.sheet,
       })
       onNotice('Cabina guardada. El siguiente dibujo usa esta hoja.')
       draft = null
@@ -268,6 +272,37 @@ export function ConfigSection({
                 Recorrer el borde guardado
               </button>
             </div>
+            <div className="admin-sheets">
+              {papers.map((paper) => (
+                <button
+                  key={paper.id}
+                  type="button"
+                  className="admin-press admin-sheet"
+                  aria-pressed={booth.sheet === paper.id}
+                  disabled={!paper.fits}
+                  title={
+                    paper.reason ||
+                    `el retrato queda de ${Math.round(paper.draw_width_mm)} × ${Math.round(paper.draw_height_mm)} mm`
+                  }
+                  onClick={() => patch('sheet', paper.id)}
+                >
+                  {paper.label}
+                  <span className="admin-sheet-size">
+                    {paper.width_mm}×{paper.height_mm}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {calibration?.paper && booth.sheet !== calibration.paper.id ? (
+              <p className="admin-note">
+                Lo medido {calibration.paper.matches ? 'es' : 'parece'} {calibration.paper.label} y elegiste{' '}
+                {papers.find((paper) => paper.id === booth.sheet)?.label ?? booth.sheet}. Las esquinas mandan en el tamaño.
+              </p>
+            ) : (
+              <p className="admin-card-note">
+                Hoja horizontal: el lado largo va de izquierda a derecha. El brazo tiene 240 mm de fondo y 440 a lo ancho.
+              </p>
+            )}
           </div>
         </section>
 

@@ -128,6 +128,7 @@ class SketchParams(BaseModel):
     beard_thresh: float = Field(0.45, ge=0.02, le=0.9)
     use_landmarks: bool = True
     target_width_mm: float = Field(140.0, ge=20.0, le=400.0)
+    rotate: bool = Field(False, description="Gira el retrato 90 grados. Apagado: arriba es la esquina enseñada")
     spacing_mm: float = Field(1.5, ge=0.2, le=10.0)
     simplify_px: float = Field(2.5, ge=0.0, le=5.0)
     smooth_iters: int = Field(2, ge=0, le=4, description="Pasadas Chaikin antes de RDP (lineas mas rectas)")
@@ -251,6 +252,7 @@ def build_sketch(
         crop_height,
         target_width_mm=params.target_width_mm,
         spacing_mm=params.spacing_mm,
+        rotate=params.rotate,
     )
 
     # Vista previa: los mismos contornos que va a trazar el robot.

@@ -5,6 +5,9 @@ import type { StickId } from '../components/admin/stickSpaces'
 
 /**
  * Sondeo del estado del robot cada 800 ms mientras la página admin está abierta.
+ * No dispara otra consulta hasta que la anterior contestó: el dashboard del
+ * MG400 atiende una orden a la vez y, si la respuesta tarda más que el
+ * intervalo, las peticiones se encimaban y él cortaba la conexión.
  */
 export function useAdminStatus(token: string) {
   const [status, setStatus] = useState<AdminStatus | null>(null)
@@ -14,8 +17,8 @@ export function useAdminStatus(token: string) {
     let stop = false
     let inflight = false
     const tick = async () => {
-      // Si el sondeo anterior sigue en camino (reconexión lenta), no se lanza
-      // otro: dos consultas a la vez se pisan en el único socket del MG400.
+      // Si el sondeo anterior sigue en camino, no se lanza otro: el dashboard
+      // atiende una orden a la vez y dos peticiones encimadas cortan el enlace.
       if (inflight) return
       inflight = true
       try {
