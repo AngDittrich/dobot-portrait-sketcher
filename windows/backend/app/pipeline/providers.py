@@ -306,14 +306,17 @@ def prepare_reference(
     models_dir: Path | None = None,
     width: int = OUTPUT_WIDTH,
     height: int = OUTPUT_HEIGHT,
-) -> np.ndarray:
+) -> tuple[np.ndarray, tuple[float, float, float, float] | None]:
     """Recorta cabeza y hombros en 3:4: el modelo gasta los píxeles en la cara.
 
     Sin este recorte la foto de la cabina entra apaisada, con gente de fondo, y
     el modelo reparte el detalle entre los curiosos que pasan por detrás.
+    El segundo valor es la caja de la cara (x, y, ancho, alto) en la imagen
+    de salida, o None si YuNet no encontró una.
     """
     height_in, width_in = image.shape[:2]
     cropped = image
+    face_box: tuple[float, float, float, float] | None = None
     model_path = (models_dir or (ROOT / "models")) / "face_detection_yunet_2023mar.onnx"
     if model_path.exists():
         detector = cv2.FaceDetectorYN.create(
@@ -322,7 +325,7 @@ def prepare_reference(
         _, faces = detector.detect(image)
         if faces is not None and len(faces):
             face = max(faces, key=lambda f: f[2] * f[3])
-            face_x, face_y, face_w, face_h = face[:4]
+            face_x, face_y, face_w, face_h = (float(value) for value in face[:4])
             center_x = face_x + face_w / 2
             center_y = face_y + face_h / 2
             x0 = int(max(0, center_x - face_w * 2.6 / 2))
@@ -331,18 +334,33 @@ def prepare_reference(
             y1 = int(min(height_in, center_y + face_h * 3.4 * 0.62))
             if x1 > x0 and y1 > y0:
                 cropped = image[y0:y1, x0:x1]
+                face_box = (face_x - x0, face_y - y0, face_w, face_h)
 
     height_c, width_c = cropped.shape[:2]
     target_ratio = width / height
     if width_c / height_c > target_ratio:
         new_width = int(height_c * target_ratio)
-        x0 = (width_c - new_width) // 2
-        cropped = cropped[:, x0 : x0 + new_width]
+        x_offset = (width_c - new_width) // 2
+        cropped = cropped[:, x_offset : x_offset + new_width]
+        if face_box is not None:
+            face_box = (face_box[0] - x_offset, face_box[1], face_box[2], face_box[3])
     else:
         new_height = int(width_c / target_ratio)
-        y0 = (height_c - new_height) // 2
-        cropped = cropped[y0 : y0 + new_height, :]
-    return cv2.resize(cropped, (width, height), interpolation=cv2.INTER_AREA)
+        y_offset = (height_c - new_height) // 2
+        cropped = cropped[y_offset : y_offset + new_height, :]
+        if face_box is not None:
+            face_box = (face_box[0], face_box[1] - y_offset, face_box[2], face_box[3])
+    scale_x = width / max(1, cropped.shape[1])
+    scale_y = height / max(1, cropped.shape[0])
+    resized = cv2.resize(cropped, (width, height), interpolation=cv2.INTER_AREA)
+    if face_box is not None:
+        face_box = (
+            face_box[0] * scale_x,
+            face_box[1] * scale_y,
+            face_box[2] * scale_x,
+            face_box[3] * scale_y,
+        )
+    return resized, face_box
 
 
 def _to_data_url(image: np.ndarray) -> str:
@@ -572,7 +590,7 @@ def generate_mask(
             + (f" ({', '.join(rejected)})" if rejected else "")
         )
 
-    reference = prepare_reference(image, models_dir=models_dir)
+    reference, face_box = prepare_reference(image, models_dir=models_dir)
     errors: list[str] = []
     for name in order:
         if name == "local":
@@ -592,5 +610,6 @@ def generate_mask(
             meta["style"] = resolve_style(style)
             meta["reference_sha"] = hashlib.sha256(reference.tobytes()).hexdigest()[:12]
             meta["size"] = f"{reference.shape[1]}x{reference.shape[0]}"
+            meta["face_box"] = list(face_box) if face_box is not None else None
             return mask, meta
     raise SketchProviderError("; ".join(errors) or "sin proveedores")

@@ -33,6 +33,7 @@ from app.imaging import decode_data_url, encode_data_url, fit_max_side  # noqa: 
 from app.pipeline import providers  # noqa: E402
 from app.pipeline import vectorize as vectorize_ops  # noqa: E402
 from app.pipeline.caption import append_caption  # noqa: E402
+from app.pipeline.robot_path import plan_robot_path  # noqa: E402
 from app.pipeline.providers import DEFAULT_STYLE  # noqa: E402
 from app.pipeline.portrait import PortraitRenderer  # noqa: E402
 from app.admin_ops import (  # noqa: E402
@@ -168,7 +169,7 @@ class SketchParams(BaseModel):
     # detalle fino para que el robot no se eternice en la expo.
     # 150 s deja margen bajo el límite de 180 s del MG400 sin podar
     # retratos normales (50-70 s sin podar).
-    max_draw_seconds: float = Field(150.0, ge=5.0, le=600.0)
+    max_draw_seconds: float = Field(240.0, ge=5.0, le=600.0)
     # Ruta nueva: el boceto lo dibuja un modelo de imagen (ver providers.py).
     # use_ai=False obliga al XDoG de siempre, que queda como respaldo sin red.
     use_ai: bool = True
@@ -219,8 +220,17 @@ def build_sketch(
             ai_meta = {"provider": "xdog", "fallback_reason": str(exc)}
 
     portrait: dict = {}
+    face_box = None
     if mask is not None:
-        mask = vectorize_ops.trim_to_ink(mask)
+        mask, origin = vectorize_ops.trim_to_ink(mask)
+        raw_box = (ai_meta or {}).get("face_box")
+        if raw_box:
+            face_box = (
+                float(raw_box[0]) - origin[0],
+                float(raw_box[1]) - origin[1],
+                float(raw_box[2]),
+                float(raw_box[3]),
+            )
         crop_height, crop_width = mask.shape[:2]
         # Línea central: cada trazo que dibuja el modelo se recorre una sola vez.
         # Trazarlo por contorno recorría los dos bordes y en papel se veía doble,
@@ -255,46 +265,34 @@ def build_sketch(
         portrait_ms = portrait["total_ms"]
         face_detected = portrait["face"] is not None
 
-    simplified = [vectorize_ops.simplify_and_smooth(s, params.simplify_px, params.smooth_iters) for s in strokes_px]
-    ordered = [stroke for stroke, _ in vectorize_ops.order_strokes(simplified)]
-    # Tope de tiempo: si el retrato sale muy largo se van los trazos mas
-    # cortos (textura) antes de mandar al robot.
-    # El rótulo se añade después para que no se recorte como textura, pero su
-    # coste se calcula con la misma estimación realista antes de podar la cara.
-    caption_strokes, _ = append_caption([], crop_width, crop_height)
-    caption_seconds = vectorize_ops.estimate_seconds(
-        caption_strokes, crop_width, target_width_mm=params.target_width_mm
-    )
-    ordered = vectorize_ops.prune_to_budget(
-        ordered,
-        crop_width,
-        max_seconds=max(0.0, params.max_draw_seconds - caption_seconds),
-        target_width_mm=params.target_width_mm,
-        min_strokes=0,
-    )
-    # El rótulo va después de podar: si entrara antes, el recorte de tiempo
-    # se lo comería por ser de los trazos más cortos.
+    ordered = [stroke for stroke, _ in vectorize_ops.order_strokes(strokes_px)]
+    caption_from = len(ordered)
     ordered, crop_height = append_caption(ordered, crop_width, crop_height)
-
-    trajectory = vectorize_ops.build_trajectory(
+    planned = plan_robot_path(
         ordered,
+        mask,
         crop_width,
         crop_height,
+        caption_from=caption_from,
         target_width_mm=params.target_width_mm,
+        max_seconds=params.max_draw_seconds,
+        face_box=face_box,
         rotate=params.rotate,
     )
+    ordered = planned["strokes"]
+    trajectory_stats = planned["stats"]
+    trajectory_segments = planned["segments"]
 
     # Vista previa: los mismos contornos que va a trazar el robot.
     preview = vectorize_ops.render_black_strokes(ordered, crop_width, crop_height, thickness=2)
     svg = vectorize_ops.strokes_to_svg(ordered, crop_width, crop_height)
 
     stats = {
-        **trajectory.stats,
+        **trajectory_stats,
         "width": crop_width,
         "height": crop_height,
         "portrait_ms": portrait_ms,
         "face_detected": face_detected,
-        "caption_seconds": round(caption_seconds, 1),
         **portrait.get("lab", {}),
     }
     if ai_meta:
@@ -306,7 +304,7 @@ def build_sketch(
         "strokes": [
             {"points": [[float(x), float(y)] for x, y in stroke]} for stroke in ordered
         ],
-        "segments": trajectory.segments,
+        "segments": trajectory_segments,
         "stats": stats,
     }
 
@@ -431,7 +429,16 @@ async def create_job(payload: JobRequest) -> dict:
             job.progress = 1.0
             job.eta_seconds = 0.0
             activity_totals["done"] += 1
-            robot_log.info("%s: terminado en %.1f s", job.id, time.monotonic() - started)
+            elapsed = time.monotonic() - started
+            robot_log.info(
+                "%s: terminado en %.1f s; %s ordenes, %s subidas, %.0f mm dibujados, estimado %.1f s",
+                job.id,
+                elapsed,
+                sketch.stats.get("orders", "?"),
+                sketch.stats.get("lifts", "?"),
+                float(sketch.stats.get("draw_length_mm", 0.0)),
+                estimated_seconds,
+            )
         except DrawCancelled:
             await _mark_cancelled(job)
         except Exception as exc:  # noqa: BLE001
