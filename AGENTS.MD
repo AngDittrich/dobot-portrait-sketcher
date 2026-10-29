@@ -82,7 +82,7 @@ Medido paseando el brazo hasta que un tope lo detuvo (z = -95, R = 90):
 - La hoja va **horizontal**: el lado largo de izquierda a derecha. A5 queda 210 × 148 y A4 entra (297 × 210), porque el lado corto (210) cabe en los 240 mm de fondo. Con el lado largo de frente al fondo A4 no entra.
 - El retrato se queda **de pie** respecto a las esquinas enseñadas. No se gira 90°: arriba es la esquina superior que se enseñó. `build_trajectory(rotate=True)` existe, pero `SketchParams.rotate` viene apagado.
 - El tamaño lo marcan las esquinas. El selector de hoja (A6, A5, media carta, A4, carta) dice si ese tamaño cabe en la caja de arriba y cuánto ocupa el retrato.
-- **Recorrer el borde** va primero al centro de la hoja enseñada y después a las cuatro esquinas, con el lápiz arriba.
+- **Recorrer el perímetro** va primero al centro de la hoja enseñada (las cuatro esquinas, aunque todavía no se hayan guardado) y después camina el rectángulo completo, con el lápiz arriba.
 - El dashboard atiende una orden a la vez (`MG400Client._wire`). El sondeo del panel no dispara otra consulta hasta que la anterior contestó, y no reconfigura el robot al reconectar.
 
 ## Wizard de la cabina (`windows/`)
@@ -99,13 +99,23 @@ Wizard de una sola pantalla, sin scroll. Estados en `src/hooks/usePhotobooth.ts`
    - Con trabajo del robot, `drawing` espera a que termine. Si termina en error va a `robotError` (`assets/robot/dobot-robot-error.webp`, "EL ROBOT SE DETUVO", botones INICIO y REINTENTAR), que no vuelve solo a `attract`. El detalle sale en la consola del navegador y en la de uvicorn (logger `robot`).
    - El botón Admin de la barra abre un PIN de 4 dígitos (por defecto 2026) y el panel de depuración del MG400. No mueve el brazo mientras hay un dibujo.
 
+## Enrutamiento (`windows/frontend/src/App.tsx`, `src/hooks/useRoute.ts`)
+
+- La URL manda qué se ve, con la History API y sin librería de router: `/` es la cabina del visitante y `/admin/estado|control|configuracion|actividad` es el panel, una ruta por pestaña. Antes todo vivía en un `useState` de React, así que recargar la página en cualquier pestaña del panel volvía siempre al wizard del visitante: no había nada en la URL que dijera dónde estaba el administrador.
+- `AdminArea` (`src/components/admin/AdminArea.tsx`) es la dueña de `/admin`: lee la sección de la URL, completa `/admin` → `/admin/estado` y corrige una sección que no existe, siempre con `replaceState` (sin apilar historial por cada clic en la barra).
+- El token del PIN se guarda en `sessionStorage` (`src/lib/adminSession.ts`), así que una recarga normal no lo pierde: el panel reabre en la misma pestaña sin pedir el PIN otra vez. Si el backend lo rechaza (401, porque uvicorn se reinició y `app/admin_ops.py` olvida los tokens en memoria) se borra el token y se vuelve a pedir el PIN, pero la URL de la sección no se toca. Pulsar **Salir** sí borra el token y navega a `/`.
+- Rutas que no son `/` ni empiezan con `/admin` caen en `/` (typos, enlaces viejos). El wizard del visitante (`usePhotobooth`) no vive en la URL: sus pasos siguen reiniciándose a `attract` por diseño (inactividad, `THANKS_MS`, etc.), eso no cambió.
+- El logo de SYSCOM, arriba a la izquierda del encabezado del panel, abre el demo (`/`) y deja el token: el botón Admin de la cabina vuelve al panel sin pedir el PIN. **Salir** sigue borrando el token.
+- Con un dibujo en curso hay **Cancelar** en Actividad y en la pantalla de la cabina. `POST /api/jobs/cancel` pausa el brazo por el dashboard; el lazo sale sin contarlo como error y luego manda `Stop()`, `Continue()` y sube el lápiz. **Logs** y **Borrar**, junto al paro, abren la bitácora y borran los trabajos ya cerrados (`DELETE /api/admin/jobs`). El que sigue dibujando no se borra.
+
 ## Calibración de la hoja (`windows/backend/app/robot/frame.py`)
 
 - La hoja se enseña en el panel admin (Configuración) con **tres esquinas**: superior izquierda, superior derecha e inferior izquierda, mirando la hoja como se va a ver el dibujo y con la punta tocando el papel. Se guardan en `data/robot.json` (raíz del repo, fuera de lo que recarga uvicorn).
 - De las tres esquinas salen ancho, alto, orientación y sentido de los ejes (no hay signos que adivinar), la Z de dibujo como plano (la mesa no siempre está pareja) y la R interpolada. Lápiz arriba = plano + `lift_mm` (8 por defecto).
 - El retrato se genera al ancho que llena la hoja (`portrait_width_mm`, con alto ≈ 1.45 × ancho por el 3:4 y el rótulo) y el cliente lo ajusta y centra con `margin_mm` sin estirarlo. En hoja horizontal manda el alto.
 - `reach_report` impide guardar esquinas a más de 440 mm del eje o detrás de J1 ±160°, y avisa si un borde pasa a menos de 170 mm de la columna.
-- "Ir aquí" (`POST /api/admin/goto`) sube primero el lápiz y luego viaja; funciona con una esquina suelta antes de tener las tres.
+- "Ir aquí" (`POST /api/admin/goto`) sube el lápiz para el viaje y **baja al plano de la esquina** al llegar, incluida la inferior derecha calculada. Funciona con una esquina suelta antes de tener las tres. J4, la muñeca del tool, no gira: todo el recorrido y el dibujo usan el R de la esquina superior izquierda. Si R cambiara de punto a punto, la punta del lápiz se corre.
+- **Dibujar prueba** (`POST /api/admin/test-draw`) escribe SYSCOM en el centro de la hoja enseñada (las esquinas del formulario, o las guardadas) para comprobar la calibración sin un retrato.
 - Sin esquinas guardadas se usa el modo viejo del `.env` (centro + signos). Un `robot.json` viejo (con `origin_x`) se ignora en la hoja y avisa en la consola.
 
 En `camera`, `review`, `style` y `confirm` se ve un anillo de 3 minutos. Pulsarlo vuelve a llenar el tiempo. Al llegar a cero, todo se reinicia a `attract`.

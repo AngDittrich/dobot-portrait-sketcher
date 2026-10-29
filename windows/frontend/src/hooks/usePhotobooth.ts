@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import type Webcam from 'react-webcam'
-import { getJob, getLastSketchId, postJob } from '../lib/api'
+import { getJob, getLastSketchId, postJob, cancelActiveJob } from '../lib/api'
 import { generateSketchDetail, type SketchDetail, type SketchStroke } from '../lib/sketch'
 import { EMPTY_TRAITS, selectedTraitIds, toggleTrait } from '../lib/traits'
 import type { TraitGroup, TraitSelection } from '../lib/traits'
@@ -221,6 +221,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
       robotTimer.current = null
     }
   }, [])
+  const skipRobotError = useRef(false)
 
   useEffect(() => stopRobotPolling, [stopRobotPolling])
 
@@ -378,12 +379,14 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
         etaSeconds: job.est_seconds,
         error: null,
       })
+      skipRobotError.current = false
 
       stopRobotPolling()
       robotTimer.current = window.setInterval(() => {
         void (async () => {
           try {
             const status = await getJob(job.job_id)
+            if (skipRobotError.current) return
             setRobotJob((previous) =>
               previous
                 ? {
@@ -400,6 +403,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
               console.info(`[robot] ${job.job_id} terminado`)
             } else if (status.status === 'error') {
               stopRobotPolling()
+              if (skipRobotError.current || status.error === 'cancelado') return
               console.error(
                 `[robot] ${job.job_id} falló al ${Math.round(status.progress * 100)} %:`,
                 status.error,
@@ -462,6 +466,18 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     dispatch({ type: 'ATTRACT' })
   }, [stopRobotPolling])
 
+  const cancelDrawing = useCallback(async () => {
+    skipRobotError.current = true
+    stopRobotPolling()
+    try {
+      await cancelActiveJob()
+    } catch (error) {
+      console.error('[robot] no se pudo cancelar el dibujo', error)
+    }
+    setRobotJob(null)
+    dispatch({ type: 'ATTRACT' })
+  }, [stopRobotPolling])
+
   const retake = useCallback(() => {
     stopRobotPolling()
     setRobotJob(null)
@@ -497,6 +513,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     accept,
     retryRobot,
     home,
+    cancelDrawing,
     retake,
     like,
     toggleTrait,

@@ -28,9 +28,13 @@ function duration(job: AdminActivityJob): string {
 export function ActivitySection({
   activity,
   token,
+  onCancel,
+  cancelling,
 }: {
   activity: AdminActivity | null
   token: string
+  onCancel?: () => void
+  cancelling?: boolean
 }) {
   if (!activity) {
     return (
@@ -70,6 +74,16 @@ export function ActivitySection({
                   )}
                   {job.error && <span className="admin-job-error">{job.error}</span>}
                 </div>
+                {(job.status === 'drawing' || job.status === 'queued') && onCancel && (
+                  <button
+                    type="button"
+                    className="admin-press admin-job-cancel"
+                    onClick={onCancel}
+                    disabled={cancelling}
+                  >
+                    {cancelling ? 'Cancelando…' : 'Cancelar'}
+                  </button>
+                )}
               </li>
             ))}
           </ul>

@@ -180,7 +180,7 @@ def test_las_esquinas_medidas_caen_en_el_papel():
     assert ",145.000," in movimientos[2]
 
 
-def test_el_giro_llega_a_96_en_la_esquina_lejana():
+def test_la_muneca_no_gira_al_dibujar():
     enlace = EnlaceFalso()
     cliente = MG400Client(pace_lead_s=0.0, 
         link=enlace,
@@ -210,7 +210,7 @@ def test_el_giro_llega_a_96_en_la_esquina_lejana():
     asyncio.run(correr())
     movimientos = [orden for orden in enlace.moves if orden.startswith("MovL")]
     assert ",145.000," in movimientos[0]
-    assert ",96.000," in movimientos[2]
+    assert all(",145.000," in orden for orden in movimientos)
 
 
 class _EnlaceQueFalla:

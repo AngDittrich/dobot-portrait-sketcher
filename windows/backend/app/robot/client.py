@@ -128,6 +128,10 @@ class Trajectory:
 ProgressCallback = Callable[[float, Segment], Awaitable[None]]
 
 
+class DrawCancelled(Exception):
+    """El visitante o el panel cortaron el dibujo antes de que terminara."""
+
+
 class RobotClient:
     """Interfaz común de los clientes de robot."""
 
@@ -136,7 +140,13 @@ class RobotClient:
     async def connect(self) -> None:  # pragma: no cover - interfaz
         raise NotImplementedError
 
-    async def draw(self, trajectory: Trajectory, on_progress: ProgressCallback) -> None:
+    async def draw(
+        self,
+        trajectory: Trajectory,
+        on_progress: ProgressCallback,
+        *,
+        sheet_mm: bool = False,
+    ) -> None:
         raise NotImplementedError  # pragma: no cover - interfaz
 
 
@@ -151,24 +161,47 @@ class MockRobotClient(RobotClient):
         self.time_scale = (
             time_scale if time_scale is not None else float(os.environ.get("ROBOT_TIME_SCALE", "1.0"))
         )
+        self._cancel = False
 
     async def connect(self) -> None:
         return None
 
-    async def draw(self, trajectory: Trajectory, on_progress: ProgressCallback) -> None:
+    async def cancel(self) -> None:
+        self._cancel = True
+
+    async def finish_cancel(self) -> None:
+        self._cancel = False
+
+    async def draw(
+        self,
+        trajectory: Trajectory,
+        on_progress: ProgressCallback,
+        *,
+        sheet_mm: bool = False,
+    ) -> None:
+        del sheet_mm  # el simulador no tiene hoja: recorre los trazos igual
         total = trajectory.total_length or 1.0
         done = 0.0
         for segment in trajectory.segments:
+            if self._cancel:
+                raise DrawCancelled()
             length = segment.length
             if segment.type == "draw":
                 duration = length / max(1.0, self.speed_mm_s)
             else:
                 # Los viajes con el lápiz arriba son más rápidos.
                 duration = length / max(1.0, self.speed_mm_s * 1.6)
-            if duration > 0:
-                await asyncio.sleep(duration * self.time_scale)
+            remaining = duration * self.time_scale
+            while remaining > 0:
+                if self._cancel:
+                    raise DrawCancelled()
+                step = min(0.1, remaining)
+                await asyncio.sleep(step)
+                remaining -= step
             done += length
             await on_progress(min(1.0, done / total), segment)
+        if self._cancel:
+            raise DrawCancelled()
 
 
 class _DryLink:
@@ -315,6 +348,7 @@ class MG400Client(RobotClient):
             self.set_frame(frame, lift_mm, margin_mm)
         self.commands: list[str] = []
         self._ready = False
+        self._cancel = False
         # El MG400 acepta un solo cliente. Dos consultas a la vez no pueden abrir dos sockets.
         self._io = asyncio.Lock()
         # El dashboard del MG400 atiende una orden a la vez y contesta por el
@@ -490,7 +524,63 @@ class MG400Client(RobotClient):
             await self._goto(x, y, self.z_travel, self.speed_travel, 0)
         await self._drain()
 
-    async def draw(self, trajectory: Trajectory, on_progress: ProgressCallback) -> None:
+    async def cancel(self) -> None:
+        """Corta el dibujo: la pausa va por el dashboard, así no se cruza con el MovL."""
+        self._cancel = True
+        link = self._link
+        dashboard = getattr(link, "dashboard", None)
+        if dashboard is None:
+            return
+        try:
+            async with self._wire:
+                await asyncio.to_thread(dashboard, "Pause()")
+        except Exception:
+            logger.warning("pausa al cancelar no respondió", exc_info=True)
+
+    async def finish_cancel(self) -> None:
+        """Vacía la cola, sale de la pausa y levanta el lápiz donde se quedó."""
+        link = self._link
+        if link is not None:
+            move = getattr(link, "move", None)
+            dashboard = getattr(link, "dashboard", None)
+            if move is not None:
+                try:
+                    await asyncio.to_thread(move, "Stop()")
+                except Exception:
+                    logger.warning("Stop() al cancelar no respondió", exc_info=True)
+            if dashboard is not None:
+                try:
+                    async with self._wire:
+                        await asyncio.to_thread(dashboard, "Continue()")
+                except Exception:
+                    logger.warning("Continue() al cancelar no respondió", exc_info=True)
+            pose = getattr(link, "pose", None)
+            if move is not None and pose is not None:
+                try:
+                    actual = await asyncio.to_thread(pose)
+                    await asyncio.to_thread(
+                        move,
+                        self._movl(
+                            float(actual[0]),
+                            float(actual[1]),
+                            self.z_travel,
+                            self.r,
+                            self.speed_travel,
+                            0,
+                        ),
+                    )
+                except Exception:
+                    logger.warning("no se pudo levantar el lápiz al cancelar", exc_info=True)
+        self._pending = []
+        self._cancel = False
+
+    async def draw(
+        self,
+        trajectory: Trajectory,
+        on_progress: ProgressCallback,
+        *,
+        sheet_mm: bool = False,
+    ) -> None:
         self._validate(trajectory)
         await self.connect()
         self._sent = 0
@@ -502,7 +592,10 @@ class MG400Client(RobotClient):
         self._pending = []
         self._paper_w = trajectory.width_mm
         self._paper_h = trajectory.height_mm
-        if self.frame is not None:
+        if sheet_mm:
+            # Los puntos ya están en milímetros de la hoja enseñada.
+            self._fit = (1.0, 0.0, 0.0)
+        elif self.frame is not None:
             self._fit = frame_ops.fit(
                 self.frame, trajectory.width_mm, trajectory.height_mm, self.margin_mm
             )
@@ -529,6 +622,8 @@ class MG400Client(RobotClient):
         last = Segment(type="travel")
 
         for segment in trajectory.segments:
+            if self._cancel:
+                raise DrawCancelled()
             points = segment.points
             if not points:
                 continue
@@ -540,9 +635,13 @@ class MG400Client(RobotClient):
             done += segment.length
             await on_progress(min(1.0, done / total), segment)
 
+        if self._cancel:
+            raise DrawCancelled()
         if pen_down and held is not None:
             await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
         await self._drain()
+        if self._cancel:
+            raise DrawCancelled()
         await on_progress(1.0, last)
 
     async def _draw_segment(
@@ -627,6 +726,8 @@ class MG400Client(RobotClient):
         cp: int,
     ) -> bool:
         """Manda el punto. False si quedó fuera del brazo y se saltó para seguir dibujando."""
+        if self._cancel:
+            raise DrawCancelled()
         robot_x, robot_y, real_z, rotation = self._map(x, y, z)
         if self._mas_adentro(robot_x, robot_y):
             logger.warning(
@@ -735,6 +836,8 @@ class MG400Client(RobotClient):
         mejor = float("inf")
         inicial: float | None = None
         while time.monotonic() < limite:
+            if self._cancel:
+                raise DrawCancelled()
             try:
                 actual = await asyncio.to_thread(pose)
             except Exception:  # noqa: BLE001 - sin lectura seguimos dibujando
@@ -873,12 +976,15 @@ class MG400Client(RobotClient):
         """
         if self.frame is not None:
             scale, u0, v0 = self._fit
-            robot_x, robot_y, plane_z, rotation = self.frame.to_robot(u0 + scale * x, v0 + scale * y)
+            robot_x, robot_y, plane_z, _rotation = self.frame.to_robot(u0 + scale * x, v0 + scale * y)
             real_z = plane_z if z == self.z_draw else plane_z + self.lift_mm
-            return _nonzero(robot_x), _nonzero(robot_y), _nonzero(real_z), _nonzero(rotation)
+            # J4 es la muñeca del tool. Si R cambia de un punto a otro, ese
+            # motor gira y la punta del lápiz se corre. Se queda en el R de
+            # la esquina superior izquierda.
+            return _nonzero(robot_x), _nonzero(robot_y), _nonzero(real_z), _nonzero(self.r)
         robot_x = _nonzero(self.origin_x + self.x_sign * (x - self._paper_w / 2))
         robot_y = _nonzero(self.origin_y + self.y_sign * (y - self._paper_h / 2))
-        return robot_x, robot_y, _nonzero(float(z)), _nonzero(self._rotation(robot_x, robot_y))
+        return robot_x, robot_y, _nonzero(float(z)), _nonzero(self.r)
 
     def _movl(self, x: float, y: float, z: float, r: float, speed: int, cp: int) -> str:
         return (
@@ -886,12 +992,28 @@ class MG400Client(RobotClient):
             f"SpeedL={int(speed)},AccL={int(self.acc_mm_s2)},CP={_blend(cp)})"
         )
 
-    async def visit(self, x: float, y: float, z: float, r: float, speed: int | None = None) -> None:
-        """Lleva el brazo a un punto del robot sin arrastrar el lápiz: primero sube, luego viaja."""
+    async def visit(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        r: float,
+        speed: int | None = None,
+        *,
+        lift: float = 0.0,
+    ) -> None:
+        """Llega a (x, y, z), que es la altura del papel en ese punto.
+
+        Con `lift`, el viaje va esa distancia por encima para no arrastrar el
+        lápiz, y al llegar baja al plano. Sin eso la esquina calculada se
+        quedaba a la altura de la marca, unos milímetros arriba de las otras.
+        """
         await self.connect()
         rate = self.speed_travel if speed is None else int(speed)
         await self.prepare_motion(rate)
         self._pending = []
+        clearance = max(0.0, float(lift))
+        travel_z = z + clearance
         pose_fn = getattr(self._link, "pose", None)
         here: tuple[float, float, float, float] | None = None
         if pose_fn is not None:
@@ -899,27 +1021,18 @@ class MG400Client(RobotClient):
                 here = tuple(float(value) for value in await asyncio.to_thread(pose_fn))[:4]  # type: ignore[assignment]
             except Exception:  # noqa: BLE001 - sin pose se viaja directo
                 here = None
-        if here is not None and here[2] < z - 0.5:
-            await self._move(self._movl(here[0], here[1], z, here[3], rate, 0))
+        if here is not None and here[2] < travel_z - 0.5:
+            await self._move(self._movl(here[0], here[1], travel_z, here[3], rate, 0))
             await self._wait_arrival(here[0], here[1], 0.0, rate)
+            here = (here[0], here[1], travel_z, here[3])
         distance = 0.0 if here is None else math.hypot(x - here[0], y - here[1])
-        await self._move(self._movl(_nonzero(x), _nonzero(y), _nonzero(z), _nonzero(r), rate, 0))
-        await self._wait_arrival(x, y, distance, rate)
-
-    def _rotation(self, robot_x: float, robot_y: float) -> float:
-        """Gira entre el R del origen y el de la esquina lejana, si se midió."""
-        if self.r_far is None or self.far_x is None or self.far_y is None:
-            return self.r
-        along_x = self.far_x - self.origin_x
-        along_y = self.far_y - self.origin_y
-        span = along_x * along_x + along_y * along_y
-        if span <= 1e-6:
-            return self.r
-        offset_x = robot_x - self.origin_x
-        offset_y = robot_y - self.origin_y
-        traveled = (offset_x * along_x + offset_y * along_y) / span
-        traveled = min(1.0, max(0.0, traveled))
-        return self.r + traveled * (self.r_far - self.r)
+        at_travel = here is not None and abs(here[2] - travel_z) <= 0.5 and distance <= 0.5
+        if not at_travel:
+            await self._move(self._movl(_nonzero(x), _nonzero(y), _nonzero(travel_z), _nonzero(r), rate, 0))
+            await self._wait_arrival(x, y, distance, rate)
+        if clearance > 0.5:
+            await self._move(self._movl(_nonzero(x), _nonzero(y), _nonzero(z), _nonzero(r), rate, 0))
+            await self._wait_arrival(x, y, 0.0, rate)
 
     def _close_link(self) -> None:
         link = self._link

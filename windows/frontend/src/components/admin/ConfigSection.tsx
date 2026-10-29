@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { adminArea, adminCalibration, adminGoto, saveAdminBooth } from '../../lib/api'
+import { adminArea, adminCalibration, adminGoto, adminTestDraw, saveAdminBooth } from '../../lib/api'
 import type { AdminSheet, AdminStatus, Calibration, CornerId, CornerPose, Corners, SpotId } from '../../lib/api'
 import { ReachMap } from './ReachMap'
 
@@ -156,6 +156,8 @@ export function ConfigSection({
   })
   const [saving, setSaving] = useState(false)
   const [marking, setMarking] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [tracing, setTracing] = useState(false)
   const [moving, setMoving] = useState<string>('')
   const busy = Boolean(status?.busy)
   const live = status?.pose ?? []
@@ -268,6 +270,41 @@ export function ConfigSection({
       onNotice(error instanceof Error ? error.message : 'no se pudo marcar el marco')
     } finally {
       setMarking(false)
+    }
+  }
+
+  async function tracePerimeter() {
+    if (!booth || tracing || busy || saving) return
+    setTracing(true)
+    try {
+      const area = await adminArea(token, {
+        corners: complete(corners) ? corners : undefined,
+        lift_mm: Number(booth.lift_mm),
+      })
+      onNotice(
+        `Perímetro recorrido: ${Math.round(area.width_mm)} × ${Math.round(area.height_mm)} mm, con el lápiz arriba.`,
+      )
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : 'no se pudo recorrer el perímetro')
+    } finally {
+      setTracing(false)
+    }
+  }
+
+  async function drawTest() {
+    if (!booth || testing || saving || busy) return
+    setTesting(true)
+    try {
+      await adminTestDraw(token, {
+        corners: complete(corners) ? corners : undefined,
+        lift_mm: Number(booth.lift_mm),
+        margin_mm: Number(booth.margin_mm),
+      })
+      onNotice('Dibujando SYSCOM en el centro de la hoja.')
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : 'no se pudo dibujar la prueba')
+    } finally {
+      setTesting(false)
     }
   }
 
@@ -424,7 +461,7 @@ export function ConfigSection({
               <strong>Inferior derecha</strong>
               <p>
                 {calibration
-                  ? `Calculada: X ${mm(calibration.points.br[0])}  Y ${mm(calibration.points.br[1])}`
+                  ? `Calculada: X ${mm(calibration.points.br[0])}  Y ${mm(calibration.points.br[1])}  Z ${mm(calibration.points.br[2])}  R ${mm(calibration.points.br[3])}`
                   : 'Se calcula con las otras tres.'}
               </p>
               <div className="admin-corner-actions">
@@ -494,6 +531,24 @@ export function ConfigSection({
 
         <div className="admin-config-save">
           {blocked && <span className="admin-card-hint">{ready ? 'Corrige la hoja para guardar' : 'Faltan esquinas por enseñar'}</span>}
+          <button
+            type="button"
+            className="admin-press"
+            disabled={busy || saving || tracing || marking || (!ready && !status?.calibration) || booth.backend !== 'mg400'}
+            title="Recorre las cuatro esquinas de la hoja y cierra el rectángulo, con el lápiz arriba."
+            onClick={() => void tracePerimeter()}
+          >
+            {tracing ? 'Recorriendo…' : 'Recorrer el perímetro'}
+          </button>
+          <button
+            type="button"
+            className="admin-press"
+            disabled={busy || saving || testing || marking || tracing || (!ready && !status?.calibration) || booth.backend !== 'mg400'}
+            title="Escribe SYSCOM en el centro de la hoja enseñada, con el lápiz abajo."
+            onClick={() => void drawTest()}
+          >
+            {testing || busy ? 'Dibujando…' : 'Dibujar prueba'}
+          </button>
           <button type="submit" className="admin-press admin-press--primary" disabled={busy || saving || blocked}>
             {saving ? 'Guardando…' : 'Guardar cabina'}
           </button>

@@ -1,22 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Gamepad2, Gauge, History, LogOut, OctagonX, Settings } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
-import { adminActivity, adminCommand } from '../../lib/api'
+import { LogOut, OctagonX, ScrollText, Trash2 } from 'lucide-react'
+import { adminActivity, adminClearJobs, adminCommand, cancelActiveJob } from '../../lib/api'
 import type { AdminActivity, AdminCommand, AdminStatus } from '../../lib/api'
 import { useAdminStatus } from '../../hooks/useAdminStatus'
 import { ActivitySection } from './ActivitySection'
 import { ConfigSection } from './ConfigSection'
 import { ControlSection } from './ControlSection'
+import { SECTIONS } from './sections'
+import type { SectionId } from './sections'
 import { StatusSection } from './StatusSection'
-
-type SectionId = 'estado' | 'control' | 'configuracion' | 'actividad'
-
-const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
-  { id: 'estado', label: 'Estado', icon: Gauge },
-  { id: 'control', label: 'Control', icon: Gamepad2 },
-  { id: 'configuracion', label: 'Configuración', icon: Settings },
-  { id: 'actividad', label: 'Actividad', icon: History },
-]
 
 type Mood = 'connecting' | 'mock' | 'offline' | 'alarm' | 'busy' | 'ready'
 
@@ -35,22 +27,44 @@ function moodOf(status: AdminStatus | null): { key: Mood; text: string } {
 /**
  * Página del administrador a pantalla completa. Sonda el robot cada 800 ms y
  * la actividad cada 3 s; el PARO queda siempre al alcance en el encabezado.
+ *
+ * La sección activa (`active`) vive en la URL, no aquí: la controla
+ * `AdminArea` para que una recarga de página reabra la misma pestaña.
  */
-export function AdminPage({ token, onClose }: { token: string; onClose: () => void }) {
-  const [active, setActive] = useState<SectionId>('estado')
+export function AdminPage({
+  token,
+  section: active,
+  onSection,
+  onClose,
+  onExpired,
+  onDemo,
+}: {
+  token: string
+  section: SectionId
+  onSection: (id: SectionId) => void
+  onClose: () => void
+  onExpired: () => void
+  onDemo: () => void
+}) {
   const [notice, setNotice] = useState('')
+  const [cancelling, setCancelling] = useState(false)
   const { status, pollError } = useAdminStatus(token)
   const [activity, setActivity] = useState<AdminActivity | null>(null)
+
+  const loadActivity = useCallback(async () => {
+    try {
+      const next = await adminActivity(token)
+      setActivity(next)
+    } catch {
+      // La actividad no es crítica: el estado del robot manda.
+    }
+  }, [token])
 
   useEffect(() => {
     let stop = false
     const tick = async () => {
-      try {
-        const next = await adminActivity(token)
-        if (!stop) setActivity(next)
-      } catch {
-        // La actividad no es crítica: el estado del robot manda.
-      }
+      if (stop) return
+      await loadActivity()
     }
     void tick()
     const timer = window.setInterval(() => void tick(), 3000)
@@ -58,13 +72,14 @@ export function AdminPage({ token, onClose }: { token: string; onClose: () => vo
       stop = true
       window.clearInterval(timer)
     }
-  }, [token])
+  }, [loadActivity])
 
   // El token vive en la memoria del servidor: si uvicorn se reinicia, el
-  // sondeo recibe 401 para siempre. Se vuelve al PIN en vez de quedarse mudo.
+  // sondeo recibe 401 para siempre. Se vuelve a pedir el PIN sin salir de
+  // esta sección (a diferencia de Salir, que sí vuelve a la cabina).
   useEffect(() => {
-    if (pollError.startsWith('Backend 401')) onClose()
-  }, [pollError, onClose])
+    if (pollError.startsWith('Backend 401')) onExpired()
+  }, [pollError, onExpired])
 
   const send = useCallback(
     async (command: AdminCommand) => {
@@ -78,18 +93,63 @@ export function AdminPage({ token, onClose }: { token: string; onClose: () => vo
     [token],
   )
 
+  const clearLogs = useCallback(async () => {
+    try {
+      await adminClearJobs(token)
+      await loadActivity()
+      setNotice('')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'no se pudo borrar la bitácora')
+    }
+  }, [token, loadActivity])
+
+  const cancelDraw = useCallback(async () => {
+    setCancelling(true)
+    try {
+      await cancelActiveJob()
+      setNotice('')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'no se pudo cancelar el dibujo')
+    } finally {
+      setCancelling(false)
+    }
+  }, [])
+
   const mood = moodOf(status)
   const strip = notice || pollError
+  const hasLogs = (activity?.jobs ?? []).some(
+    (job) => job.status === 'done' || job.status === 'error',
+  )
 
   return (
     <div className="admin-page">
       <header className={`admin-top is-${mood.key}`}>
         <span className="admin-top-light" aria-hidden="true" />
+        <button type="button" className="admin-brand" onClick={onDemo} aria-label="Ir al demo">
+          <img src="/brand/syscomLargeLogo.webp" alt="" />
+        </button>
         <div className="admin-top-title">
           <h1>Robot MG400</h1>
           <p>{mood.text}</p>
         </div>
         <div className="admin-top-actions">
+          <button
+            type="button"
+            className={active === 'actividad' ? 'admin-exit is-on' : 'admin-exit'}
+            onClick={() => onSection('actividad')}
+          >
+            <ScrollText size={18} aria-hidden="true" />
+            Logs
+          </button>
+          <button
+            type="button"
+            className="admin-exit"
+            onClick={() => void clearLogs()}
+            disabled={!hasLogs}
+          >
+            <Trash2 size={18} aria-hidden="true" />
+            Borrar
+          </button>
           <button
             type="button"
             className="admin-estop"
@@ -119,7 +179,7 @@ export function AdminPage({ token, onClose }: { token: string; onClose: () => vo
               type="button"
               className={active === id ? 'is-on' : ''}
               aria-current={active === id ? 'page' : undefined}
-              onClick={() => setActive(id)}
+              onClick={() => onSection(id)}
             >
               <Icon size={20} aria-hidden="true" />
               <span>{label}</span>
@@ -135,7 +195,14 @@ export function AdminPage({ token, onClose }: { token: string; onClose: () => vo
           {active === 'configuracion' && (
             <ConfigSection status={status} token={token} onNotice={setNotice} />
           )}
-          {active === 'actividad' && <ActivitySection activity={activity} token={token} />}
+          {active === 'actividad' && (
+            <ActivitySection
+              activity={activity}
+              token={token}
+              onCancel={() => void cancelDraw()}
+              cancelling={cancelling}
+            />
+          )}
         </main>
       </div>
     </div>

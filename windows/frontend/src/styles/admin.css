@@ -214,6 +214,31 @@
   gap: 0.6rem;
 }
 
+.admin-brand {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.45rem;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.admin-brand img {
+  height: 28px;
+  width: auto;
+  filter: brightness(0) invert(1);
+}
+
+.admin-brand:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.admin-brand:active {
+  transform: translateY(1px) scale(0.98);
+}
+
 .admin-estop {
   display: inline-flex;
   align-items: center;
@@ -265,6 +290,17 @@
 
 .admin-exit:active {
   transform: translateY(1px) scale(0.97);
+}
+
+.admin-exit.is-on {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.42);
+}
+
+.admin-exit:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 /* ---------- Avisos (respuestas de órdenes, lecturas DI) ---------- */
@@ -915,7 +951,7 @@
 
 .admin-job {
   display: grid;
-  grid-template-columns: 64px 1fr;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
   gap: 0.8rem;
   align-items: center;
   padding: 0.6rem 0.75rem;

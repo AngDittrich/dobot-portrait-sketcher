@@ -55,11 +55,19 @@ from app.robot.booth import (  # noqa: E402
     parse_booth,
     write_booth,
 )
-from app.robot.client import MockRobotClient, Segment, Trajectory, configure_logging, robot_from_env  # noqa: E402
+from app.robot.client import (  # noqa: E402
+    DrawCancelled,
+    MockRobotClient,
+    Segment,
+    Trajectory,
+    configure_logging,
+    robot_from_env,
+)
 from app.store import Job, JobStore, Sketch, SketchStore  # noqa: E402
 from app.robot import frame as frame_ops  # noqa: E402
 from app.robot import sheet as sheet_ops  # noqa: E402
 from app.robot.frame import Frame, FrameError  # noqa: E402
+from app.robot.text import syscom_trajectory  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", ROOT / "models"))
@@ -114,6 +122,16 @@ sketches = SketchStore()
 jobs = JobStore()
 # Contadores desde el arranque (el JobStore es LRU y olvida; esto no).
 activity_totals = {"done": 0, "error": 0}
+
+
+async def _mark_cancelled(job: Job) -> None:
+    """El dibujo se cortó a propósito: no cuenta como fallo del robot."""
+    job.status = "error"
+    job.error = "cancelado"
+    finish = getattr(robot, "finish_cancel", None)
+    if finish is not None:
+        await finish()
+    robot_log.info("%s: cancelado", job.id)
 
 
 class SketchParams(BaseModel):
@@ -402,16 +420,21 @@ async def create_job(payload: JobRequest) -> dict:
             job.eta_seconds = 0.0
             activity_totals["done"] += 1
             robot_log.info("%s: terminado en %.1f s", job.id, time.monotonic() - started)
+        except DrawCancelled:
+            await _mark_cancelled(job)
         except Exception as exc:  # noqa: BLE001
-            job.status = "error"
-            job.error = str(exc)
-            activity_totals["error"] += 1
-            robot_log.exception(
-                "%s: fallo al %.1f%% tras %.1f s",
-                job.id,
-                job.progress * 100,
-                time.monotonic() - started,
-            )
+            if getattr(robot, "_cancel", False):
+                await _mark_cancelled(job)
+            else:
+                job.status = "error"
+                job.error = str(exc)
+                activity_totals["error"] += 1
+                robot_log.exception(
+                    "%s: fallo al %.1f%% tras %.1f s",
+                    job.id,
+                    job.progress * 100,
+                    time.monotonic() - started,
+                )
         finally:
             job.finished_at = time.time()
             busy.leave()
@@ -424,6 +447,21 @@ async def create_job(payload: JobRequest) -> dict:
         "est_seconds": round(trajectory.draw_length / 80.0, 1),
         "stats": sketch.stats,
     }
+
+
+@app.post("/api/jobs/cancel")
+async def cancel_active_job() -> dict:
+    """Corta el dibujo en curso. Lo usa la cabina y el panel, sin PIN."""
+    if not busy.active():
+        return {"cancelled": False}
+    for job in jobs.latest(40):
+        if job.status in {"drawing", "queued"}:
+            job.error = "cancelado"
+            break
+    cancel = getattr(robot, "cancel", None)
+    if cancel is not None:
+        await cancel()
+    return {"cancelled": True}
 
 
 class PinRequest(BaseModel):
@@ -604,7 +642,7 @@ async def admin_goto(
     body: dict = Body(...),
     x_admin_token: str | None = Header(default=None),
 ) -> dict:
-    """Lleva el brazo a una esquina o al centro de la hoja con el lápiz arriba."""
+    """Lleva el brazo a una esquina o al centro. Viaja con el lápiz arriba y baja al plano."""
     _require_admin(x_admin_token)
     if robot.name != "mg400":
         raise HTTPException(status_code=409, detail="el backend está en simulador")
@@ -627,14 +665,16 @@ async def admin_goto(
             errors, _ = frame_ops.reach_report(frame)
             if errors:
                 raise HTTPException(status_code=409, detail=errors[0])
-            x, y, z, r = frame.named(str(body.get("corner") or ""))
+            x, y, z, _r = frame.named(str(body.get("corner") or ""))
+            # La muñeca no gira al ir de una esquina a otra: R fijo, el de arriba a la izquierda.
+            r = frame.tl.r
     except (FrameError, KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
-        await robot.visit(x, y, z + lift, r, None if speed is None else int(speed))  # type: ignore[attr-defined]
+        await robot.visit(x, y, z, r, None if speed is None else int(speed), lift=lift)  # type: ignore[attr-defined]
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"corner": body.get("corner"), "x": x, "y": y, "z": z + lift, "r": r}
+    return {"corner": body.get("corner"), "x": x, "y": y, "z": z, "r": r}
 
 
 @app.post("/api/admin/area")
@@ -690,6 +730,63 @@ async def admin_area(
     }
 
 
+@app.post("/api/admin/test-draw")
+async def admin_test_draw(
+    body: dict = Body(default_factory=dict),
+    x_admin_token: str | None = Header(default=None),
+) -> dict:
+    """Escribe SYSCOM en el centro de la hoja enseñada, para probar la calibración."""
+    _require_admin(x_admin_token)
+    if robot.name != "mg400":
+        raise HTTPException(status_code=409, detail="el backend está en simulador")
+    if busy.active():
+        raise HTTPException(status_code=409, detail="el robot está dibujando")
+    frame = _frame_from_body(body)
+    if frame is None:
+        raise HTTPException(status_code=409, detail="primero enseña y guarda las tres esquinas")
+    try:
+        margin = float(body.get("margin_mm", getattr(robot, "margin_mm", frame_ops.DEFAULT_MARGIN_MM)))
+        lift = float(body.get("lift_mm", getattr(robot, "lift_mm", frame_ops.DEFAULT_LIFT_MM)))
+        trajectory = syscom_trajectory(frame.width, frame.height, margin)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    saved_frame = getattr(robot, "frame", None)
+    saved_lift = float(getattr(robot, "lift_mm", frame_ops.DEFAULT_LIFT_MM))
+    saved_margin = float(getattr(robot, "margin_mm", frame_ops.DEFAULT_MARGIN_MM))
+    job = Job(id=f"job_{uuid.uuid4().hex[:10]}", sketch_id="prueba-syscom", status="drawing")
+    jobs.put(job.id, job)
+
+    async def run() -> None:
+        robot.set_frame(frame, lift, margin)  # type: ignore[attr-defined]
+        try:
+            busy.enter()
+
+            async def on_progress(value: float, _segment: Segment) -> None:
+                job.progress = value
+
+            await robot.draw(trajectory, on_progress, sheet_mm=True)  # type: ignore[attr-defined]
+            job.status = "done"
+            job.progress = 1.0
+            activity_totals["done"] += 1
+        except DrawCancelled:
+            await _mark_cancelled(job)
+        except Exception as exc:  # noqa: BLE001
+            if getattr(robot, "_cancel", False):
+                await _mark_cancelled(job)
+            else:
+                job.status = "error"
+                job.error = str(exc)
+                activity_totals["error"] += 1
+                robot_log.exception("prueba SYSCOM: %s", exc)
+        finally:
+            job.finished_at = time.time()
+            robot.set_frame(saved_frame, saved_lift, saved_margin)  # type: ignore[attr-defined]
+            busy.leave()
+
+    asyncio.create_task(run())
+    return {"job_id": job.id, "text": "SYSCOM"}
+
+
 @app.get("/api/admin/activity")
 def admin_activity(x_admin_token: str | None = Header(default=None)) -> dict:
     """Dibujos recientes, contadores del arranque y proveedor de IA, para la página admin."""
@@ -716,6 +813,13 @@ def admin_activity(x_admin_token: str | None = Header(default=None)) -> dict:
             "available": providers.available_providers(settings),
         },
     }
+
+
+@app.delete("/api/admin/jobs")
+def admin_clear_jobs(x_admin_token: str | None = Header(default=None)) -> dict:
+    """Borra la bitácora ya cerrada. El dibujo en curso se queda."""
+    _require_admin(x_admin_token)
+    return {"removed": jobs.drop_settled()}
 
 
 @app.get("/api/admin/sketches/{sketch_id}/preview")
