@@ -78,6 +78,33 @@ def test_el_borde_de_la_hoja_se_recorre_con_el_lapiz_arriba():
     assert min(ys) == pytest.approx(-105.0) and max(ys) == pytest.approx(105.0)
 
 
+def test_una_hoja_estandar_se_marca_centrada_en_las_esquinas():
+    # La hoja enseñada mide 210 × 148. A6 horizontal es 148 × 105 y queda
+    # centrada: 148 mm a lo ancho (Y) y 105 mm de fondo (X).
+    enlace = EnlaceFalso()
+    asyncio.run(_cliente(enlace, _hoja()).mark_area(148.0, 105.0))
+
+    puntos = _movl(enlace)
+    assert puntos[0][:2] == pytest.approx((246.0, 0.0), abs=0.01)
+    assert all(z == pytest.approx(-57.0) for _, _, z in puntos)
+    xs = [x for x, _, _ in puntos]
+    ys = [y for _, y, _ in puntos]
+    assert min(xs) == pytest.approx(193.5) and max(xs) == pytest.approx(298.5)
+    assert min(ys) == pytest.approx(-74.0) and max(ys) == pytest.approx(74.0)
+
+
+def test_un_marco_mas_grande_que_el_alcance_se_rechaza():
+    from app.robot.frame import outline_block
+
+    lejos = Frame.from_corners(
+        Corner(430.0, 180.0, -65.0, 90.0),
+        Corner(430.0, -180.0, -65.0, 90.0),
+        Corner(380.0, 180.0, -65.0, 90.0),
+    )
+    assert "440" in outline_block(lejos, 297.0, 210.0)
+    assert outline_block(_hoja(), 210.0, 148.0) == ""
+
+
 def test_sin_esquinas_no_se_marca_nada():
     enlace = EnlaceFalso()
     with pytest.raises(MG400Error, match="esquinas"):

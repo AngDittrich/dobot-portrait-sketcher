@@ -185,6 +185,34 @@ def _edge_points(frame: Frame, samples: int = 40) -> list[tuple[float, float]]:
     return points
 
 
+def outline_block(frame: Frame, width_mm: float, height_mm: float) -> str:
+    """Por qué no se puede recorrer un rectángulo de ese tamaño centrado en la hoja.
+
+    Vacío si las cuatro esquinas entran en el alcance. El rectángulo puede
+    sobresalir de lo enseñado: así se ve el tamaño real de una hoja estándar.
+    """
+    u0 = (frame.width - width_mm) / 2
+    v0 = (frame.height - height_mm) / 2
+    spots = (
+        ("superior izquierda", u0, v0),
+        ("superior derecha", u0 + width_mm, v0),
+        ("inferior derecha", u0 + width_mm, v0 + height_mm),
+        ("inferior izquierda", u0, v0 + height_mm),
+    )
+    for label, u, v in spots:
+        x, y, _, _ = frame.to_robot(u, v)
+        radius = _radius(x, y)
+        if radius > REACH_MAX_MM:
+            return (
+                f"el marco de {width_mm:.0f} × {height_mm:.0f} mm saca la esquina "
+                f"{label} a {radius:.0f} mm del eje; el brazo llega a {REACH_MAX_MM:.0f}"
+            )
+        angle = math.degrees(math.atan2(y, x))
+        if abs(angle) > J1_LIMIT_DEG:
+            return f"el marco de {width_mm:.0f} × {height_mm:.0f} mm saca la esquina {label} detrás del robot"
+    return ""
+
+
 def reach_report(frame: Frame) -> tuple[list[str], list[str]]:
     """(errores, avisos). Un error impide guardar; un aviso pide probar con "Ir aquí"."""
     errors: list[str] = []

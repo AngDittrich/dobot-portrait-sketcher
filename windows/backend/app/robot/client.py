@@ -454,17 +454,18 @@ class MG400Client(RobotClient):
         await self._dashboard(f"CP({_blend(self.cp_draw)})")
         self._ready = True
 
-    async def mark_area(self) -> None:
-        """Recorre el borde de la hoja enseñada con el lápiz arriba.
+    async def mark_area(self, width_mm: float | None = None, height_mm: float | None = None) -> None:
+        """Recorre un rectángulo con el lápiz arriba, centrado en la hoja enseñada.
 
-        No dibuja nada: sirve para comprobar que las esquinas caen sobre el
-        papel antes de que llegue el visitante.
+        Sin medidas, el rectángulo es el de las esquinas. Con medidas, es el de
+        una hoja estándar (A5, A4…) para ver ese tamaño sobre la mesa.
         """
         from app.robot.mg400 import MG400Error
 
         if self.frame is None:
             raise MG400Error("primero enseña las tres esquinas de la hoja")
-        width_mm, height_mm = self.frame.width, self.frame.height
+        sheet_w = self.frame.width if width_mm is None else float(width_mm)
+        sheet_h = self.frame.height if height_mm is None else float(height_mm)
         await self.connect()
         self._sent = 0
         self._pace_due = None
@@ -474,15 +475,17 @@ class MG400Client(RobotClient):
         self._pending = []
         self._reconnects_left = self.reconnects
         self._fit = (1.0, 0.0, 0.0)
+        u0 = (self.frame.width - sheet_w) / 2
+        v0 = (self.frame.height - sheet_h) / 2
         corners = [
-            (width_mm / 2, height_mm / 2),  # centro: punto de partida conocido
-            (0.0, 0.0),
-            (width_mm, 0.0),
-            (width_mm, height_mm),
-            (0.0, height_mm),
-            (0.0, 0.0),
+            (self.frame.width / 2, self.frame.height / 2),
+            (u0, v0),
+            (u0 + sheet_w, v0),
+            (u0 + sheet_w, v0 + sheet_h),
+            (u0, v0 + sheet_h),
+            (u0, v0),
         ]
-        logger.info("marco el area de la hoja: %.0f x %.0f mm", width_mm, height_mm)
+        logger.info("marco el area de la hoja: %.0f x %.0f mm", sheet_w, sheet_h)
         for x, y in corners:
             await self._goto(x, y, self.z_travel, self.speed_travel, 0)
         await self._drain()

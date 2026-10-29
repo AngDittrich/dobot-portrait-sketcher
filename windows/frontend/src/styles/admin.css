@@ -1257,6 +1257,11 @@
   cursor: default;
 }
 
+.admin-sheet-mark {
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
 .admin-calib-side .admin-card-note {
   margin: 0 0 0.8rem;
 }

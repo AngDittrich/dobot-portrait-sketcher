@@ -30,10 +30,18 @@ function SheetPicker({
   papers,
   selectedId,
   onSelect,
+  onMark,
+  marking,
+  markDisabled,
+  needsCorners,
 }: {
   papers: AdminSheet[]
   selectedId: string
   onSelect: (id: string) => void
+  onMark: () => void
+  marking: boolean
+  markDisabled: boolean
+  needsCorners: boolean
 }) {
   const selected = papers.find((paper) => paper.id === selectedId) ?? papers[0]
   return (
@@ -76,6 +84,18 @@ function SheetPicker({
           </button>
         ))}
       </div>
+      <button
+        type="button"
+        className="admin-press admin-sheet-mark"
+        disabled={markDisabled || marking}
+        title="Recorre con el lápiz arriba el rectángulo de esta hoja, centrado en las esquinas que enseñaste."
+        onClick={onMark}
+      >
+        {marking ? 'Marcando…' : `Marcar el marco de ${selected.label}`}
+      </button>
+      {needsCorners ? (
+        <p className="admin-sheet-caption">Enseña las tres esquinas: el marco se centra en esa hoja.</p>
+      ) : null}
     </div>
   )
 }
@@ -135,6 +155,7 @@ export function ConfigSection({
     error: '',
   })
   const [saving, setSaving] = useState(false)
+  const [marking, setMarking] = useState(false)
   const [moving, setMoving] = useState<string>('')
   const busy = Boolean(status?.busy)
   const live = status?.pose ?? []
@@ -219,7 +240,7 @@ export function ConfigSection({
   }
 
   async function markArea() {
-    if (saving) return
+    if (saving || marking) return
     setSaving(true)
     try {
       const area = await adminArea(token)
@@ -228,6 +249,25 @@ export function ConfigSection({
       onNotice(error instanceof Error ? error.message : 'no se pudo marcar el área')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function markSheet() {
+    if (!booth || marking || saving) return
+    setMarking(true)
+    try {
+      const area = await adminArea(token, {
+        sheet: booth.sheet,
+        corners: complete(corners) ? corners : undefined,
+        lift_mm: Number(booth.lift_mm),
+      })
+      onNotice(
+        `Marco de ${area.label}: ${Math.round(area.width_mm)} × ${Math.round(area.height_mm)} mm, con el lápiz arriba.`,
+      )
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : 'no se pudo marcar el marco')
+    } finally {
+      setMarking(false)
     }
   }
 
@@ -323,7 +363,7 @@ export function ConfigSection({
               <button
                 type="button"
                 className="admin-press"
-                disabled={busy || saving || !status?.calibration}
+                disabled={busy || saving || marking || !status?.calibration}
                 title={status?.calibration ? '' : 'guarda las esquinas primero'}
                 onClick={() => void markArea()}
               >
@@ -335,6 +375,10 @@ export function ConfigSection({
                 papers={papers}
                 selectedId={booth.sheet}
                 onSelect={(id) => patch('sheet', id)}
+                onMark={() => void markSheet()}
+                marking={marking}
+                markDisabled={busy || saving || (!ready && !status?.calibration) || booth.backend !== 'mg400'}
+                needsCorners={!ready && !status?.calibration}
               />
             )}
             {calibration?.paper && booth.sheet !== calibration.paper.id ? (

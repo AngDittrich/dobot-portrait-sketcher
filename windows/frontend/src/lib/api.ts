@@ -196,9 +196,16 @@ export function saveAdminBooth(token: string, booth: BoothSettings): Promise<Boo
   })
 }
 
-/** Recorre el borde de la hoja enseñada con el lápiz arriba. */
-export function adminArea(token: string): Promise<{ width_mm: number; height_mm: number }> {
-  return request('/api/admin/area', { method: 'POST', headers: adminHeaders(token) })
+/** Recorre un rectángulo con el lápiz arriba. Sin cuerpo, el de las esquinas; con `sheet`, el de esa hoja estándar. */
+export function adminArea(
+  token: string,
+  body?: { sheet?: string; corners?: Corners; lift_mm?: number },
+): Promise<{ width_mm: number; height_mm: number; label: string }> {
+  return request('/api/admin/area', {
+    method: 'POST',
+    headers: adminHeaders(token),
+    body: JSON.stringify(body ?? {}),
+  })
 }
 
 /** Medida y avisos de unas esquinas todavía sin guardar. */

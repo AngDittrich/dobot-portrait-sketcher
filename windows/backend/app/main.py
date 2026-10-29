@@ -638,21 +638,56 @@ async def admin_goto(
 
 
 @app.post("/api/admin/area")
-async def admin_area(x_admin_token: str | None = Header(default=None)) -> dict:
-    """Recorre el borde de la hoja enseñada con el lápiz arriba."""
+async def admin_area(
+    body: dict = Body(default_factory=dict),
+    x_admin_token: str | None = Header(default=None),
+) -> dict:
+    """Recorre un rectángulo con el lápiz arriba.
+
+    Sin `sheet`, es el borde de las esquinas enseñadas. Con `sheet` (a5, a4…),
+    es el marco de esa hoja estándar, centrado en las mismas esquinas, para ver
+    el tamaño real sobre la mesa.
+    """
     _require_admin(x_admin_token)
     if robot.name != "mg400":
         raise HTTPException(status_code=409, detail="el backend está en simulador")
     if busy.active():
         raise HTTPException(status_code=409, detail="el robot está dibujando")
-    frame = getattr(robot, "frame", None)
+    frame = _frame_from_body(body)
     if frame is None:
         raise HTTPException(status_code=409, detail="primero enseña y guarda las tres esquinas")
+    sheet_name = str(body.get("sheet") or "").strip().lower()
+    if sheet_name:
+        if not sheet_ops.known(sheet_name):
+            raise HTTPException(status_code=409, detail="esa hoja no existe")
+        width, height = sheet_ops.place_mm(sheet_name)
+        label = sheet_ops.label(sheet_name)
+        blocked = frame_ops.outline_block(frame, width, height)
+        if blocked:
+            raise HTTPException(status_code=409, detail=blocked)
+    else:
+        width, height = frame.width, frame.height
+        label = "la hoja enseñada"
+    saved_frame = getattr(robot, "frame", None)
+    saved_lift = float(getattr(robot, "lift_mm", frame_ops.DEFAULT_LIFT_MM))
+    saved_margin = float(getattr(robot, "margin_mm", frame_ops.DEFAULT_MARGIN_MM))
     try:
-        await robot.mark_area()  # type: ignore[attr-defined]
+        lift = float(body.get("lift_mm", saved_lift))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail="la altura del lápiz no es un número") from exc
+    robot.set_frame(frame, lift, saved_margin)  # type: ignore[attr-defined]
+    try:
+        await robot.mark_area(width, height)  # type: ignore[attr-defined]
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"width_mm": round(frame.width, 1), "height_mm": round(frame.height, 1)}
+    finally:
+        robot.set_frame(saved_frame, saved_lift, saved_margin)  # type: ignore[attr-defined]
+    return {
+        "width_mm": round(width, 1),
+        "height_mm": round(height, 1),
+        "label": label,
+        "sheet": sheet_name or None,
+    }
 
 
 @app.get("/api/admin/activity")
