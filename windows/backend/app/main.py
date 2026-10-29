@@ -523,6 +523,8 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
         "frame": booth_from_client(robot),
         "calibration": _calibration_of(getattr(robot, "frame", None), getattr(robot, "margin_mm", None)),
         "sheets": sheet_ops.catalog(),
+        "j4_fixed": getattr(robot, "j4_fixed", None),
+        "j4_model": getattr(robot, "r_model", None),
     }
     if robot.name != "mg400":
         snapshot["detail"] = "el backend está en simulador"
@@ -586,16 +588,54 @@ async def admin_command(
     _require_admin(x_admin_token)
     if robot.name != "mg400":
         raise HTTPException(status_code=409, detail="el backend está en simulador")
+    if body.action == "j4home":
+        if busy.active():
+            raise HTTPException(status_code=409, detail="el robot está dibujando")
+        try:
+            await robot.prepare_motion(None)  # type: ignore[attr-defined]
+            corrected = await robot.ensure_j4(lift=False)  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        value = "J4 devuelta a -50" if corrected else "J4 ya estaba en -50"
+        return {"command": "j4home", "code": 0, "value": value}
     try:
         payload = body.model_dump() if hasattr(body, "model_dump") else body.dict()
+        if body.action == "movl" and body.x is not None and body.y is not None:
+            payload["r"] = robot.r_for(float(body.x), float(body.y))  # type: ignore[attr-defined]
         command, is_move, prepare = plan(body.action, payload, busy=busy.active())
         rate = rate_for(body.action, payload) if prepare else None
     except AdminOpError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
+        if body.action == "step" and (body.axis or "")[:1] in {"X", "Y"}:
+            # RelMovL deja R igual y entonces J4 gira con la base. Un MovL
+            # absoluto con el R calculado mueve en X/Y sin tocar la muñeca.
+            _, pose_value = await robot.ask("GetPose()")  # type: ignore[attr-defined]
+            pose = _numbers(pose_value)[:3]
+            if len(pose) < 3:
+                raise HTTPException(status_code=502, detail="no se pudo leer la pose para el paso")
+            size = float(body.mm or 0.0) * (1 if (body.axis or "").endswith("+") else -1)
+            x, y, z = pose
+            if body.axis.startswith("X"):  # type: ignore[union-attr]
+                x += size
+            else:
+                y += size
+            command = robot.movl_command(x, y, z, rate or 20)  # type: ignore[attr-defined]
         if prepare:
             await robot.prepare_motion(rate)  # type: ignore[attr-defined]
         code, value = await robot.ask(command, move=is_move)  # type: ignore[attr-defined]
+        if code == 0 and (
+            (body.action == "jog" and not body.axis) or (body.action == "drag" and not body.on)
+        ):
+            # El jog cartesiano y el arrastre a mano giran J4. Al soltar se
+            # devuelve a su valor en el sitio, antes de guardar una esquina.
+            await asyncio.sleep(0.3)
+            try:
+                await robot.ensure_j4(lift=False)  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001 - la orden ya se cumplió
+                robot_log.warning("no se pudo devolver J4 tras %s", command, exc_info=True)
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if code != 0:
@@ -666,8 +706,8 @@ async def admin_goto(
             if errors:
                 raise HTTPException(status_code=409, detail=errors[0])
             x, y, z, _r = frame.named(str(body.get("corner") or ""))
-            # La muñeca no gira al ir de una esquina a otra: R fijo, el de arriba a la izquierda.
-            r = frame.tl.r
+        # R lo calcula el cliente para que J4 se quede en -50; la R enseñada no se usa.
+        r = robot.r_for(x, y)  # type: ignore[attr-defined]
     except (FrameError, KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:

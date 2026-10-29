@@ -16,7 +16,7 @@ STEP_MAX = 20.0
 
 MOTION = {"jog", "step", "movl", "drag"}
 
-# R cartesiana es J4 en este MG400. MoveJog(R+) no gira la muñeca.
+# Sin R ni J4: la muñeca se queda fija en J4_FIXED (ver app/robot/client.py).
 JOG_AXES = {
     "X+": "X+",
     "X-": "X-",
@@ -24,16 +24,12 @@ JOG_AXES = {
     "Y-": "Y-",
     "Z+": "Z+",
     "Z-": "Z-",
-    "R+": "J4+",
-    "R-": "J4-",
     "J1+": "J1+",
     "J1-": "J1-",
     "J2+": "J2+",
     "J2-": "J2-",
     "J3+": "J3+",
     "J3-": "J3-",
-    "J4+": "J4+",
-    "J4-": "J4-",
 }
 
 STEP_CARTESIAN = {
@@ -45,7 +41,7 @@ STEP_CARTESIAN = {
     "Z-": (0, 0, -1, 0),
 }
 
-JOINT_INDEX = {"J1": 0, "J2": 1, "J3": 2, "J4": 3, "R": 3}
+JOINT_INDEX = {"J1": 0, "J2": 1, "J3": 2}
 
 MODES = {
     1: "inicializando",

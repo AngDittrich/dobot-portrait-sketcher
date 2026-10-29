@@ -35,10 +35,12 @@ def test_el_token_no_sale_de_la_nada():
     assert not token_ok(token)
 
 
-def test_el_jog_de_r_usa_j4():
-    command, is_move, prepare = plan("jog", {"axis": "R+"}, busy=False)
-    assert command == "MoveJog(J4+)"
-    assert is_move and prepare
+def test_la_muneca_no_tiene_jog_ni_paso():
+    for axis in ("R+", "R-", "J4+", "J4-"):
+        with pytest.raises(AdminOpError):
+            plan("jog", {"axis": axis}, busy=False)
+        with pytest.raises(AdminOpError):
+            plan("step", {"axis": axis, "mm": 1}, busy=False)
 
 
 def test_el_jog_usa_la_velocidad_del_slider_sin_meterla_en_movejog():

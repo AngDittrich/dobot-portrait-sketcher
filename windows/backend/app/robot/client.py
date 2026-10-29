@@ -57,6 +57,11 @@ ARRIVAL_EXTRA_S = 6.0
 # Con 3 en vuelo se solapa el envío con el movimiento. Nunca más: con flujo
 # continuo (decenas de órdenes por segundo) el controlador cierra el socket.
 DEFAULT_PIPELINE = 3
+# J4 es la muñeca del tool. Con el lápiz fuera del eje, girarla corre la punta,
+# así que se queda siempre en este ángulo. En el MG400, R = J1 + J4: el R de
+# cada punto se calcula con el J1 que ese punto exige.
+J4_FIXED = -50.0
+J4_TOLERANCE_DEG = 1.0
 
 
 def effective_speed_mm_s(
@@ -349,6 +354,9 @@ class MG400Client(RobotClient):
         self.commands: list[str] = []
         self._ready = False
         self._cancel = False
+        self.j4_fixed = J4_FIXED
+        # "j1+j4" (documentación Dobot) o "j4" si al conectar R resulta ser J4.
+        self.r_model = "j1+j4"
         # El MG400 acepta un solo cliente. Dos consultas a la vez no pueden abrir dos sockets.
         self._io = asyncio.Lock()
         # El dashboard del MG400 atiende una orden a la vez y contesta por el
@@ -486,7 +494,91 @@ class MG400Client(RobotClient):
         await self._dashboard(f"User({int(self.user)})")
         await self._dashboard(f"Tool({int(self.tool)})")
         await self._dashboard(f"CP({_blend(self.cp_draw)})")
+        await self._measure_r_model()
         self._ready = True
+
+    def r_for(self, x: float, y: float) -> float:
+        """R cartesiana que deja J4 en `j4_fixed` con la base apuntando a (x, y)."""
+        if self.r_model == "j4":
+            return _nonzero(self.j4_fixed)
+        return _nonzero(math.degrees(math.atan2(y, x)) + self.j4_fixed)
+
+    async def _read_angles(self) -> list[float] | None:
+        angles = getattr(self._link, "angles", None)
+        if angles is None:
+            return None
+        try:
+            async with self._wire:
+                values = [float(value) for value in await asyncio.to_thread(angles)]
+        except Exception:  # noqa: BLE001 - sin lectura no se corrige
+            return None
+        return values if len(values) >= 4 else None
+
+    async def _read_pose(self) -> tuple[float, float, float, float] | None:
+        pose = getattr(self._link, "pose", None)
+        if pose is None:
+            return None
+        try:
+            values = tuple(float(value) for value in await asyncio.to_thread(pose))
+        except Exception:  # noqa: BLE001
+            return None
+        return values[:4] if len(values) >= 4 else None  # type: ignore[return-value]
+
+    async def _measure_r_model(self) -> None:
+        """Comprueba con el brazo real si R = J1 + J4 o R = J4."""
+        angles = await self._read_angles()
+        pose = await self._read_pose()
+        if angles is None or pose is None:
+            return
+        j1, j4, r = angles[0], angles[3], pose[3]
+        suma = abs(_wrap(r - (j1 + j4)))
+        solo = abs(_wrap(r - j4))
+        if abs(j1) < 2.0:
+            logger.info("J1 %.1f: no distingue el modelo de R; sigo con %s", j1, self.r_model)
+        elif suma <= 1.0:
+            self.r_model = "j1+j4"
+        elif solo <= 1.0:
+            self.r_model = "j4"
+        else:
+            logger.warning(
+                "R %.2f no cuadra con J1 %.2f + J4 %.2f ni con J4; sigo con %s",
+                r,
+                j1,
+                j4,
+                self.r_model,
+            )
+        logger.info("modelo de R: %s (J4 fijo en %.1f)", self.r_model, self.j4_fixed)
+
+    def movl_command(self, x: float, y: float, z: float, speed: int) -> str:
+        """MovL suelto (pasos del panel) con J4 fija."""
+        return self._movl(_nonzero(x), _nonzero(y), _nonzero(z), 0.0, speed, 0)
+
+    async def ensure_j4(self, *, lift: bool = True) -> bool:
+        """Devuelve J4 a `j4_fixed` si algo la giró. True si tuvo que corregir.
+
+        Con `lift` sube el lápiz a la vez, para no girar la punta sobre el
+        papel. Sin él (tras un jog o al soltar el arrastre) corrige en el sitio,
+        y así la pose que se guarda como esquina ya tiene J4 en su valor.
+        """
+        angles = await self._read_angles()
+        if angles is None or abs(_wrap(angles[3] - self.j4_fixed)) <= J4_TOLERANCE_DEG:
+            return False
+        logger.warning("J4 está en %.2f; la devuelvo a %.1f", angles[3], self.j4_fixed)
+        pose = await self._read_pose()
+        if pose is not None:
+            # Un MovL con el R calculado ya deja J4 en su sitio.
+            z = max(pose[2], self.z_travel) if lift else pose[2]
+            await self._move(self._movl(pose[0], pose[1], z, 0.0, self.speed_travel, 0))
+            await self._wait_arrival(pose[0], pose[1], 0.0, self.speed_travel)
+            angles = await self._read_angles()
+            if angles is None or abs(_wrap(angles[3] - self.j4_fixed)) <= J4_TOLERANCE_DEG:
+                return True
+        await self._move(
+            "JointMovJ({:.3f},{:.3f},{:.3f},{:.3f})".format(
+                _nonzero(angles[0]), _nonzero(angles[1]), _nonzero(angles[2]), _nonzero(self.j4_fixed)
+            )
+        )
+        return True
 
     async def mark_area(self, width_mm: float | None = None, height_mm: float | None = None) -> None:
         """Recorre un rectángulo con el lápiz arriba, centrado en la hoja enseñada.
@@ -509,6 +601,7 @@ class MG400Client(RobotClient):
         self._pending = []
         self._reconnects_left = self.reconnects
         self._fit = (1.0, 0.0, 0.0)
+        await self.ensure_j4()
         u0 = (self.frame.width - sheet_w) / 2
         v0 = (self.frame.height - sheet_h) / 2
         corners = [
@@ -608,6 +701,7 @@ class MG400Client(RobotClient):
                 self._fit[0],
             )
         self._reconnects_left = self.reconnects
+        await self.ensure_j4()
         self._total = sum(len(segment.points) for segment in trajectory.segments)
         logger.info(
             "dibujo: %d segmentos, ~%d puntos, %.0f mm con lapiz abajo",
@@ -630,6 +724,10 @@ class MG400Client(RobotClient):
             last = segment
             if segment.type == "travel":
                 pen_down, held = await self._travel(points, held, pen_down)
+                if not pen_down:
+                    # Lápiz arriba y sin órdenes en vuelo: momento seguro para
+                    # devolver J4 si un empujón la giró.
+                    await self.ensure_j4()
             else:
                 pen_down, held = await self._draw_segment(points, held, pen_down)
             done += segment.length
@@ -978,15 +1076,15 @@ class MG400Client(RobotClient):
             scale, u0, v0 = self._fit
             robot_x, robot_y, plane_z, _rotation = self.frame.to_robot(u0 + scale * x, v0 + scale * y)
             real_z = plane_z if z == self.z_draw else plane_z + self.lift_mm
-            # J4 es la muñeca del tool. Si R cambia de un punto a otro, ese
-            # motor gira y la punta del lápiz se corre. Se queda en el R de
-            # la esquina superior izquierda.
-            return _nonzero(robot_x), _nonzero(robot_y), _nonzero(real_z), _nonzero(self.r)
+            robot_x, robot_y = _nonzero(robot_x), _nonzero(robot_y)
+            return robot_x, robot_y, _nonzero(real_z), self.r_for(robot_x, robot_y)
         robot_x = _nonzero(self.origin_x + self.x_sign * (x - self._paper_w / 2))
         robot_y = _nonzero(self.origin_y + self.y_sign * (y - self._paper_h / 2))
-        return robot_x, robot_y, _nonzero(float(z)), _nonzero(self.r)
+        return robot_x, robot_y, _nonzero(float(z)), self.r_for(robot_x, robot_y)
 
-    def _movl(self, x: float, y: float, z: float, r: float, speed: int, cp: int) -> str:
+    def _movl(self, x: float, y: float, z: float, _r: float, speed: int, cp: int) -> str:
+        """MovL con el R que mantiene J4 fija; el R recibido no se usa."""
+        r = self.r_for(x, y)
         return (
             f"MovL({x:.3f},{y:.3f},{z:.3f},{r:.3f},"
             f"SpeedL={int(speed)},AccL={int(self.acc_mm_s2)},CP={_blend(cp)})"
@@ -1012,6 +1110,7 @@ class MG400Client(RobotClient):
         rate = self.speed_travel if speed is None else int(speed)
         await self.prepare_motion(rate)
         self._pending = []
+        await self.ensure_j4()
         clearance = max(0.0, float(lift))
         travel_z = z + clearance
         pose_fn = getattr(self._link, "pose", None)
@@ -1262,6 +1361,11 @@ def _nonzero(value: float) -> float:
     if abs(value) >= 0.001:
         return value
     return 0.001 if value >= 0 else -0.001
+
+
+def _wrap(degrees: float) -> float:
+    """Diferencia de ángulos llevada a ±180."""
+    return (degrees + 180.0) % 360.0 - 180.0
 
 
 def _blend(value: int) -> int:

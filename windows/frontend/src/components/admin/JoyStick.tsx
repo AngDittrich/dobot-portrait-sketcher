@@ -10,8 +10,8 @@ import type { Axes } from './stickSpaces'
 
 function axisFromOffset(dx: number, dy: number, dead: number, axes: Axes): string | null {
   if (Math.hypot(dx, dy) < dead) return null
-  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? axes.right : axes.left
-  return dy > 0 ? axes.down : axes.up
+  const axis = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? axes.right : axes.left) : dy > 0 ? axes.down : axes.up
+  return axis || null
 }
 
 export function JoyStick({

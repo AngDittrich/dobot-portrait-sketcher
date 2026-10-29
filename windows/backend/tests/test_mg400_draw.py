@@ -1,6 +1,7 @@
 """El MG400 dibuja la trayectoria con el lapiz arriba entre trazos, sin abrir el socket en seco."""
 
 import asyncio
+import math
 import os
 import re
 import sys
@@ -76,6 +77,14 @@ def _xyz(command: str) -> tuple[float, float, float]:
     return tuple(float(part) for part in match.groups())  # type: ignore[return-value]
 
 
+def _j4(command: str) -> float:
+    """J4 que deja un MovL: R menos el J1 que exige ese X, Y."""
+    match = re.match(r"MovL\(([^,]+),([^,]+),[^,]+,([^,]+),", command)
+    assert match, command
+    x, y, r = (float(part) for part in match.groups())
+    return r - math.degrees(math.atan2(y, x))
+
+
 def test_baja_sobre_el_trazo_y_viaja_en_alto():
     enlace = EnlaceFalso()
     cliente = _cliente(enlace)
@@ -107,7 +116,7 @@ def test_baja_sobre_el_trazo_y_viaja_en_alto():
     for anterior, orden in zip(movimientos, movimientos[1:]):
         if _xyz(anterior)[2] != _xyz(orden)[2]:
             assert "CP=1" in orden
-    assert all(",12.000," in orden for orden in movimientos)
+    assert all(_j4(orden) == pytest.approx(-50.0, abs=0.01) for orden in movimientos)
     assert not any("Sync()" in move for move in enlace.moves)
 
 
@@ -177,7 +186,7 @@ def test_las_esquinas_medidas_caen_en_el_papel():
     assert _xyz(movimientos[0]) == (360.0, 92.0, -160.0)
     assert _xyz(movimientos[1]) == (360.0, 92.0, -167.0)
     assert _xyz(movimientos[2]) == (218.0, -145.0, -167.0)
-    assert ",145.000," in movimientos[2]
+    assert _j4(movimientos[2]) == pytest.approx(-50.0, abs=0.01)
 
 
 def test_la_muneca_no_gira_al_dibujar():
@@ -209,8 +218,8 @@ def test_la_muneca_no_gira_al_dibujar():
 
     asyncio.run(correr())
     movimientos = [orden for orden in enlace.moves if orden.startswith("MovL")]
-    assert ",145.000," in movimientos[0]
-    assert all(",145.000," in orden for orden in movimientos)
+    # El R del .env (145) y el lejano (96) no mandan: J4 queda en -50 en cada punto.
+    assert all(_j4(orden) == pytest.approx(-50.0, abs=0.01) for orden in movimientos)
 
 
 class _EnlaceQueFalla:

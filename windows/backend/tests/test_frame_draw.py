@@ -1,6 +1,7 @@
 """El retrato cae dentro de la hoja enseñada y "Ir aquí" no arrastra el lápiz."""
 
 import asyncio
+import math
 import re
 
 import pytest
@@ -124,4 +125,7 @@ def test_el_dibujo_no_gira_la_muneca_aunque_las_esquinas_tengan_otro_r():
 
     movl = [orden for orden in enlace.moves if orden.startswith("MovL(")]
     assert movl
-    assert all(",31.000," in orden for orden in movl)
+    for orden in movl:
+        x, y, _z, r = (float(part) for part in orden[5:].split(",")[:4])
+        # R = J1 + J4: con la base en atan2(y, x), J4 queda en -50.
+        assert r - math.degrees(math.atan2(y, x)) == pytest.approx(-50.0, abs=0.01)

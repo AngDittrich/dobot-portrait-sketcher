@@ -1,6 +1,7 @@
 """El panel revisa unas esquinas sin guardarlas y no manda el brazo fuera de alcance."""
 
 import asyncio
+import math
 import os
 import sys
 
@@ -46,6 +47,9 @@ class _Robot:
         self.visitas: list[tuple[float, float, float, float]] = []
         self.lift = 0.0
 
+    def r_for(self, x: float, y: float) -> float:
+        return math.degrees(math.atan2(y, x)) - 50.0
+
     async def visit(
         self,
         x: float,
@@ -67,7 +71,9 @@ def test_ir_a_la_esquina_calculada_baja_al_plano_de_las_otras(monkeypatch: pytes
         main.admin_goto({"corner": "br", "corners": ESQUINAS, "lift_mm": 8}, x_admin_token=_token())
     )
     # El viaje usa los 8 mm, pero el punto de llegada es el plano (Z -65), no -57.
-    assert robot.visitas == [pytest.approx((172.0, -105.0, -65.0, 120.0))]
+    # R no es la enseñada (120): es la que deja J4 en -50 en ese punto.
+    r = math.degrees(math.atan2(-105.0, 172.0)) - 50.0
+    assert robot.visitas == [pytest.approx((172.0, -105.0, -65.0, r))]
     assert robot.lift == pytest.approx(8.0)
 
 
