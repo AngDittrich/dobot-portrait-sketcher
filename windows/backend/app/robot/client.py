@@ -136,7 +136,13 @@ class RobotClient:
     async def connect(self) -> None:  # pragma: no cover - interfaz
         raise NotImplementedError
 
-    async def draw(self, trajectory: Trajectory, on_progress: ProgressCallback) -> None:
+    async def draw(
+        self,
+        trajectory: Trajectory,
+        on_progress: ProgressCallback,
+        *,
+        sheet_mm: bool = False,
+    ) -> None:
         raise NotImplementedError  # pragma: no cover - interfaz
 
 
@@ -155,7 +161,14 @@ class MockRobotClient(RobotClient):
     async def connect(self) -> None:
         return None
 
-    async def draw(self, trajectory: Trajectory, on_progress: ProgressCallback) -> None:
+    async def draw(
+        self,
+        trajectory: Trajectory,
+        on_progress: ProgressCallback,
+        *,
+        sheet_mm: bool = False,
+    ) -> None:
+        del sheet_mm  # el simulador no tiene hoja: recorre los trazos igual
         total = trajectory.total_length or 1.0
         done = 0.0
         for segment in trajectory.segments:
@@ -490,7 +503,13 @@ class MG400Client(RobotClient):
             await self._goto(x, y, self.z_travel, self.speed_travel, 0)
         await self._drain()
 
-    async def draw(self, trajectory: Trajectory, on_progress: ProgressCallback) -> None:
+    async def draw(
+        self,
+        trajectory: Trajectory,
+        on_progress: ProgressCallback,
+        *,
+        sheet_mm: bool = False,
+    ) -> None:
         self._validate(trajectory)
         await self.connect()
         self._sent = 0
@@ -502,7 +521,10 @@ class MG400Client(RobotClient):
         self._pending = []
         self._paper_w = trajectory.width_mm
         self._paper_h = trajectory.height_mm
-        if self.frame is not None:
+        if sheet_mm:
+            # Los puntos ya están en milímetros de la hoja enseñada.
+            self._fit = (1.0, 0.0, 0.0)
+        elif self.frame is not None:
             self._fit = frame_ops.fit(
                 self.frame, trajectory.width_mm, trajectory.height_mm, self.margin_mm
             )

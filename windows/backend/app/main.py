@@ -60,6 +60,7 @@ from app.store import Job, JobStore, Sketch, SketchStore  # noqa: E402
 from app.robot import frame as frame_ops  # noqa: E402
 from app.robot import sheet as sheet_ops  # noqa: E402
 from app.robot.frame import Frame, FrameError  # noqa: E402
+from app.robot.text import syscom_trajectory  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", ROOT / "models"))
@@ -688,6 +689,58 @@ async def admin_area(
         "label": label,
         "sheet": sheet_name or None,
     }
+
+
+@app.post("/api/admin/test-draw")
+async def admin_test_draw(
+    body: dict = Body(default_factory=dict),
+    x_admin_token: str | None = Header(default=None),
+) -> dict:
+    """Escribe SYSCOM en el centro de la hoja enseñada, para probar la calibración."""
+    _require_admin(x_admin_token)
+    if robot.name != "mg400":
+        raise HTTPException(status_code=409, detail="el backend está en simulador")
+    if busy.active():
+        raise HTTPException(status_code=409, detail="el robot está dibujando")
+    frame = _frame_from_body(body)
+    if frame is None:
+        raise HTTPException(status_code=409, detail="primero enseña y guarda las tres esquinas")
+    try:
+        margin = float(body.get("margin_mm", getattr(robot, "margin_mm", frame_ops.DEFAULT_MARGIN_MM)))
+        lift = float(body.get("lift_mm", getattr(robot, "lift_mm", frame_ops.DEFAULT_LIFT_MM)))
+        trajectory = syscom_trajectory(frame.width, frame.height, margin)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    saved_frame = getattr(robot, "frame", None)
+    saved_lift = float(getattr(robot, "lift_mm", frame_ops.DEFAULT_LIFT_MM))
+    saved_margin = float(getattr(robot, "margin_mm", frame_ops.DEFAULT_MARGIN_MM))
+    job = Job(id=f"job_{uuid.uuid4().hex[:10]}", sketch_id="prueba-syscom", status="drawing")
+    jobs.put(job.id, job)
+
+    async def run() -> None:
+        robot.set_frame(frame, lift, margin)  # type: ignore[attr-defined]
+        try:
+            busy.enter()
+
+            async def on_progress(value: float, _segment: Segment) -> None:
+                job.progress = value
+
+            await robot.draw(trajectory, on_progress, sheet_mm=True)  # type: ignore[attr-defined]
+            job.status = "done"
+            job.progress = 1.0
+            activity_totals["done"] += 1
+        except Exception as exc:  # noqa: BLE001
+            job.status = "error"
+            job.error = str(exc)
+            activity_totals["error"] += 1
+            robot_log.exception("prueba SYSCOM: %s", exc)
+        finally:
+            job.finished_at = time.time()
+            robot.set_frame(saved_frame, saved_lift, saved_margin)  # type: ignore[attr-defined]
+            busy.leave()
+
+    asyncio.create_task(run())
+    return {"job_id": job.id, "text": "SYSCOM"}
 
 
 @app.get("/api/admin/activity")

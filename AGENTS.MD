@@ -113,6 +113,7 @@ Wizard de una sola pantalla, sin scroll. Estados en `src/hooks/usePhotobooth.ts`
 - El retrato se genera al ancho que llena la hoja (`portrait_width_mm`, con alto ≈ 1.45 × ancho por el 3:4 y el rótulo) y el cliente lo ajusta y centra con `margin_mm` sin estirarlo. En hoja horizontal manda el alto.
 - `reach_report` impide guardar esquinas a más de 440 mm del eje o detrás de J1 ±160°, y avisa si un borde pasa a menos de 170 mm de la columna.
 - "Ir aquí" (`POST /api/admin/goto`) sube el lápiz para el viaje y **baja al plano de la esquina** al llegar, incluida la inferior derecha calculada. Funciona con una esquina suelta antes de tener las tres.
+- **Dibujar prueba** (`POST /api/admin/test-draw`) escribe SYSCOM en el centro de la hoja enseñada (las esquinas del formulario, o las guardadas) para comprobar la calibración sin un retrato.
 - Sin esquinas guardadas se usa el modo viejo del `.env` (centro + signos). Un `robot.json` viejo (con `origin_x`) se ignora en la hoja y avisa en la consola.
 
 En `camera`, `review`, `style` y `confirm` se ve un anillo de 3 minutos. Pulsarlo vuelve a llenar el tiempo. Al llegar a cero, todo se reinicia a `attract`.

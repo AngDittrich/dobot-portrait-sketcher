@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { adminArea, adminCalibration, adminGoto, saveAdminBooth } from '../../lib/api'
+import { adminArea, adminCalibration, adminGoto, adminTestDraw, saveAdminBooth } from '../../lib/api'
 import type { AdminSheet, AdminStatus, Calibration, CornerId, CornerPose, Corners, SpotId } from '../../lib/api'
 import { ReachMap } from './ReachMap'
 
@@ -156,6 +156,7 @@ export function ConfigSection({
   })
   const [saving, setSaving] = useState(false)
   const [marking, setMarking] = useState(false)
+  const [testing, setTesting] = useState(false)
   const [moving, setMoving] = useState<string>('')
   const busy = Boolean(status?.busy)
   const live = status?.pose ?? []
@@ -268,6 +269,23 @@ export function ConfigSection({
       onNotice(error instanceof Error ? error.message : 'no se pudo marcar el marco')
     } finally {
       setMarking(false)
+    }
+  }
+
+  async function drawTest() {
+    if (!booth || testing || saving || busy) return
+    setTesting(true)
+    try {
+      await adminTestDraw(token, {
+        corners: complete(corners) ? corners : undefined,
+        lift_mm: Number(booth.lift_mm),
+        margin_mm: Number(booth.margin_mm),
+      })
+      onNotice('Dibujando SYSCOM en el centro de la hoja.')
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : 'no se pudo dibujar la prueba')
+    } finally {
+      setTesting(false)
     }
   }
 
@@ -494,6 +512,15 @@ export function ConfigSection({
 
         <div className="admin-config-save">
           {blocked && <span className="admin-card-hint">{ready ? 'Corrige la hoja para guardar' : 'Faltan esquinas por enseñar'}</span>}
+          <button
+            type="button"
+            className="admin-press"
+            disabled={busy || saving || testing || marking || (!ready && !status?.calibration) || booth.backend !== 'mg400'}
+            title="Escribe SYSCOM en el centro de la hoja enseñada, con el lápiz abajo."
+            onClick={() => void drawTest()}
+          >
+            {testing || busy ? 'Dibujando…' : 'Dibujar prueba'}
+          </button>
           <button type="submit" className="admin-press admin-press--primary" disabled={busy || saving || blocked}>
             {saving ? 'Guardando…' : 'Guardar cabina'}
           </button>

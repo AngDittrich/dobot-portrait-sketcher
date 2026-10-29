@@ -196,6 +196,18 @@ export function saveAdminBooth(token: string, booth: BoothSettings): Promise<Boo
   })
 }
 
+/** Escribe SYSCOM en el centro de la hoja enseñada. */
+export function adminTestDraw(
+  token: string,
+  body?: { corners?: Corners; lift_mm?: number; margin_mm?: number },
+): Promise<{ job_id: string; text: string }> {
+  return request('/api/admin/test-draw', {
+    method: 'POST',
+    headers: adminHeaders(token),
+    body: JSON.stringify(body ?? {}),
+  })
+}
+
 /** Recorre un rectángulo con el lápiz arriba. Sin cuerpo, el de las esquinas; con `sheet`, el de esa hoja estándar. */
 export function adminArea(
   token: string,
