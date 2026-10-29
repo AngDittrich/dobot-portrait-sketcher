@@ -93,8 +93,10 @@ def test_ir_a_una_esquina_sube_el_lapiz_antes_de_viajar():
     cliente = _cliente(enlace)
     x, y, z, r = cliente.frame.named("tr")  # type: ignore[union-attr]
 
-    asyncio.run(cliente.visit(x, y, z + 8.0, r))
+    asyncio.run(cliente.visit(x, y, z, r, lift=8.0))
 
     puntos = _puntos(enlace)
     assert puntos[0] == pytest.approx((250.0, 0.0, -57.0))
-    assert puntos[-1] == pytest.approx((320.0, -105.0, -57.0))
+    assert puntos[1][:2] == pytest.approx((320.0, -105.0))
+    assert puntos[1][2] == pytest.approx(-57.0)
+    assert puntos[-1] == pytest.approx((320.0, -105.0, -65.0))

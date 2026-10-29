@@ -886,12 +886,28 @@ class MG400Client(RobotClient):
             f"SpeedL={int(speed)},AccL={int(self.acc_mm_s2)},CP={_blend(cp)})"
         )
 
-    async def visit(self, x: float, y: float, z: float, r: float, speed: int | None = None) -> None:
-        """Lleva el brazo a un punto del robot sin arrastrar el lápiz: primero sube, luego viaja."""
+    async def visit(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        r: float,
+        speed: int | None = None,
+        *,
+        lift: float = 0.0,
+    ) -> None:
+        """Llega a (x, y, z), que es la altura del papel en ese punto.
+
+        Con `lift`, el viaje va esa distancia por encima para no arrastrar el
+        lápiz, y al llegar baja al plano. Sin eso la esquina calculada se
+        quedaba a la altura de la marca, unos milímetros arriba de las otras.
+        """
         await self.connect()
         rate = self.speed_travel if speed is None else int(speed)
         await self.prepare_motion(rate)
         self._pending = []
+        clearance = max(0.0, float(lift))
+        travel_z = z + clearance
         pose_fn = getattr(self._link, "pose", None)
         here: tuple[float, float, float, float] | None = None
         if pose_fn is not None:
@@ -899,12 +915,18 @@ class MG400Client(RobotClient):
                 here = tuple(float(value) for value in await asyncio.to_thread(pose_fn))[:4]  # type: ignore[assignment]
             except Exception:  # noqa: BLE001 - sin pose se viaja directo
                 here = None
-        if here is not None and here[2] < z - 0.5:
-            await self._move(self._movl(here[0], here[1], z, here[3], rate, 0))
+        if here is not None and here[2] < travel_z - 0.5:
+            await self._move(self._movl(here[0], here[1], travel_z, here[3], rate, 0))
             await self._wait_arrival(here[0], here[1], 0.0, rate)
+            here = (here[0], here[1], travel_z, here[3])
         distance = 0.0 if here is None else math.hypot(x - here[0], y - here[1])
-        await self._move(self._movl(_nonzero(x), _nonzero(y), _nonzero(z), _nonzero(r), rate, 0))
-        await self._wait_arrival(x, y, distance, rate)
+        at_travel = here is not None and abs(here[2] - travel_z) <= 0.5 and distance <= 0.5
+        if not at_travel:
+            await self._move(self._movl(_nonzero(x), _nonzero(y), _nonzero(travel_z), _nonzero(r), rate, 0))
+            await self._wait_arrival(x, y, distance, rate)
+        if clearance > 0.5:
+            await self._move(self._movl(_nonzero(x), _nonzero(y), _nonzero(z), _nonzero(r), rate, 0))
+            await self._wait_arrival(x, y, 0.0, rate)
 
     def _rotation(self, robot_x: float, robot_y: float) -> float:
         """Gira entre el R del origen y el de la esquina lejana, si se midió."""

@@ -44,18 +44,31 @@ class _Robot:
 
     def __init__(self) -> None:
         self.visitas: list[tuple[float, float, float, float]] = []
+        self.lift = 0.0
 
-    async def visit(self, x: float, y: float, z: float, r: float, speed: int | None = None) -> None:
+    async def visit(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        r: float,
+        speed: int | None = None,
+        *,
+        lift: float = 0.0,
+    ) -> None:
         self.visitas.append((x, y, z, r))
+        self.lift = lift
 
 
-def test_ir_a_la_esquina_calculada_va_con_el_lapiz_arriba(monkeypatch: pytest.MonkeyPatch):
+def test_ir_a_la_esquina_calculada_baja_al_plano_de_las_otras(monkeypatch: pytest.MonkeyPatch):
     robot = _Robot()
     monkeypatch.setattr(main, "robot", robot)
     asyncio.run(
         main.admin_goto({"corner": "br", "corners": ESQUINAS, "lift_mm": 8}, x_admin_token=_token())
     )
-    assert robot.visitas == [pytest.approx((172.0, -105.0, -57.0, 120.0))]
+    # El viaje usa los 8 mm, pero el punto de llegada es el plano (Z -65), no -57.
+    assert robot.visitas == [pytest.approx((172.0, -105.0, -65.0, 120.0))]
+    assert robot.lift == pytest.approx(8.0)
 
 
 def test_un_punto_fuera_del_alcance_no_se_visita(monkeypatch: pytest.MonkeyPatch):

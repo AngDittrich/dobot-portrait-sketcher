@@ -105,7 +105,7 @@ Wizard de una sola pantalla, sin scroll. Estados en `src/hooks/usePhotobooth.ts`
 - De las tres esquinas salen ancho, alto, orientación y sentido de los ejes (no hay signos que adivinar), la Z de dibujo como plano (la mesa no siempre está pareja) y la R interpolada. Lápiz arriba = plano + `lift_mm` (8 por defecto).
 - El retrato se genera al ancho que llena la hoja (`portrait_width_mm`, con alto ≈ 1.45 × ancho por el 3:4 y el rótulo) y el cliente lo ajusta y centra con `margin_mm` sin estirarlo. En hoja horizontal manda el alto.
 - `reach_report` impide guardar esquinas a más de 440 mm del eje o detrás de J1 ±160°, y avisa si un borde pasa a menos de 170 mm de la columna.
-- "Ir aquí" (`POST /api/admin/goto`) sube primero el lápiz y luego viaja; funciona con una esquina suelta antes de tener las tres.
+- "Ir aquí" (`POST /api/admin/goto`) sube el lápiz para el viaje y **baja al plano de la esquina** al llegar, incluida la inferior derecha calculada. Funciona con una esquina suelta antes de tener las tres.
 - Sin esquinas guardadas se usa el modo viejo del `.env` (centro + signos). Un `robot.json` viejo (con `origin_x`) se ignora en la hoja y avisa en la consola.
 
 En `camera`, `review`, `style` y `confirm` se ve un anillo de 3 minutos. Pulsarlo vuelve a llenar el tiempo. Al llegar a cero, todo se reinicia a `attract`.

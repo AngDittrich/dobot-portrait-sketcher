@@ -604,7 +604,7 @@ async def admin_goto(
     body: dict = Body(...),
     x_admin_token: str | None = Header(default=None),
 ) -> dict:
-    """Lleva el brazo a una esquina o al centro de la hoja con el lápiz arriba."""
+    """Lleva el brazo a una esquina o al centro. Viaja con el lápiz arriba y baja al plano."""
     _require_admin(x_admin_token)
     if robot.name != "mg400":
         raise HTTPException(status_code=409, detail="el backend está en simulador")
@@ -631,10 +631,10 @@ async def admin_goto(
     except (FrameError, KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
-        await robot.visit(x, y, z + lift, r, None if speed is None else int(speed))  # type: ignore[attr-defined]
+        await robot.visit(x, y, z, r, None if speed is None else int(speed), lift=lift)  # type: ignore[attr-defined]
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"corner": body.get("corner"), "x": x, "y": y, "z": z + lift, "r": r}
+    return {"corner": body.get("corner"), "x": x, "y": y, "z": z, "r": r}
 
 
 @app.post("/api/admin/area")

@@ -424,7 +424,7 @@ export function ConfigSection({
               <strong>Inferior derecha</strong>
               <p>
                 {calibration
-                  ? `Calculada: X ${mm(calibration.points.br[0])}  Y ${mm(calibration.points.br[1])}`
+                  ? `Calculada: X ${mm(calibration.points.br[0])}  Y ${mm(calibration.points.br[1])}  Z ${mm(calibration.points.br[2])}  R ${mm(calibration.points.br[3])}`
                   : 'Se calcula con las otras tres.'}
               </p>
               <div className="admin-corner-actions">
