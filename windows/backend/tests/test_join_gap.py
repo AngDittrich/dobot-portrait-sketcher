@@ -1,7 +1,8 @@
-"""El encadenado por defecto une 8 mm, no 6.
+"""El cliente no une trazos por su cuenta.
 
-Medido sobre un retrato real de 110 trazos: con 6 mm el brazo levanta el lápiz
-37 veces; con 8 mm baja a 24 y solo añade 93 mm de línea (4% del dibujo).
+Unir a ciegas 8 mm convertía las letras y los rasgos cercanos en rayas que no
+están en el boceto. Las uniones las decide el planificador, y solo cuando el
+conector cae sobre tinta.
 """
 
 import asyncio
@@ -92,22 +93,11 @@ def _dibujar(segunda: list[list[float]]) -> EnlaceVivo:
     return enlace
 
 
-def test_el_encadenado_por_defecto_es_de_ocho_milimetros():
-    assert DEFAULT_JOIN_GAP_MM == 8.0
+def test_el_cliente_no_encadena_trazos():
+    assert DEFAULT_JOIN_GAP_MM == 0.0
 
 
-def test_dos_trazos_a_siete_milimetros_no_levantan():
-    # Del final del primero (10,0) al principio del segundo (17,0): 7 mm.
-    juntos = _dibujar([[17.0, 0.0], [30.0, 0.0]])
-    lejos = _dibujar([[20.0, 0.0], [30.0, 0.0]])  # 10 mm
-
-    assert _levanta(juntos) < _levanta(lejos), (
-        f"siete={_levanta(juntos)} diez={_levanta(lejos)}"
-    )
-
-
-def test_dos_trazos_a_diez_milimetros_si_levantan():
-    # Con el encadenado en 8 mm, 10 mm ya no se unen.
-    enlace = _dibujar([[20.0, 0.0], [30.0, 0.0]])
+def test_un_hueco_de_siete_milimetros_levanta_el_lapiz():
+    enlace = _dibujar([[17.0, 0.0], [30.0, 0.0]])
 
     assert _levanta(enlace) >= 2
