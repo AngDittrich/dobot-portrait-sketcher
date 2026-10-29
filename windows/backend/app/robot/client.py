@@ -895,12 +895,15 @@ class MG400Client(RobotClient):
         """
         if self.frame is not None:
             scale, u0, v0 = self._fit
-            robot_x, robot_y, plane_z, rotation = self.frame.to_robot(u0 + scale * x, v0 + scale * y)
+            robot_x, robot_y, plane_z, _rotation = self.frame.to_robot(u0 + scale * x, v0 + scale * y)
             real_z = plane_z if z == self.z_draw else plane_z + self.lift_mm
-            return _nonzero(robot_x), _nonzero(robot_y), _nonzero(real_z), _nonzero(rotation)
+            # J4 es la muñeca del tool. Si R cambia de un punto a otro, ese
+            # motor gira y la punta del lápiz se corre. Se queda en el R de
+            # la esquina superior izquierda.
+            return _nonzero(robot_x), _nonzero(robot_y), _nonzero(real_z), _nonzero(self.r)
         robot_x = _nonzero(self.origin_x + self.x_sign * (x - self._paper_w / 2))
         robot_y = _nonzero(self.origin_y + self.y_sign * (y - self._paper_h / 2))
-        return robot_x, robot_y, _nonzero(float(z)), _nonzero(self._rotation(robot_x, robot_y))
+        return robot_x, robot_y, _nonzero(float(z)), _nonzero(self.r)
 
     def _movl(self, x: float, y: float, z: float, r: float, speed: int, cp: int) -> str:
         return (
@@ -949,21 +952,6 @@ class MG400Client(RobotClient):
         if clearance > 0.5:
             await self._move(self._movl(_nonzero(x), _nonzero(y), _nonzero(z), _nonzero(r), rate, 0))
             await self._wait_arrival(x, y, 0.0, rate)
-
-    def _rotation(self, robot_x: float, robot_y: float) -> float:
-        """Gira entre el R del origen y el de la esquina lejana, si se midió."""
-        if self.r_far is None or self.far_x is None or self.far_y is None:
-            return self.r
-        along_x = self.far_x - self.origin_x
-        along_y = self.far_y - self.origin_y
-        span = along_x * along_x + along_y * along_y
-        if span <= 1e-6:
-            return self.r
-        offset_x = robot_x - self.origin_x
-        offset_y = robot_y - self.origin_y
-        traveled = (offset_x * along_x + offset_y * along_y) / span
-        traveled = min(1.0, max(0.0, traveled))
-        return self.r + traveled * (self.r_far - self.r)
 
     def _close_link(self) -> None:
         link = self._link

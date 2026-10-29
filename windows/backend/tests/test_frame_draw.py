@@ -100,3 +100,28 @@ def test_ir_a_una_esquina_sube_el_lapiz_antes_de_viajar():
     assert puntos[1][:2] == pytest.approx((320.0, -105.0))
     assert puntos[1][2] == pytest.approx(-57.0)
     assert puntos[-1] == pytest.approx((320.0, -105.0, -65.0))
+
+
+def test_el_dibujo_no_gira_la_muneca_aunque_las_esquinas_tengan_otro_r():
+    enlace = Enlace()
+    cliente = _cliente(enlace)
+    cliente.frame = Frame.from_corners(
+        Corner(320.0, 105.0, -65.0, 31.0),
+        Corner(320.0, -105.0, -65.0, 90.0),
+        Corner(172.0, 105.0, -65.0, 63.0),
+    )
+    cliente.r = 31.0
+    trayectoria = Trajectory(
+        segments=[Segment(type="draw", points=[[0.0, 0.0], [100.0, 80.0]])],
+        width_mm=140.0,
+        height_mm=200.0,
+    )
+
+    async def progreso(_valor: float, _segmento: Segment) -> None:
+        return None
+
+    asyncio.run(cliente.draw(trayectoria, progreso))
+
+    movl = [orden for orden in enlace.moves if orden.startswith("MovL(")]
+    assert movl
+    assert all(",31.000," in orden for orden in movl)

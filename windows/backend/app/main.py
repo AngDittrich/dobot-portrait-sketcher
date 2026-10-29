@@ -628,7 +628,9 @@ async def admin_goto(
             errors, _ = frame_ops.reach_report(frame)
             if errors:
                 raise HTTPException(status_code=409, detail=errors[0])
-            x, y, z, r = frame.named(str(body.get("corner") or ""))
+            x, y, z, _r = frame.named(str(body.get("corner") or ""))
+            # La muñeca no gira al ir de una esquina a otra: R fijo, el de arriba a la izquierda.
+            r = frame.tl.r
     except (FrameError, KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
