@@ -99,6 +99,13 @@ Wizard de una sola pantalla, sin scroll. Estados en `src/hooks/usePhotobooth.ts`
    - Con trabajo del robot, `drawing` espera a que termine. Si termina en error va a `robotError` (`assets/robot/dobot-robot-error.webp`, "EL ROBOT SE DETUVO", botones INICIO y REINTENTAR), que no vuelve solo a `attract`. El detalle sale en la consola del navegador y en la de uvicorn (logger `robot`).
    - El botón Admin de la barra abre un PIN de 4 dígitos (por defecto 2026) y el panel de depuración del MG400. No mueve el brazo mientras hay un dibujo.
 
+## Enrutamiento (`windows/frontend/src/App.tsx`, `src/hooks/useRoute.ts`)
+
+- La URL manda qué se ve, con la History API y sin librería de router: `/` es la cabina del visitante y `/admin/estado|control|configuracion|actividad` es el panel, una ruta por pestaña. Antes todo vivía en un `useState` de React, así que recargar la página en cualquier pestaña del panel volvía siempre al wizard del visitante: no había nada en la URL que dijera dónde estaba el administrador.
+- `AdminArea` (`src/components/admin/AdminArea.tsx`) es la dueña de `/admin`: lee la sección de la URL, completa `/admin` → `/admin/estado` y corrige una sección que no existe, siempre con `replaceState` (sin apilar historial por cada clic en la barra).
+- El token del PIN se guarda en `sessionStorage` (`src/lib/adminSession.ts`), así que una recarga normal no lo pierde: el panel reabre en la misma pestaña sin pedir el PIN otra vez. Si el backend lo rechaza (401, porque uvicorn se reinició y `app/admin_ops.py` olvida los tokens en memoria) se borra el token y se vuelve a pedir el PIN, pero la URL de la sección no se toca. Pulsar **Salir** sí borra el token y navega a `/`.
+- Rutas que no son `/` ni empiezan con `/admin` caen en `/` (typos, enlaces viejos). El wizard del visitante (`usePhotobooth`) no vive en la URL: sus pasos siguen reiniciándose a `attract` por diseño (inactividad, `THANKS_MS`, etc.), eso no cambió.
+
 ## Calibración de la hoja (`windows/backend/app/robot/frame.py`)
 
 - La hoja se enseña en el panel admin (Configuración) con **tres esquinas**: superior izquierda, superior derecha e inferior izquierda, mirando la hoja como se va a ver el dibujo y con la punta tocando el papel. Se guardan en `data/robot.json` (raíz del repo, fuera de lo que recarga uvicorn).

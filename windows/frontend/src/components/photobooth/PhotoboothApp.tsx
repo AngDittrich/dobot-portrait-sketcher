@@ -61,7 +61,7 @@ const headingAnimation = {
  * Wizard de una sola pantalla sobre el backend de main:
  * el boceto y el trabajo del robot siguen saliendo de /api.
  */
-export function PhotoboothApp() {
+export function PhotoboothApp({ onOpenAdmin }: { onOpenAdmin: () => void }) {
   const webcamRef = useRef<Webcam>(null)
   const booth = usePhotobooth(webcamRef)
   const [cameraError, setCameraError] = useState(false)
@@ -143,7 +143,7 @@ export function PhotoboothApp() {
           <span className="booth-brand-divider" aria-hidden="true" />
           <span className="booth-product">Robot Dobot</span>
           <span className="booth-demo-note">Conectado al backend del robot</span>
-          <AdminDesk />
+          <AdminDesk onOpenAdmin={onOpenAdmin} />
         </div>
       </header>
 

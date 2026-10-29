@@ -1,22 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Gamepad2, Gauge, History, LogOut, OctagonX, Settings } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { LogOut, OctagonX } from 'lucide-react'
 import { adminActivity, adminCommand } from '../../lib/api'
 import type { AdminActivity, AdminCommand, AdminStatus } from '../../lib/api'
 import { useAdminStatus } from '../../hooks/useAdminStatus'
 import { ActivitySection } from './ActivitySection'
 import { ConfigSection } from './ConfigSection'
 import { ControlSection } from './ControlSection'
+import { SECTIONS } from './sections'
+import type { SectionId } from './sections'
 import { StatusSection } from './StatusSection'
-
-type SectionId = 'estado' | 'control' | 'configuracion' | 'actividad'
-
-const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
-  { id: 'estado', label: 'Estado', icon: Gauge },
-  { id: 'control', label: 'Control', icon: Gamepad2 },
-  { id: 'configuracion', label: 'Configuración', icon: Settings },
-  { id: 'actividad', label: 'Actividad', icon: History },
-]
 
 type Mood = 'connecting' | 'mock' | 'offline' | 'alarm' | 'busy' | 'ready'
 
@@ -35,9 +27,23 @@ function moodOf(status: AdminStatus | null): { key: Mood; text: string } {
 /**
  * Página del administrador a pantalla completa. Sonda el robot cada 800 ms y
  * la actividad cada 3 s; el PARO queda siempre al alcance en el encabezado.
+ *
+ * La sección activa (`active`) vive en la URL, no aquí: la controla
+ * `AdminArea` para que una recarga de página reabra la misma pestaña.
  */
-export function AdminPage({ token, onClose }: { token: string; onClose: () => void }) {
-  const [active, setActive] = useState<SectionId>('estado')
+export function AdminPage({
+  token,
+  section: active,
+  onSection,
+  onClose,
+  onExpired,
+}: {
+  token: string
+  section: SectionId
+  onSection: (id: SectionId) => void
+  onClose: () => void
+  onExpired: () => void
+}) {
   const [notice, setNotice] = useState('')
   const { status, pollError } = useAdminStatus(token)
   const [activity, setActivity] = useState<AdminActivity | null>(null)
@@ -61,10 +67,11 @@ export function AdminPage({ token, onClose }: { token: string; onClose: () => vo
   }, [token])
 
   // El token vive en la memoria del servidor: si uvicorn se reinicia, el
-  // sondeo recibe 401 para siempre. Se vuelve al PIN en vez de quedarse mudo.
+  // sondeo recibe 401 para siempre. Se vuelve a pedir el PIN sin salir de
+  // esta sección (a diferencia de Salir, que sí vuelve a la cabina).
   useEffect(() => {
-    if (pollError.startsWith('Backend 401')) onClose()
-  }, [pollError, onClose])
+    if (pollError.startsWith('Backend 401')) onExpired()
+  }, [pollError, onExpired])
 
   const send = useCallback(
     async (command: AdminCommand) => {
@@ -119,7 +126,7 @@ export function AdminPage({ token, onClose }: { token: string; onClose: () => vo
               type="button"
               className={active === id ? 'is-on' : ''}
               aria-current={active === id ? 'page' : undefined}
-              onClick={() => setActive(id)}
+              onClick={() => onSection(id)}
             >
               <Icon size={20} aria-hidden="true" />
               <span>{label}</span>
