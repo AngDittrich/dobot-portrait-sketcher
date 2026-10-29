@@ -11,6 +11,7 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from app.robot import sheet as sheet_ops
 from app.robot.client import MG400Client, MockRobotClient, RobotClient
 
 PATH = Path(__file__).resolve().parents[4] / "data" / "robot.json"
@@ -39,6 +40,7 @@ class Booth:
     x_sign: int
     y_sign: int
     cp_draw: int
+    sheet: str = "a5"
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -73,6 +75,9 @@ def parse_booth(payload: dict) -> Booth:
     z_travel = _float(payload.get("z_travel"), "Z de viaje")
     if z_travel <= z_draw:
         raise BoothError("Z de viaje tiene que quedar por encima de Z de dibujo")
+    hoja = str(payload.get("sheet") or sheet_ops.DEFAULT).strip().lower()
+    if not sheet_ops.known(hoja):
+        raise BoothError("esa hoja no existe: elige A6, A5 o A4")
     return Booth(
         backend=backend,
         host=host,
@@ -91,6 +96,7 @@ def parse_booth(payload: dict) -> Booth:
         x_sign=_sign(payload.get("x_sign"), "signo X"),
         y_sign=_sign(payload.get("y_sign"), "signo Y"),
         cp_draw=_int(payload.get("cp_draw"), 0, 100, "CP"),
+        sheet=hoja,
     )
 
 
@@ -146,6 +152,7 @@ def booth_from_client(robot: RobotClient) -> dict:
         "x_sign": int(robot.x_sign),  # type: ignore[attr-defined]
         "y_sign": int(robot.y_sign),  # type: ignore[attr-defined]
         "cp_draw": int(robot.cp_draw),  # type: ignore[attr-defined]
+        "sheet": getattr(robot, "sheet", sheet_ops.DEFAULT),
     }
 
 
@@ -168,6 +175,7 @@ def apply_booth(robot: MG400Client, booth: Booth) -> None:
     robot.y_sign = booth.y_sign
     robot.dry_run = booth.dry_run
     robot.cp_draw = booth.cp_draw
+    robot.sheet = booth.sheet
     robot._drop()
 
 
