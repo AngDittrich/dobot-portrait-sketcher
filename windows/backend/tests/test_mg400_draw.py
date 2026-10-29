@@ -401,6 +401,66 @@ def test_dos_consultas_a_la_vez_abren_un_solo_socket(monkeypatch: pytest.MonkeyP
     assert cliente._ready is True
 
 
+def test_leer_el_estado_no_abre_el_puerto_de_movimiento():
+    """Abrir el 30003 y dejarlo mudo hace que el controlador cierre el enlace."""
+    import socket
+    import threading
+
+    from app.robot.mg400 import MG400Link
+
+    tablero = socket.socket()
+    tablero.bind(("127.0.0.1", 0))
+    tablero.listen(1)
+    movimiento = socket.socket()
+    movimiento.bind(("127.0.0.1", 0))
+    movimiento.listen(1)
+
+    def atender() -> None:
+        conexion, _ = tablero.accept()
+        with conexion:
+            while True:
+                datos = conexion.recv(1024)
+                if not datos:
+                    return
+                conexion.sendall(b"0,{5},RobotMode();")
+
+    threading.Thread(target=atender, daemon=True).start()
+    enlace = MG400Link(
+        "127.0.0.1",
+        dashboard_port=tablero.getsockname()[1],
+        move_port=movimiento.getsockname()[1],
+        timeout_s=0.4,
+    )
+    try:
+        assert enlace.dashboard("RobotMode()").ok
+        assert enlace._move is None
+        movimiento.settimeout(0.2)
+        with pytest.raises(socket.timeout):
+            movimiento.accept()
+    finally:
+        enlace.close()
+        tablero.close()
+        movimiento.close()
+
+
+def test_si_el_controlador_cierra_el_enlace_el_sondeo_lo_suelta():
+    class Mudo:
+        def dashboard(self, _command: str) -> Reply:
+            raise ConnectionError("sin respuesta")
+
+        def close(self) -> None:
+            return None
+
+    cliente = MG400Client(z_draw=-65.0, z_travel=-57.0, r=0.0, host="192.168.10.55")
+    cliente._link = Mudo()
+    cliente._ready = True
+
+    with pytest.raises(ConnectionError):
+        asyncio.run(cliente.ask("RobotMode()"))
+    assert cliente._link is None
+    assert cliente._ready is False
+
+
 def test_el_plazo_del_movl_sale_del_entorno(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ROBOT_DRY_RUN", "1")
     monkeypatch.setenv("ROBOT_MOVE_TIMEOUT_S", "12")

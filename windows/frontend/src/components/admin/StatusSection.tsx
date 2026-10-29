@@ -26,6 +26,7 @@ export function StatusSection({
   const live = status?.pose ?? []
   const angles = status?.angles ?? []
   const frame = status?.frame ?? {}
+  const calibration = status?.calibration ?? null
   const currentJob =
     activity?.jobs.find((job) => job.status === 'drawing' || job.status === 'queued') ?? null
 
@@ -71,9 +72,19 @@ export function StatusSection({
             <dd>{fact(frame.speed_factor)}</dd>
           </div>
           <div>
-            <dt>Z dibujo / viaje</dt>
+            <dt>Hoja</dt>
             <dd>
-              {fact(frame.z_draw)} / {fact(frame.z_travel)}
+              {calibration
+                ? `${Math.round(calibration.width_mm)} × ${Math.round(calibration.height_mm)} mm, ${calibration.orientation}`
+                : 'sin esquinas'}
+            </dd>
+          </div>
+          <div>
+            <dt>Retrato</dt>
+            <dd>
+              {calibration
+                ? `${Math.round(calibration.draw_width_mm)} × ${Math.round(calibration.draw_height_mm)} mm`
+                : '—'}
             </dd>
           </div>
         </dl>

@@ -71,21 +71,19 @@ Trampas que cuestan tiempo:
 
 ## Área del robot: valores medidos, no los recalcules
 
-Medido en la cabina paseando el brazo hasta que un tope lo detuvo (z = -95, R = 90). Tómalos como defaults:
+Medido paseando el brazo hasta que un tope lo detuvo (z = -95, R = 90):
 
 | | |
 |---|---|
 | Fondo útil (X) | `199.24` → `439.24` (240 mm) |
 | A lo ancho (Y) | `-247.20` → `192.80` (440 mm) |
-| Centro de la hoja | `319.24, -27.20` |
-| A5 acostada (210 × 148) | X `214.24`→`424.24` · Y `-101.20`→`46.80` |
-| A6 acostada (148 × 105) | X `245.24`→`393.24` · Y `-79.70`→`25.30` |
-| A4 acostada (297 × 210) | no entra: mide 297 y hay 240 |
+| Centro de esa banda | `319.24, -27.20` |
 
-- **La hoja y el retrato van acostados** (girados 90°): el lado largo cae en el eje de 240 mm y deja 32 mm de aire por lado. Lo aplica `build_trajectory(rotate=True)`, que ya viene encendido en `SketchParams`.
-- **`ROBOT_R = 90`** deja la punta del marcador al frente, a 5-8 cm del centro del tool. Es un desfase fijo: el dibujo sale corrido ese tanto, no deformado.
-- El tamaño del retrato sale de la hoja (`app/robot/sheet.py`): lado corto menos 8 mm por lado → 89 mm (A6), 132 (A5), 194 (A4), y el alto es 4/3 de eso.
-- El botón **Marcar el área** del panel va al centro y recorre las cuatro esquinas con el lápiz arriba, 16 s; sirve para ubicar el papel sin dibujar.
+- La hoja va **horizontal**: el lado largo de izquierda a derecha. A5 queda 210 × 148 y A4 entra (297 × 210), porque el lado corto (210) cabe en los 240 mm de fondo. Con el lado largo de frente al fondo A4 no entra.
+- El retrato se queda **de pie** respecto a las esquinas enseñadas. No se gira 90°: arriba es la esquina superior que se enseñó. `build_trajectory(rotate=True)` existe, pero `SketchParams.rotate` viene apagado.
+- El tamaño lo marcan las esquinas. El selector de hoja (A6, A5, media carta, A4, carta) dice si ese tamaño cabe en la caja de arriba y cuánto ocupa el retrato.
+- **Recorrer el borde** va primero al centro de la hoja enseñada y después a las cuatro esquinas, con el lápiz arriba.
+- El dashboard atiende una orden a la vez (`MG400Client._wire`). El sondeo del panel no dispara otra consulta hasta que la anterior contestó, y no reconfigura el robot al reconectar.
 
 ## Wizard de la cabina (`windows/`)
 
@@ -100,5 +98,14 @@ Wizard de una sola pantalla, sin scroll. Estados en `src/hooks/usePhotobooth.ts`
 7. `drawing` (3 s, `assets/robot/dobotidlemarker.webp`) → `thanks` (`assets/robot/dobot-giving-drawing-2-person.webp`): "LISTO. TOMA TU DIBUJO." y "SYSCOM agradece tu visita." Vuelve solo a `attract`.
    - Con trabajo del robot, `drawing` espera a que termine. Si termina en error va a `robotError` (`assets/robot/dobot-robot-error.webp`, "EL ROBOT SE DETUVO", botones INICIO y REINTENTAR), que no vuelve solo a `attract`. El detalle sale en la consola del navegador y en la de uvicorn (logger `robot`).
    - El botón Admin de la barra abre un PIN de 4 dígitos (por defecto 2026) y el panel de depuración del MG400. No mueve el brazo mientras hay un dibujo.
+
+## Calibración de la hoja (`windows/backend/app/robot/frame.py`)
+
+- La hoja se enseña en el panel admin (Configuración) con **tres esquinas**: superior izquierda, superior derecha e inferior izquierda, mirando la hoja como se va a ver el dibujo y con la punta tocando el papel. Se guardan en `data/robot.json` (raíz del repo, fuera de lo que recarga uvicorn).
+- De las tres esquinas salen ancho, alto, orientación y sentido de los ejes (no hay signos que adivinar), la Z de dibujo como plano (la mesa no siempre está pareja) y la R interpolada. Lápiz arriba = plano + `lift_mm` (8 por defecto).
+- El retrato se genera al ancho que llena la hoja (`portrait_width_mm`, con alto ≈ 1.45 × ancho por el 3:4 y el rótulo) y el cliente lo ajusta y centra con `margin_mm` sin estirarlo. En hoja horizontal manda el alto.
+- `reach_report` impide guardar esquinas a más de 440 mm del eje o detrás de J1 ±160°, y avisa si un borde pasa a menos de 170 mm de la columna.
+- "Ir aquí" (`POST /api/admin/goto`) sube primero el lápiz y luego viaja; funciona con una esquina suelta antes de tener las tres.
+- Sin esquinas guardadas se usa el modo viejo del `.env` (centro + signos). Un `robot.json` viejo (con `origin_x`) se ignora en la hoja y avisa en la consola.
 
 En `camera`, `review`, `style` y `confirm` se ve un anillo de 3 minutos. Pulsarlo vuelve a llenar el tiempo. Al llegar a cero, todo se reinicia a `attract`.

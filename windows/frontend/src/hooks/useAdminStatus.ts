@@ -15,10 +15,12 @@ export function useAdminStatus(token: string) {
 
   useEffect(() => {
     let stop = false
-    let inFlight = false
+    let inflight = false
     const tick = async () => {
-      if (inFlight) return
-      inFlight = true
+      // Si el sondeo anterior sigue en camino, no se lanza otro: el dashboard
+      // atiende una orden a la vez y dos peticiones encimadas cortan el enlace.
+      if (inflight) return
+      inflight = true
       try {
         const next = await adminStatus(token)
         if (stop) return
@@ -27,7 +29,7 @@ export function useAdminStatus(token: string) {
       } catch (error) {
         if (!stop) setPollError(error instanceof Error ? error.message : 'sin respuesta')
       } finally {
-        inFlight = false
+        inflight = false
       }
     }
     void tick()

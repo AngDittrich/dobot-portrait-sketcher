@@ -57,7 +57,9 @@ from app.robot.booth import (  # noqa: E402
 )
 from app.robot.client import MockRobotClient, Segment, Trajectory, configure_logging, robot_from_env  # noqa: E402
 from app.store import Job, JobStore, Sketch, SketchStore  # noqa: E402
+from app.robot import frame as frame_ops  # noqa: E402
 from app.robot import sheet as sheet_ops  # noqa: E402
+from app.robot.frame import Frame, FrameError  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", ROOT / "models"))
@@ -105,7 +107,7 @@ except BoothError:
 if _saved_booth:
     try:
         robot = client_from_booth(_saved_booth)
-    except BoothError:
+    except Exception:  # noqa: BLE001 - una calibración rota no tumba la cabina
         logging.getLogger("robot").exception("robot.json ignorado; sigo con .env")
 robot_log = logging.getLogger("robot")
 sketches = SketchStore()
@@ -126,7 +128,7 @@ class SketchParams(BaseModel):
     beard_thresh: float = Field(0.45, ge=0.02, le=0.9)
     use_landmarks: bool = True
     target_width_mm: float = Field(140.0, ge=20.0, le=400.0)
-    rotate: bool = Field(True, description="Dibuja el retrato acostado (hoja horizontal)")
+    rotate: bool = Field(False, description="Gira el retrato 90 grados. Apagado: arriba es la esquina enseñada")
     spacing_mm: float = Field(1.5, ge=0.2, le=10.0)
     simplify_px: float = Field(2.5, ge=0.0, le=5.0)
     smooth_iters: int = Field(2, ge=0, le=4, description="Pasadas Chaikin antes de RDP (lineas mas rectas)")
@@ -289,9 +291,12 @@ def health() -> dict:
     }
 
 
-def _sheet_name() -> str:
-    """La hoja elegida en el panel; si todavía no se guardó, la de por defecto."""
-    return getattr(robot, "sheet", None) or sheet_ops.DEFAULT
+def _portrait_width_mm() -> float:
+    """Ancho del retrato: el que llena la hoja enseñada sin pasarse de alto."""
+    frame = getattr(robot, "frame", None)
+    if frame is not None:
+        return frame_ops.portrait_width_mm(frame, getattr(robot, "margin_mm", frame_ops.DEFAULT_MARGIN_MM))
+    return sheet_ops.draw_width_mm(sheet_ops.DEFAULT)
 
 
 @app.post("/api/sketch")
@@ -303,9 +308,9 @@ async def create_sketch(payload: SketchRequest) -> dict:
 
     save_raw_capture(image)
     image = fit_max_side(image)
-    # La hoja elegida en el panel manda en el tamaño: un retrato de 140 mm no
-    # cabe en A6 y uno de 90 mm deja media A4 en blanco.
-    payload.params.target_width_mm = sheet_ops.draw_width_mm(_sheet_name())
+    # La hoja enseñada manda en el tamaño: el retrato se genera al ancho que
+    # luego ocupa en el papel y el robot casi no tiene que escalarlo.
+    payload.params.target_width_mm = _portrait_width_mm()
     try:
         result = await run_in_threadpool(
             build_sketch, image, payload.params, payload.traits, payload.style
@@ -330,6 +335,13 @@ async def create_sketch(payload: SketchRequest) -> dict:
 
 @app.post("/api/jobs")
 async def create_job(payload: JobRequest) -> dict:
+    if robot.name == "mg400" and getattr(robot, "frame", None) is None and not getattr(robot, "dry_run", False):
+        # Sin esquinas mandaría las alturas viejas del `.env` y el lápiz se
+        # clavaría en la mesa si esta cambió de altura.
+        raise HTTPException(
+            status_code=409,
+            detail="falta calibrar la hoja: enseña las tres esquinas en el panel admin",
+        )
     sketch = sketches.get(payload.sketch_id) if payload.sketch_id else None
 
     if sketch is None:
@@ -341,7 +353,7 @@ async def create_job(payload: JobRequest) -> dict:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
             params = SketchParams()
-            params.target_width_mm = sheet_ops.draw_width_mm(_sheet_name())
+            params.target_width_mm = _portrait_width_mm()
             result = await run_in_threadpool(build_sketch, image, params)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=f"Error generando el boceto: {exc}") from exc
@@ -471,7 +483,7 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
         "busy": busy.active(),
         "connected": False,
         "frame": booth_from_client(robot),
-        "sheet": _sheet_name(),
+        "calibration": _calibration_of(getattr(robot, "frame", None), getattr(robot, "margin_mm", None)),
         "sheets": sheet_ops.catalog(),
     }
     if robot.name != "mg400":
@@ -553,24 +565,129 @@ async def admin_command(
     return {"command": command, "code": code, "value": value}
 
 
-@app.post("/api/admin/area")
-async def admin_area(x_admin_token: str | None = Header(default=None)) -> dict:
-    """Marca el borde de la hoja con el lápiz arriba, para ubicar el papel."""
+def _calibration_of(frame: Frame | None, margin_mm: float | None) -> dict | None:
+    if frame is None:
+        return None
+    return frame_ops.summary(frame, frame_ops.DEFAULT_MARGIN_MM if margin_mm is None else float(margin_mm))
+
+
+def _frame_from_body(body: dict) -> Frame | None:
+    """Las esquinas del formulario (todavía sin guardar) o, si no vienen, las guardadas."""
+    corners = body.get("corners")
+    if corners is None:
+        return getattr(robot, "frame", None)
+    try:
+        return Frame.from_dict(corners)
+    except FrameError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/admin/calibration")
+def admin_calibration(
+    body: dict = Body(...),
+    x_admin_token: str | None = Header(default=None),
+) -> dict:
+    """Medida, orientación, caja del retrato y avisos de unas esquinas, sin guardarlas."""
+    _require_admin(x_admin_token)
+    frame = _frame_from_body(body)
+    if frame is None:
+        raise HTTPException(status_code=409, detail="faltan esquinas: enseña las tres")
+    margin = body.get("margin_mm", frame_ops.DEFAULT_MARGIN_MM)
+    try:
+        return frame_ops.summary(frame, float(margin))
+    except (FrameError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/admin/goto")
+async def admin_goto(
+    body: dict = Body(...),
+    x_admin_token: str | None = Header(default=None),
+) -> dict:
+    """Lleva el brazo a una esquina o al centro de la hoja con el lápiz arriba."""
     _require_admin(x_admin_token)
     if robot.name != "mg400":
         raise HTTPException(status_code=409, detail="el backend está en simulador")
     if busy.active():
         raise HTTPException(status_code=409, detail="el robot está dibujando")
-    name = _sheet_name()
-    cabe, motivo = sheet_ops.fits(name)
-    if not cabe:
-        raise HTTPException(status_code=409, detail=motivo)
-    width, height = sheet_ops.place_mm(name)
+    try:
+        lift = float(body.get("lift_mm", getattr(robot, "lift_mm", frame_ops.DEFAULT_LIFT_MM)))
+        speed = body.get("speed")
+        point = body.get("point")
+        if isinstance(point, dict):
+            # Una esquina suelta, antes de tener las tres.
+            x, y, z = float(point["x"]), float(point["y"]), float(point["z"])
+            r = float(point.get("r", 0.0))
+            if (x * x + y * y) ** 0.5 > frame_ops.REACH_MAX_MM:
+                raise HTTPException(status_code=409, detail="ese punto queda fuera del alcance del brazo")
+        else:
+            frame = _frame_from_body(body)
+            if frame is None:
+                raise HTTPException(status_code=409, detail="faltan esquinas: enseña las tres")
+            errors, _ = frame_ops.reach_report(frame)
+            if errors:
+                raise HTTPException(status_code=409, detail=errors[0])
+            x, y, z, r = frame.named(str(body.get("corner") or ""))
+    except (FrameError, KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        await robot.visit(x, y, z + lift, r, None if speed is None else int(speed))  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"corner": body.get("corner"), "x": x, "y": y, "z": z + lift, "r": r}
+
+
+@app.post("/api/admin/area")
+async def admin_area(
+    body: dict = Body(default_factory=dict),
+    x_admin_token: str | None = Header(default=None),
+) -> dict:
+    """Recorre un rectángulo con el lápiz arriba.
+
+    Sin `sheet`, es el borde de las esquinas enseñadas. Con `sheet` (a5, a4…),
+    es el marco de esa hoja estándar, centrado en las mismas esquinas, para ver
+    el tamaño real sobre la mesa.
+    """
+    _require_admin(x_admin_token)
+    if robot.name != "mg400":
+        raise HTTPException(status_code=409, detail="el backend está en simulador")
+    if busy.active():
+        raise HTTPException(status_code=409, detail="el robot está dibujando")
+    frame = _frame_from_body(body)
+    if frame is None:
+        raise HTTPException(status_code=409, detail="primero enseña y guarda las tres esquinas")
+    sheet_name = str(body.get("sheet") or "").strip().lower()
+    if sheet_name:
+        if not sheet_ops.known(sheet_name):
+            raise HTTPException(status_code=409, detail="esa hoja no existe")
+        width, height = sheet_ops.place_mm(sheet_name)
+        label = sheet_ops.label(sheet_name)
+        blocked = frame_ops.outline_block(frame, width, height)
+        if blocked:
+            raise HTTPException(status_code=409, detail=blocked)
+    else:
+        width, height = frame.width, frame.height
+        label = "la hoja enseñada"
+    saved_frame = getattr(robot, "frame", None)
+    saved_lift = float(getattr(robot, "lift_mm", frame_ops.DEFAULT_LIFT_MM))
+    saved_margin = float(getattr(robot, "margin_mm", frame_ops.DEFAULT_MARGIN_MM))
+    try:
+        lift = float(body.get("lift_mm", saved_lift))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail="la altura del lápiz no es un número") from exc
+    robot.set_frame(frame, lift, saved_margin)  # type: ignore[attr-defined]
     try:
         await robot.mark_area(width, height)  # type: ignore[attr-defined]
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"sheet": name, "width_mm": width, "height_mm": height}
+    finally:
+        robot.set_frame(saved_frame, saved_lift, saved_margin)  # type: ignore[attr-defined]
+    return {
+        "width_mm": round(width, 1),
+        "height_mm": round(height, 1),
+        "label": label,
+        "sheet": sheet_name or None,
+    }
 
 
 @app.get("/api/admin/activity")

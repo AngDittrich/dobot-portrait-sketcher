@@ -882,7 +882,9 @@
 .admin-config-save {
   grid-column: 1 / -1;
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 1rem;
 }
 
 .admin-config-save .admin-press {
@@ -1028,34 +1030,341 @@
   border-color: rgba(147, 197, 253, 0.8);
 }
 
-/* ---------- Hojas de papel ---------- */
-.admin-sheets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.6rem;
+/* ---------- Calibración de la hoja ---------- */
+.admin-card--wide {
+  grid-column: 1 / -1;
 }
 
-.admin-sheet {
+.admin-card-hint {
+  font-size: 0.78rem;
+  color: rgba(226, 232, 240, 0.55);
+}
+
+.admin-calib {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 1.4rem;
+  align-items: start;
+}
+
+.admin-calib-map {
+  aspect-ratio: 1;
+  max-height: 440px;
+  width: 100%;
+  border-radius: 16px;
+  background: rgba(4, 10, 22, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.admin-map {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.admin-map-reach {
+  fill: rgba(96, 165, 250, 0.16);
+  stroke: rgba(147, 197, 253, 0.55);
+  stroke-width: 2;
+}
+
+.admin-map-inner {
+  fill: rgba(4, 10, 22, 0.45);
+  stroke: rgba(253, 224, 171, 0.45);
+  stroke-width: 2;
+  stroke-dasharray: 8 8;
+}
+
+.admin-map-ring {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.06);
+  stroke-width: 1.5;
+}
+
+.admin-map-axis {
+  stroke: rgba(255, 255, 255, 0.18);
+  stroke-width: 2;
+}
+
+.admin-map-text {
+  fill: rgba(226, 232, 240, 0.5);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.admin-map-sheet {
+  fill: rgba(255, 255, 255, 0.86);
+  stroke: #fff;
+  stroke-width: 2;
+}
+
+.admin-map-draw {
+  fill: rgba(26, 58, 107, 0.28);
+  stroke: rgba(26, 58, 107, 0.9);
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
+}
+
+.admin-map-corner {
+  fill: #93c5fd;
+  stroke: #0b1424;
+  stroke-width: 3;
+}
+
+.admin-map-label {
+  fill: #e2e8f0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.admin-map-base {
+  fill: rgba(255, 255, 255, 0.16);
+  stroke: rgba(255, 255, 255, 0.4);
+  stroke-width: 2;
+}
+
+.admin-map-pen {
+  fill: #f97316;
+  stroke: #fff;
+  stroke-width: 3;
+  transition: cx 0.3s ease, cy 0.3s ease;
+}
+
+.admin-calib-side h3 {
+  margin-bottom: 0.5rem;
+}
+
+.admin-calib-size {
+  margin: 0 0 0.4rem;
+  font-size: 1.9rem;
+  font-weight: 800;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.admin-calib-size span {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.7);
+}
+
+.admin-sheet-picker {
+  margin-top: 0.95rem;
+}
+
+.admin-sheet-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 440 / 240;
+  border-radius: 16px;
+  background: rgba(4, 10, 22, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.admin-sheet-page {
+  position: relative;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 22px rgba(2, 8, 20, 0.32);
+}
+
+.admin-sheet-draw {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(26, 58, 107, 0.16);
+  border: 1.5px dashed rgba(26, 58, 107, 0.85);
+}
+
+.admin-sheet-caption {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  color: rgba(226, 232, 240, 0.62);
+}
+
+.admin-sheet-row {
+  container-type: inline-size;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.35rem;
+  margin-top: 0.7rem;
+}
+
+.admin-sheet-pick {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.1rem;
-  min-width: 5.2rem;
-  border-radius: 0.9rem;
+  gap: 0.32rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.58);
+  font-family: inherit;
+  cursor: pointer;
 }
 
-.admin-sheet[aria-pressed='true'] {
-  background: rgba(147, 197, 253, 0.26);
-  border-color: rgba(191, 219, 254, 0.9);
-  box-shadow: inset 0 0 0 1px rgba(191, 219, 254, 0.35);
+.admin-sheet-pick-page {
+  display: block;
+  width: calc(var(--w) * 0.056cqw);
+  height: calc(var(--h) * 0.056cqw);
+  background: rgba(255, 255, 255, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
 }
 
-.admin-sheet-size {
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  opacity: 0.7;
+.admin-sheet-pick-name {
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.admin-sheet-pick[aria-pressed='true'] {
+  color: #fff;
+}
+
+.admin-sheet-pick[aria-pressed='true'] .admin-sheet-pick-page {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: #fff;
+  box-shadow:
+    0 6px 14px rgba(2, 8, 20, 0.28),
+    0 0 0 2px rgba(147, 197, 253, 0.9);
+}
+
+.admin-sheet-pick:hover:not(:disabled) .admin-sheet-pick-page {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.admin-sheet-pick:focus-visible {
+  outline: 2px solid rgba(147, 197, 253, 0.9);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.admin-sheet-pick:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.admin-sheet-mark {
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+.admin-calib-side .admin-card-note {
+  margin: 0 0 0.8rem;
+}
+
+.admin-alert {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: #fca5a5;
+}
+
+.admin-corners {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.admin-corner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.9rem 1rem 0.9rem 2.6rem;
+  border-radius: 16px;
+  background: rgba(4, 10, 22, 0.24);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.admin-corner.is-set {
+  border-color: rgba(147, 197, 253, 0.55);
+  background: rgba(96, 165, 250, 0.1);
+}
+
+.admin-corner strong {
+  font-size: 0.95rem;
+  color: #fff;
+}
+
+.admin-corner p {
+  margin: 0;
+  min-height: 2.4em;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: rgba(226, 232, 240, 0.65);
+  font-variant-numeric: tabular-nums;
+  white-space: pre-wrap;
+}
+
+.admin-corner-glyph {
+  position: absolute;
+  left: 0.95rem;
+  top: 1rem;
+  width: 0.95rem;
+  height: 0.95rem;
+  border: 0 solid rgba(226, 232, 240, 0.55);
+}
+
+.admin-corner.is-set .admin-corner-glyph {
+  border-color: #93c5fd;
+}
+
+.admin-corner.is-tl .admin-corner-glyph {
+  border-top-width: 3px;
+  border-left-width: 3px;
+}
+
+.admin-corner.is-tr .admin-corner-glyph {
+  border-top-width: 3px;
+  border-right-width: 3px;
+}
+
+.admin-corner.is-bl .admin-corner-glyph {
+  border-bottom-width: 3px;
+  border-left-width: 3px;
+}
+
+.admin-corner.is-br .admin-corner-glyph {
+  border-bottom-width: 3px;
+  border-right-width: 3px;
+}
+
+.admin-corner-actions {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.2rem;
+}
+
+.admin-advanced {
+  margin-top: 0.9rem;
+}
+
+.admin-advanced summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.6);
+  margin-bottom: 0.6rem;
+}
+
+.admin-advanced summary:hover {
+  color: #fff;
 }
 
 .admin-note {
@@ -1114,6 +1423,10 @@
   }
 
   .admin-config {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-calib {
     grid-template-columns: 1fr;
   }
 }
