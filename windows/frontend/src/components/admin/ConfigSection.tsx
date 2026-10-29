@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { adminArea, adminCalibration, adminGoto, saveAdminBooth } from '../../lib/api'
-import type { AdminStatus, Calibration, CornerId, CornerPose, Corners, SpotId } from '../../lib/api'
+import type { AdminSheet, AdminStatus, Calibration, CornerId, CornerPose, Corners, SpotId } from '../../lib/api'
 import { ReachMap } from './ReachMap'
 
 /**
@@ -20,6 +20,64 @@ type BoothForm = {
   lift_mm: string
   margin_mm: string
   sheet: string
+}
+
+/** Caja medida del brazo: 440 mm a lo ancho y 240 de fondo. Igual que sheet.py. */
+const REACH_WIDTH_MM = 440
+const REACH_DEPTH_MM = 240
+
+function SheetPicker({
+  papers,
+  selectedId,
+  onSelect,
+}: {
+  papers: AdminSheet[]
+  selectedId: string
+  onSelect: (id: string) => void
+}) {
+  const selected = papers.find((paper) => paper.id === selectedId) ?? papers[0]
+  return (
+    <div className="admin-sheet-picker">
+      <div className="admin-sheet-stage">
+        <div
+          className="admin-sheet-page"
+          style={{
+            width: `${(selected.width_mm / REACH_WIDTH_MM) * 100}%`,
+            height: `${(selected.height_mm / REACH_DEPTH_MM) * 100}%`,
+          }}
+        >
+          <span
+            className="admin-sheet-draw"
+            style={{
+              width: `${(selected.draw_width_mm / selected.width_mm) * 100}%`,
+              height: `${(selected.draw_height_mm / selected.height_mm) * 100}%`,
+            }}
+          />
+        </div>
+      </div>
+      <p className="admin-sheet-caption">
+        Alcance {REACH_WIDTH_MM}×{REACH_DEPTH_MM} mm · {selected.label} a escala · retrato{' '}
+        {Math.round(selected.draw_width_mm)}×{Math.round(selected.draw_height_mm)} mm
+      </p>
+      <div className="admin-sheet-row" role="group" aria-label="Tamaño de hoja">
+        {papers.map((paper) => (
+          <button
+            key={paper.id}
+            type="button"
+            className="admin-sheet-pick"
+            aria-pressed={paper.id === selected.id}
+            disabled={!paper.fits}
+            title={paper.reason || `${paper.width_mm} × ${paper.height_mm} mm, lado largo a lo ancho`}
+            onClick={() => onSelect(paper.id)}
+            style={{ '--w': paper.width_mm, '--h': paper.height_mm } as CSSProperties}
+          >
+            <span className="admin-sheet-pick-page" />
+            <span className="admin-sheet-pick-name">{paper.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 const CORNER_INFO: { id: CornerId; label: string; hint: string }[] = [
@@ -272,37 +330,19 @@ export function ConfigSection({
                 Recorrer el borde guardado
               </button>
             </div>
-            <div className="admin-sheets">
-              {papers.map((paper) => (
-                <button
-                  key={paper.id}
-                  type="button"
-                  className="admin-press admin-sheet"
-                  aria-pressed={booth.sheet === paper.id}
-                  disabled={!paper.fits}
-                  title={
-                    paper.reason ||
-                    `el retrato queda de ${Math.round(paper.draw_width_mm)} × ${Math.round(paper.draw_height_mm)} mm`
-                  }
-                  onClick={() => patch('sheet', paper.id)}
-                >
-                  {paper.label}
-                  <span className="admin-sheet-size">
-                    {paper.width_mm}×{paper.height_mm}
-                  </span>
-                </button>
-              ))}
-            </div>
+            {papers.length > 0 && (
+              <SheetPicker
+                papers={papers}
+                selectedId={booth.sheet}
+                onSelect={(id) => patch('sheet', id)}
+              />
+            )}
             {calibration?.paper && booth.sheet !== calibration.paper.id ? (
               <p className="admin-note">
                 Lo medido {calibration.paper.matches ? 'es' : 'parece'} {calibration.paper.label} y elegiste{' '}
                 {papers.find((paper) => paper.id === booth.sheet)?.label ?? booth.sheet}. Las esquinas mandan en el tamaño.
               </p>
-            ) : (
-              <p className="admin-card-note">
-                Hoja horizontal: el lado largo va de izquierda a derecha. El brazo tiene 240 mm de fondo y 440 a lo ancho.
-              </p>
-            )}
+            ) : null}
           </div>
         </section>
 
