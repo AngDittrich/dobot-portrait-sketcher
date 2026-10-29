@@ -426,6 +426,7 @@ class MG400Client(RobotClient):
         self._paper_w = width_mm
         self._paper_h = height_mm
         corners = [
+            (width_mm / 2, height_mm / 2),  # centro: punto de partida conocido
             (0.0, 0.0),
             (width_mm, 0.0),
             (width_mm, height_mm),
