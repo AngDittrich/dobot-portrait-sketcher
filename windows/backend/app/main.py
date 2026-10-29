@@ -333,6 +333,13 @@ async def create_sketch(payload: SketchRequest) -> dict:
 
 @app.post("/api/jobs")
 async def create_job(payload: JobRequest) -> dict:
+    if robot.name == "mg400" and getattr(robot, "frame", None) is None and not getattr(robot, "dry_run", False):
+        # Sin esquinas mandaría las alturas viejas del `.env` y el lápiz se
+        # clavaría en la mesa si esta cambió de altura.
+        raise HTTPException(
+            status_code=409,
+            detail="falta calibrar la hoja: enseña las tres esquinas en el panel admin",
+        )
     sketch = sketches.get(payload.sketch_id) if payload.sketch_id else None
 
     if sketch is None:
