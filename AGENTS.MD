@@ -69,6 +69,24 @@ Trampas que cuestan tiempo:
 - `TARGET_PX = 900` y la salida de los ONNX se recorta a múltiplos de 4 (si no, el dibujo se desplaza unos píxeles).
 - Todo el pipeline trabaja en px del recorte; los mm solo aparecen en `build_trajectory`. La vista previa se dibuja con los mismos trazos que recibe el robot.
 
+## Área del robot: valores medidos, no los recalcules
+
+Medido en la cabina paseando el brazo hasta que un tope lo detuvo (z = -95, R = 90). Tómalos como defaults:
+
+| | |
+|---|---|
+| Fondo útil (X) | `199.24` → `439.24` (240 mm) |
+| A lo ancho (Y) | `-247.20` → `192.80` (440 mm) |
+| Centro de la hoja | `319.24, -27.20` |
+| A5 acostada (210 × 148) | X `214.24`→`424.24` · Y `-101.20`→`46.80` |
+| A6 acostada (148 × 105) | X `245.24`→`393.24` · Y `-79.70`→`25.30` |
+| A4 acostada (297 × 210) | no entra: mide 297 y hay 240 |
+
+- **La hoja y el retrato van acostados** (girados 90°): el lado largo cae en el eje de 240 mm y deja 32 mm de aire por lado. Lo aplica `build_trajectory(rotate=True)`, que ya viene encendido en `SketchParams`.
+- **`ROBOT_R = 90`** deja la punta del marcador al frente, a 5-8 cm del centro del tool. Es un desfase fijo: el dibujo sale corrido ese tanto, no deformado.
+- El tamaño del retrato sale de la hoja (`app/robot/sheet.py`): lado corto menos 8 mm por lado → 89 mm (A6), 132 (A5), 194 (A4), y el alto es 4/3 de eso.
+- El botón **Marcar el área** del panel va al centro y recorre las cuatro esquinas con el lápiz arriba, 16 s; sirve para ubicar el papel sin dibujar.
+
 ## Wizard de la cabina (`windows/`)
 
 Wizard de una sola pantalla, sin scroll. Estados en `src/hooks/usePhotobooth.ts`:
