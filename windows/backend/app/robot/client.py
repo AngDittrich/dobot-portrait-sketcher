@@ -15,6 +15,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.robot import sheet as sheet_ops
+
 logger = logging.getLogger("robot")
 
 # Una respuesta más lenta que esto suele ser la cola del controlador llena.
@@ -240,6 +242,7 @@ class MG400Client(RobotClient):
         unstick_sleep_s: float = 6.0,
         connect_retries: int = 3,
         connect_retry_s: float = 0.6,
+        sheet: str = sheet_ops.DEFAULT,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -264,6 +267,9 @@ class MG400Client(RobotClient):
         self.unstick_sleep_s = float(unstick_sleep_s)
         self.connect_retries = max(1, int(connect_retries))
         self.connect_retry_s = float(connect_retry_s)
+        # Hoja elegida en el panel: decide el tamaño del retrato y el área que se
+        # marca con el lápiz arriba antes de dibujar.
+        self.sheet = sheet_ops.DEFAULT if not sheet_ops.known(sheet) else str(sheet).strip().lower()
         self._resets_left = self.unstick_resets
         self._last_point: tuple[float, float, float] | None = None
         # Radio (mm al eje) del punto que no cupo. Más adentro no se vuelve a intentar.
@@ -355,6 +361,7 @@ class MG400Client(RobotClient):
             far_x=far_x,
             far_y=far_y,
             move_timeout_s=optional_float("ROBOT_MOVE_TIMEOUT_S", 60.0),
+            sheet=_setting("ROBOT_SHEET", sheet_ops.DEFAULT),
         )
 
     async def connect(self) -> None:
@@ -401,6 +408,34 @@ class MG400Client(RobotClient):
         await self._dashboard(f"Tool({int(self.tool)})")
         await self._dashboard(f"CP({_blend(self.cp_draw)})")
         self._ready = True
+
+    async def mark_area(self, width_mm: float, height_mm: float) -> None:
+        """Recorre el borde de la hoja con el lápiz arriba para ubicarla en la mesa.
+
+        No dibuja nada: sirve para ver dónde va a caer el retrato y acomodar el
+        papel antes de que llegue el visitante.
+        """
+        await self.connect()
+        self._sent = 0
+        self._pace_due = None
+        self._pace_target = None
+        self._last_point = None
+        self._radio_minimo = None
+        self._pending = []
+        self._reconnects_left = self.reconnects
+        self._paper_w = width_mm
+        self._paper_h = height_mm
+        corners = [
+            (0.0, 0.0),
+            (width_mm, 0.0),
+            (width_mm, height_mm),
+            (0.0, height_mm),
+            (0.0, 0.0),
+        ]
+        logger.info("marco el area de la hoja: %.0f x %.0f mm", width_mm, height_mm)
+        for x, y in corners:
+            await self._goto(x, y, self.z_travel, self.speed_travel, 0)
+        await self._drain()
 
     async def draw(self, trajectory: Trajectory, on_progress: ProgressCallback) -> None:
         self._validate(trajectory)

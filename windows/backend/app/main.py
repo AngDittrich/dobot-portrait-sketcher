@@ -57,6 +57,7 @@ from app.robot.booth import (  # noqa: E402
 )
 from app.robot.client import MockRobotClient, Segment, Trajectory, configure_logging, robot_from_env  # noqa: E402
 from app.store import Job, JobStore, Sketch, SketchStore  # noqa: E402
+from app.robot import sheet as sheet_ops  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", ROOT / "models"))
@@ -286,6 +287,11 @@ def health() -> dict:
     }
 
 
+def _sheet_name() -> str:
+    """La hoja elegida en el panel; si todavía no se guardó, la de por defecto."""
+    return getattr(robot, "sheet", None) or sheet_ops.DEFAULT
+
+
 @app.post("/api/sketch")
 async def create_sketch(payload: SketchRequest) -> dict:
     try:
@@ -295,6 +301,9 @@ async def create_sketch(payload: SketchRequest) -> dict:
 
     save_raw_capture(image)
     image = fit_max_side(image)
+    # La hoja elegida en el panel manda en el tamaño: un retrato de 140 mm no
+    # cabe en A6 y uno de 90 mm deja media A4 en blanco.
+    payload.params.target_width_mm = sheet_ops.draw_width_mm(_sheet_name())
     try:
         result = await run_in_threadpool(
             build_sketch, image, payload.params, payload.traits, payload.style
@@ -329,7 +338,9 @@ async def create_job(payload: JobRequest) -> dict:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
-            result = await run_in_threadpool(build_sketch, image, SketchParams())
+            params = SketchParams()
+            params.target_width_mm = sheet_ops.draw_width_mm(_sheet_name())
+            result = await run_in_threadpool(build_sketch, image, params)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=f"Error generando el boceto: {exc}") from exc
         sketch_id = f"sk_{uuid.uuid4().hex[:10]}"
@@ -458,6 +469,8 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
         "busy": busy.active(),
         "connected": False,
         "frame": booth_from_client(robot),
+        "sheet": _sheet_name(),
+        "sheets": sheet_ops.catalog(),
     }
     if robot.name != "mg400":
         snapshot["detail"] = "el backend está en simulador"
@@ -536,6 +549,26 @@ async def admin_command(
     if code != 0:
         raise HTTPException(status_code=502, detail=f"{command} devolvio {code} {value}".strip())
     return {"command": command, "code": code, "value": value}
+
+
+@app.post("/api/admin/area")
+async def admin_area(x_admin_token: str | None = Header(default=None)) -> dict:
+    """Marca el borde de la hoja con el lápiz arriba, para ubicar el papel."""
+    _require_admin(x_admin_token)
+    if robot.name != "mg400":
+        raise HTTPException(status_code=409, detail="el backend está en simulador")
+    if busy.active():
+        raise HTTPException(status_code=409, detail="el robot está dibujando")
+    name = _sheet_name()
+    cabe, motivo = sheet_ops.fits(name)
+    if not cabe:
+        raise HTTPException(status_code=409, detail=motivo)
+    width, height = sheet_ops.size_mm(name)
+    try:
+        await robot.mark_area(width, height)  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"sheet": name, "width_mm": width, "height_mm": height}
 
 
 @app.get("/api/admin/activity")

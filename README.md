@@ -128,6 +128,7 @@ Por defecto la API va al mismo origen. Para apuntar al PC del robot:
 | `ROBOT_ACC_MM_S2` | Aceleración. Techo del firmware: `100` (más da `-40005`). |
 | `ROBOT_STEP_MM` | Paso mínimo entre puntos de un trazo (8). |
 | `ROBOT_JOIN_MM` | Une trazos más cercanos que esto sin levantar el lápiz (6). |
+| `ROBOT_SHEET` | Hoja de papel: `a6`, `a5` o `a4`. Fija el tamaño del retrato (`a5`). |
 | `ROBOT_PIPELINE` | Órdenes en vuelo (3). |
 | `ROBOT_DRY_RUN` | Arma los `MovL` sin abrir socket. |
 | `ROBOT_LOG_LEVEL` | `INFO` imprime cada paso; `DEBUG`, todos. |

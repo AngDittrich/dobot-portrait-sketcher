@@ -95,6 +95,18 @@ export interface AdminStatus {
   alarms?: string
   alarm_text?: string
   frame?: Record<string, number | string | boolean | null>
+  sheet?: string
+  sheets?: AdminSheet[]
+}
+
+export interface AdminSheet {
+  id: string
+  label: string
+  width_mm: number
+  height_mm: number
+  draw_width_mm: number
+  fits: boolean
+  reason: string
 }
 
 export interface AdminCommand {
@@ -146,6 +158,7 @@ export interface BoothSettings {
   x_sign: number
   y_sign: number
   cp_draw: number
+  sheet: string
 }
 
 export function saveAdminBooth(token: string, booth: BoothSettings): Promise<BoothSettings> {
@@ -154,6 +167,13 @@ export function saveAdminBooth(token: string, booth: BoothSettings): Promise<Boo
     headers: adminHeaders(token),
     body: JSON.stringify(booth),
   })
+}
+
+/** Recorre el borde de la hoja con el lápiz arriba para ubicar el papel. */
+export function adminArea(
+  token: string,
+): Promise<{ sheet: string; width_mm: number; height_mm: number }> {
+  return request('/api/admin/area', { method: 'POST', headers: adminHeaders(token) })
 }
 
 export function adminCommand(

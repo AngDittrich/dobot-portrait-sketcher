@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { saveAdminBooth } from '../../lib/api'
+import { adminArea, saveAdminBooth } from '../../lib/api'
 import type { AdminStatus } from '../../lib/api'
 
 /**
@@ -25,6 +25,7 @@ type BoothForm = {
   x_sign: string
   y_sign: string
   cp_draw: string
+  sheet: string
 }
 
 function fieldText(value: unknown): string {
@@ -51,6 +52,7 @@ function boothFromFrame(frame: Record<string, number | string | boolean | null>)
     x_sign: fieldText(frame.x_sign ?? -1),
     y_sign: fieldText(frame.y_sign ?? -1),
     cp_draw: fieldText(frame.cp_draw ?? 0),
+    sheet: fieldText(frame.sheet) || 'a5',
   }
 }
 
@@ -68,6 +70,7 @@ export function ConfigSection({
   const [saving, setSaving] = useState(false)
   const busy = Boolean(status?.busy)
   const live = status?.pose ?? []
+  const papers = status?.sheets ?? []
 
   useEffect(() => {
     const frame = status?.frame
@@ -102,6 +105,19 @@ export function ConfigSection({
     })
   }
 
+  async function markArea() {
+    if (saving) return
+    setSaving(true)
+    try {
+      const area = await adminArea(token)
+      onNotice(`Área marcada: ${area.width_mm} × ${area.height_mm} mm. El lápiz va arriba.`)
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : 'no se pudo marcar el área')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function saveBooth() {
     if (!booth || saving) return
     setSaving(true)
@@ -125,6 +141,7 @@ export function ConfigSection({
         x_sign: number(booth.x_sign),
         y_sign: number(booth.y_sign),
         cp_draw: number(booth.cp_draw),
+        sheet: booth.sheet,
       })
       onNotice('Cabina guardada. El siguiente dibujo usa estos valores.')
     } catch (error) {
@@ -141,6 +158,8 @@ export function ConfigSection({
       </div>
     )
   }
+
+  const chosen = papers.find((paper) => paper.id === booth.sheet)
 
   return (
     <div className="admin-section">
@@ -173,6 +192,42 @@ export function ConfigSection({
               />
               Sin mover (simula el dibujo)
             </label>
+          </div>
+        </section>
+
+        <section className="admin-card">
+          <h3>Papel</h3>
+          <div className="admin-sheets">
+            {papers.map((paper) => (
+              <button
+                key={paper.id}
+                type="button"
+                className="admin-press admin-sheet"
+                aria-pressed={booth.sheet === paper.id}
+                disabled={!paper.fits}
+                title={
+                  paper.reason ||
+                  `el retrato se dibuja a ${Math.round(paper.draw_width_mm)} mm de ancho`
+                }
+                onClick={() => patch('sheet', paper.id)}
+              >
+                {paper.label}
+                <span className="admin-sheet-size">
+                  {paper.width_mm}×{paper.height_mm}
+                </span>
+              </button>
+            ))}
+          </div>
+          {chosen && !chosen.fits ? <p className="admin-note">{chosen.reason}</p> : null}
+          <div className="admin-card-actions">
+            <button
+              type="button"
+              className="admin-press"
+              disabled={busy || saving || !chosen?.fits}
+              onClick={() => void markArea()}
+            >
+              Marcar el área con el lápiz arriba
+            </button>
           </div>
         </section>
 
