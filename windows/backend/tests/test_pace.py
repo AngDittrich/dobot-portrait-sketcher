@@ -117,3 +117,53 @@ def test_el_envio_espera_para_no_pasar_el_colchon():
 
     assert sum(reloj.dormido) == pytest.approx(2.67, abs=0.06)
     assert not any("Sync()" in move for move in enlace.moves)
+
+
+def test_con_cp_alto_el_ritmo_no_se_apaga_aunque_la_pose_diga_que_ya_paso():
+    """CP=100 recorta la esquina: la pose se aleja del punto antes de que el
+    controlador consuma la orden. Si eso se toma como «ya llegó», el envío
+    se vuelve continuo y el MG400 cierra el socket cerca de la orden 100.
+    El colchón de un segundo tiene que seguir frenando el envío.
+    """
+    reloj = Reloj()
+    enlace = Enlace()
+    lejos = 0
+
+    def pose() -> tuple[float, float, float, float]:
+        nonlocal lejos
+        lejos += 50.0
+        return (1000.0 + lejos, 0.0, -167.0, 0.0)
+
+    enlace.pose = pose  # type: ignore[attr-defined]
+    cliente = MG400Client(
+        link=enlace,
+        min_step_mm=0.0,
+        wait_arrival=True,
+        arrival_poll_s=0.0,
+        pipeline=3,
+        z_draw=-167.0,
+        z_travel=-160.0,
+        r=145.0,
+        origin_x=360.0,
+        origin_y=92.0,
+        queue_retry_s=0.0,
+        pace_lead_s=1.0,
+        clock=reloj,
+        sleep=reloj.sleep,
+    )
+    puntos = [[i * 1.7, 0.0] for i in range(20)]
+    papel = Trajectory(
+        segments=[Segment(type="draw", points=puntos)],
+        width_mm=40.0,
+        height_mm=40.0,
+    )
+
+    async def correr() -> None:
+        async def progreso(_valor: float, _segmento: Segment) -> None:
+            return None
+
+        await cliente.draw(papel, progreso)
+
+    asyncio.run(correr())
+
+    assert sum(reloj.dormido) == pytest.approx(2.67, abs=0.15)
