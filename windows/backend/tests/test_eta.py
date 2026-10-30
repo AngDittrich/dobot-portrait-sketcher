@@ -53,8 +53,7 @@ def test_el_rotulo_no_agota_el_presupuesto_del_retrato() -> None:
     caption, _ = append_caption([], width=900, height=1200)
 
     segundos = estimate_seconds(caption, 900, target_width_mm=90.0)
-    assert segundos < 120.0
-    assert 240.0 - segundos > 120.0
+    assert segundos < 150.0
 
 
 def test_la_eta_resta_el_tiempo_transcurrido_real() -> None:

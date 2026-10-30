@@ -1044,8 +1044,13 @@ class MG400Client(RobotClient):
         La cola llena es lo que provoca el -30000, y varios -30000 seguidos
         tumban el servicio TCP del robot. Se mantiene un colchón: se envía
         adelantado, pero nunca más de `pace_lead_s` segundos de movimiento.
+
+        Confirmar la pose no sustituye este colchón. Con CP=100 el brazo
+        recorta la esquina y la pose se aleja del punto antes de que el
+        controlador consuma la orden; si eso cuenta como llegada, el envío
+        se vuelve continuo y el socket se cae cerca de la orden 100.
         """
-        if self.pace_lead_s <= 0 or self.wait_arrival:
+        if self.pace_lead_s <= 0:
             return
         now = self._clock()
         previous = self._pace_target
