@@ -169,7 +169,7 @@ class SketchParams(BaseModel):
     # detalle fino para que el robot no se eternice en la expo.
     # 150 s deja margen bajo el límite de 180 s del MG400 sin podar
     # retratos normales (50-70 s sin podar).
-    max_draw_seconds: float = Field(240.0, ge=5.0, le=600.0)
+    max_draw_seconds: float = Field(150.0, ge=5.0, le=600.0)
     # Ruta nueva: el boceto lo dibuja un modelo de imagen (ver providers.py).
     # use_ai=False obliga al XDoG de siempre, que queda como respaldo sin red.
     use_ai: bool = True

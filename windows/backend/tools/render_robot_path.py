@@ -124,7 +124,7 @@ def main() -> None:
         mask.shape[0],
         caption_from=len(strokes),
         target_width_mm=40.0,
-        max_seconds=240.0,
+        max_seconds=150.0,
         face_box=(40.0, 55.0, 120.0, 70.0),
     )
     coverage, outside = fidelity(

@@ -14,7 +14,9 @@ from app.pipeline import vectorize as vectorize_ops
 
 TOLERANCES_MM = (0.15, 0.25, 0.35)
 JOIN_MAX_MM = 8.0
-CAPTION_JOIN_MAX_MM = 0.5
+# El rótulo ya viene en trazos separados a propósito (las dos panzas de la B,
+# la pierna de la R). Unirlos dibuja una raya que la letra no tiene.
+CAPTION_JOIN_MAX_MM = 0.0
 INK_SAMPLE_PX = 0.5
 INK_COVERAGE = 0.9
 DILATE_PX = 2
