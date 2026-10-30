@@ -1,8 +1,9 @@
 """Una sola trayectoria para la vista previa, la animación y el robot.
 
 El cliente del MG400 ya no recorta ni une trazos. Aquí se simplifica por
-desviación en milímetros, se unen huecos solo cuando el conector cae sobre
-tinta, y se recorta primero el pelo y la ropa si el dibujo no cabe en el tiempo.
+desviación en milímetros y se unen huecos solo cuando el conector cae sobre
+tinta. Si el retrato no cabe en el tope de tiempo, se dibuja entero: borrar
+el trazo corto partía el pelo y el cuello y el aviso seguía por encima del tope.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ CAPTION_JOIN_MAX_MM = 0.0
 INK_SAMPLE_PX = 0.5
 INK_COVERAGE = 0.9
 DILATE_PX = 2
-FACE_PAD = 0.10
 
 
 def plan_robot_path(
@@ -35,32 +35,25 @@ def plan_robot_path(
     face_box: tuple[float, float, float, float] | None = None,
     rotate: bool = False,
 ) -> dict:
-    """Devuelve los trazos finales, la trayectoria y los segundos estimados."""
+    """Devuelve los trazos finales, la trayectoria y los segundos estimados.
+
+    `face_box` se conserva en la firma porque la cabina ya lo manda. No recorta:
+    la cara que dibuja el modelo no cae en el rectángulo de la foto, y tirar
+    lo que queda afuera abre huecos. El tope solo elige una tolerancia más gruesa.
+    """
+    del face_box
     portrait = [np.asarray(stroke, dtype=np.float32) for stroke in strokes[:caption_from]]
     caption = [np.asarray(stroke, dtype=np.float32) for stroke in strokes[caption_from:]]
     mm_per_px = float(target_width_mm) / max(1, width)
-    protected = _expand_box(face_box, FACE_PAD)
     ink = _ink(mask, height, width)
 
     kept = list(portrait)
     chosen = _compose(kept, caption, ink, mm_per_px, TOLERANCES_MM[0])
     for tolerance in TOLERANCES_MM:
-        while True:
-            chosen = _compose(kept, caption, ink, mm_per_px, tolerance)
-            seconds = vectorize_ops.estimate_seconds(
-                chosen, width, target_width_mm=target_width_mm
-            )
-            if seconds <= max_seconds:
-                break
-            droppable = [
-                index
-                for index, stroke in enumerate(kept)
-                if not _protected(stroke, protected)
-            ]
-            if not droppable:
-                break
-            shortest = min(droppable, key=lambda index: vectorize_ops._polyline_length(kept[index]))
-            kept.pop(shortest)
+        chosen = _compose(kept, caption, ink, mm_per_px, tolerance)
+        seconds = vectorize_ops.estimate_seconds(
+            chosen, width, target_width_mm=target_width_mm
+        )
         if seconds <= max_seconds:
             break
 
@@ -142,15 +135,25 @@ def _join(
     usable = [stroke for stroke in strokes if len(stroke) >= 2]
     if not usable:
         return []
-    joined = [usable[0]]
-    for stroke in usable[1:]:
+    joined = [usable.pop(0)]
+    while usable:
         previous = joined[-1]
-        gap_mm = float(np.hypot(*(stroke[0] - previous[-1]))) * mm_per_px
-        covered = (not require_ink) or _coverage(previous[-1], stroke[0], ink) >= INK_COVERAGE
-        if gap_mm <= max_mm and covered:
-            joined[-1] = np.vstack((previous, stroke))
+        best_index = 0
+        best_stroke = usable[0]
+        best_gap = float("inf")
+        for index, stroke in enumerate(usable):
+            forward = float(np.hypot(*(stroke[0] - previous[-1]))) * mm_per_px
+            backward = float(np.hypot(*(stroke[-1] - previous[-1]))) * mm_per_px
+            gap, oriented = (forward, stroke) if forward <= backward else (backward, stroke[::-1])
+            if gap < best_gap:
+                best_index, best_stroke, best_gap = index, oriented, gap
+
+        usable.pop(best_index)
+        covered = (not require_ink) or _coverage(previous[-1], best_stroke[0], ink) >= INK_COVERAGE
+        if best_gap <= max_mm and covered:
+            joined[-1] = np.vstack((previous, best_stroke))
         else:
-            joined.append(stroke)
+            joined.append(best_stroke)
     return joined
 
 
@@ -179,25 +182,3 @@ def _coverage(start: np.ndarray, end: np.ndarray, ink: np.ndarray) -> float:
     return hits / (steps + 1)
 
 
-def _expand_box(
-    box: tuple[float, float, float, float] | None, pad: float
-) -> tuple[float, float, float, float] | None:
-    if box is None:
-        return None
-    x, y, width, height = box
-    return (
-        x - width * pad,
-        y - height * pad,
-        width * (1 + 2 * pad),
-        height * (1 + 2 * pad),
-    )
-
-
-def _protected(
-    stroke: np.ndarray, box: tuple[float, float, float, float] | None
-) -> bool:
-    if box is None or len(stroke) == 0:
-        return False
-    center = stroke.mean(axis=0)
-    x, y, width, height = box
-    return x <= float(center[0]) <= x + width and y <= float(center[1]) <= y + height

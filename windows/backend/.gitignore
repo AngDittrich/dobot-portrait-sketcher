@@ -7,6 +7,8 @@ __pycache__/
 *.pyc
 # Capturas crudas que deja SAVE_RAW=1 para comparar ajustes del boceto
 captures/
+# Cada visita de la cabina: foto, IA y vector. Lo lee el panel de depuración.
+archive/
 # Volcados de depuracion del proveedor de IA (SKETCH_DEBUG_DIR)
 sketch_debug/
 debug_prompts/

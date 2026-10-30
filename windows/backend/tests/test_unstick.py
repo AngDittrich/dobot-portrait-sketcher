@@ -236,6 +236,73 @@ def test_si_no_llega_no_sigue_mas_adentro() -> None:
     assert not any("20.000,100.000" in command for command in enlace.moves)
 
 
+def test_a_dos_mm_no_se_come_el_rotulo_ni_espera_el_colchon() -> None:
+    """Parar a 2 mm del vértice no es un fallo de alcance.
+
+    Antes eso esperaba los 6 s de colchón, lo tomaba como que el punto no cupo
+    y marcaba un radio. El rótulo, más cerca de la base, ya no se mandaba.
+    """
+    import time
+
+    class EnlaceCasi(EnlaceTrabado):
+        def __init__(self) -> None:
+            super().__init__()
+            self._pedido: tuple[float, float] | None = None
+
+        def move(self, command: str) -> Reply:
+            self.moves.append(command)
+            found = MOVL.search(command)
+            if found:
+                self._pedido = (float(found.group(1)), float(found.group(2)))
+            return Reply(code=0, value="")
+
+        def pose(self) -> tuple[float, float, float, float]:
+            if self._pedido is None:
+                return self.pose_fija
+            dx = self._pedido[0] - self.pose_fija[0]
+            dy = self._pedido[1] - self.pose_fija[1]
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist > 2.0:
+                self.pose_fija = (
+                    self._pedido[0] - 2.0 * dx / dist,
+                    self._pedido[1] - 2.0 * dy / dist,
+                    self.pose_fija[2],
+                    0.0,
+                )
+            return self.pose_fija
+
+    enlace = EnlaceCasi()
+    client = MG400Client(
+        link=enlace,
+        z_draw=-167.0,
+        z_travel=-160.0,
+        r=0.0,
+        origin_x=30.0,
+        origin_y=30.0,
+        speed_factor=100,
+        pipeline=1,
+        wait_arrival=True,
+        arrival_extra_s=6.0,
+        arrival_poll_s=0.02,
+        min_step_mm=0.0,
+        unstick_resets=1,
+        unstick_sleep_s=0.0,
+    )
+    papel = Trajectory(
+        segments=[Segment(type="draw", points=[[0.0, 0.0], [40.0, 0.0], [80.0, 0.0]])],
+        width_mm=140.0,
+        height_mm=140.0,
+    )
+
+    started = time.perf_counter()
+    asyncio.run(client.draw(papel, _nada))
+    elapsed = time.perf_counter() - started
+
+    assert any("20.000,100.000" in command for command in enlace.moves)
+    assert not any("ResetRobot()" in command for command in enlace.dashboards)
+    assert elapsed < 3.0, f"se quedó pensando {elapsed:.1f} s con la punta ya a 2 mm"
+
+
 def test_en_alarma_se_limpia_antes_de_habilitar() -> None:
     from app.robot.mg400 import MG400Error, MG400Link
 

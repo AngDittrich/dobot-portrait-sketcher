@@ -19,9 +19,33 @@ from app.robot.client import (  # noqa: E402
     Segment,
     Trajectory,
     effective_speed_mm_s,
+    fraction_along,
     pace_gap_s,
 )
 from app.robot.mg400 import Reply  # noqa: E402
+
+
+def test_la_pose_lejos_del_final_no_completa_el_dibujo():
+    """El porcentaje es la punta, no las órdenes ya encoladas."""
+    points = [(0.0, 0.0, 0.0), (10.0, 0.0, 10.0), (20.0, 0.0, 20.0)]
+
+    fraction, _cursor = fraction_along(points, (0.0, 0.0), 0, 0.5)
+    assert fraction == 0.0
+
+    fraction, _cursor = fraction_along(points, (10.0, 0.0), 0, 0.5)
+    assert fraction == pytest.approx(0.5)
+
+    fraction, cursor = fraction_along(points, (20.0, 0.0), 0, 0.5)
+    assert fraction == 1.0
+    assert cursor == len(points)
+
+    # CP recorta la esquina: la punta pasa a 3 mm del vértice, no a 0.5.
+    fraction, cursor = fraction_along(points, (10.0, 3.0), 0, 0.5)
+    assert fraction == pytest.approx(0.5)
+    assert cursor == 1
+
+    fraction, _cursor = fraction_along(points, (0.0, 100.0), 0, 0.5)
+    assert fraction == 0.0
 
 
 def test_el_hueco_usa_la_velocidad_efectiva_medida():
@@ -167,3 +191,104 @@ def test_con_cp_alto_el_ritmo_no_se_apaga_aunque_la_pose_diga_que_ya_paso():
     asyncio.run(correr())
 
     assert sum(reloj.dormido) == pytest.approx(2.67, abs=0.15)
+
+
+def test_el_dibujo_expone_tiempos_y_ordenes_saltadas():
+    """El log de una visita separa tinta, pluma arriba, cola y alcance."""
+    enlace = Enlace()
+    cliente = MG400Client(
+        link=enlace,
+        min_step_mm=0.0,
+        wait_arrival=False,
+        z_draw=-167.0,
+        z_travel=-160.0,
+        r=145.0,
+        origin_x=360.0,
+        origin_y=92.0,
+        queue_retry_s=0.0,
+        pace_lead_s=0.0,
+    )
+    papel = Trajectory(
+        segments=[Segment(type="draw", points=[[0.0, 0.0], [10.0, 0.0]])],
+        width_mm=40.0,
+        height_mm=40.0,
+    )
+
+    async def correr() -> None:
+        async def progreso(_valor: float, _segmento: Segment) -> None:
+            return None
+
+        await cliente.draw(papel, progreso)
+
+    asyncio.run(correr())
+
+    assert cliente.motion_stats == {
+        "draw_s": pytest.approx(0.0, abs=0.1),
+        "air_s": pytest.approx(0.0, abs=0.1),
+        "queue_s": pytest.approx(0.0, abs=0.1),
+        "skipped_orders": 0,
+    }
+
+
+def test_el_dibujo_avisa_el_avance_mientras_traza():
+    """El callback tiene que vivir durante el trazo. Si se apaga al armar
+    el cliente, la hoja del visitante se queda en blanco hasta el «terminado»."""
+    enlace = Enlace()
+    cliente = MG400Client(
+        link=enlace,
+        min_step_mm=0.0,
+        wait_arrival=False,
+        z_draw=-167.0,
+        z_travel=-160.0,
+        r=145.0,
+        origin_x=360.0,
+        origin_y=92.0,
+        queue_retry_s=0.0,
+        pace_lead_s=0.0,
+    )
+    papel = Trajectory(
+        segments=[Segment(type="draw", points=[[0.0, 0.0], [10.0, 0.0], [20.0, 0.0]])],
+        width_mm=40.0,
+        height_mm=40.0,
+    )
+    valores: list[float] = []
+
+    async def correr() -> None:
+        async def progreso(valor: float, _segmento: Segment) -> None:
+            valores.append(valor)
+
+        await cliente.draw(papel, progreso)
+
+    asyncio.run(correr())
+
+    assert valores, "el dibujo no publicó ningún avance"
+    assert any(0.0 < valor < 1.0 for valor in valores)
+    assert valores[-1] == pytest.approx(1.0)
+
+
+def test_el_progreso_solo_cuenta_tinta_confirmada():
+    cliente = MG400Client(
+        link=Enlace(),
+        z_draw=-167.0,
+        z_travel=-160.0,
+        r=145.0,
+        origin_x=360.0,
+        origin_y=92.0,
+    )
+    cliente._progress_total = 10.0
+    cliente._progress_done = 0.0
+    values: list[float] = []
+    segment = Segment(type="draw", points=[[0.0, 0.0], [10.0, 0.0]])
+
+    async def report(value: float, _segment: Segment) -> None:
+        values.append(value)
+
+    async def correr() -> None:
+        cliente._on_progress = report
+        await cliente._record_progress(3.0, segment)
+        # Enviar otra orden no llama al callback: solo su confirmación.
+        await cliente._record_progress(7.0, segment)
+
+    asyncio.run(correr())
+
+    assert values == [pytest.approx(0.3), pytest.approx(1.0)]

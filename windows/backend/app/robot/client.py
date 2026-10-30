@@ -51,6 +51,11 @@ DEFAULT_JOIN_GAP_MM = 0.0
 ARRIVAL_TOLERANCE_MM = 0.5
 ARRIVAL_POLL_S = 0.1
 ARRIVAL_EXTRA_S = 6.0
+# A un par de milímetros la punta ya está en el punto. Exigir 0.5 mm y, si no,
+# reiniciar el controlador deja el brazo quieto el colchón entero (6 s) entre
+# cada serie de trazos. Más holgura bajaría el lápiz antes de llegar.
+_SETTLED_MM = 2.5
+_SETTLED_S = 0.4
 # Órdenes de dibujo en vuelo. Cada MovL cuesta ~0.51 s: esperar la llegada de
 # una antes de mandar la siguiente deja el brazo parado medio segundo por punto.
 # Con 3 en vuelo se solapa el envío con el movimiento. Nunca más: con flujo
@@ -299,7 +304,7 @@ class MG400Client(RobotClient):
         self.join_gap_mm = max(0.0, float(join_gap_mm))
         self.wait_arrival = wait_arrival
         self.pipeline = max(1, int(pipeline))
-        self._pending: list[tuple[float, float, float, int]] = []
+        self._pending: list[tuple[float, float, float, int, float, Segment | None]] = []
         self.arrival_tolerance_mm = arrival_tolerance_mm
         self.arrival_poll_s = arrival_poll_s
         self.arrival_extra_s = arrival_extra_s
@@ -319,6 +324,10 @@ class MG400Client(RobotClient):
         self._pace_target: tuple[float, float, float] | None = None
         self._sent = 0
         self._total = 0
+        self._motion = self._empty_motion()
+        self._progress_total = 1.0
+        self._progress_done = 0.0
+        self._on_progress: ProgressCallback | None = None
         self.host = host
         self.user = user
         self.tool = tool
@@ -363,6 +372,22 @@ class MG400Client(RobotClient):
         # cruzan y el controlador corta la conexión (WinError 10053 en sendall).
         # Todo lo que hable con el dashboard pasa por este candado.
         self._wire = asyncio.Lock()
+
+    @staticmethod
+    def _empty_motion() -> dict[str, float | int]:
+        return {"draw_s": 0.0, "air_s": 0.0, "queue_s": 0.0, "skipped_orders": 0}
+
+    @property
+    def motion_stats(self) -> dict[str, float | int]:
+        """Costes del último trabajo, para distinguir tinta, levantadas y cola."""
+        return dict(self._motion)
+
+    async def _record_progress(self, amount_mm: float, segment: Segment | None) -> None:
+        """Publica solo tinta cuyo MovL ya confirmó el controlador."""
+        if amount_mm <= 0 or segment is None or self._on_progress is None:
+            return
+        self._progress_done = min(self._progress_total, self._progress_done + amount_mm)
+        await self._on_progress(self._progress_done / self._progress_total, segment)
 
     @classmethod
     def from_env(cls) -> MG400Client:
@@ -678,6 +703,10 @@ class MG400Client(RobotClient):
         self._sent = 0
         self._pace_due = None
         self._pace_target = None
+        self._motion = self._empty_motion()
+        self._progress_total = trajectory.draw_length or 1.0
+        self._progress_done = 0.0
+        self._on_progress = on_progress
         self._resets_left = self.unstick_resets
         self._last_point = None
         self._radio_minimo = None
@@ -700,7 +729,16 @@ class MG400Client(RobotClient):
                 self._fit[0],
             )
         self._reconnects_left = self.reconnects
+        self._progress_segment = None
+        self._arm_points = []
+        self._arm_cursor = 0
+        self._along = 0.0
+        self._published = -1.0
+        self._tip_landed = False
+        self._arm_total = 1.0
         await self.ensure_j4()
+        self._arm_points = self._sheet_path(trajectory)
+        self._arm_total = self._arm_points[-1][2] if self._arm_points else 1.0
         self._total = sum(len(segment.points) for segment in trajectory.segments)
         logger.info(
             "dibujo: %d segmentos, ~%d puntos, %.0f mm con lapiz abajo",
@@ -708,38 +746,46 @@ class MG400Client(RobotClient):
             self._total,
             trajectory.draw_length,
         )
-        total = trajectory.total_length or 1.0
-        done = 0.0
         pen_down = False
         held: list[float] | None = None
-        last = Segment(type="travel")
 
-        for segment in trajectory.segments:
+        try:
+            for segment in trajectory.segments:
+                if self._cancel:
+                    raise DrawCancelled()
+                points = segment.points
+                if not points:
+                    continue
+                self._progress_segment = segment
+                if segment.type == "travel":
+                    phase_started = self._clock()
+                    pen_down, held = await self._travel(points, held, pen_down)
+                    self._motion["air_s"] = float(self._motion["air_s"]) + (
+                        self._clock() - phase_started
+                    )
+                    if not pen_down:
+                        # Lápiz arriba y sin órdenes en vuelo: momento seguro para
+                        # devolver J4 si un empujón la giró.
+                        await self.ensure_j4()
+                else:
+                    phase_started = self._clock()
+                    pen_down, held = await self._draw_segment(points, held, pen_down)
+                    self._motion["draw_s"] = float(self._motion["draw_s"]) + (
+                        self._clock() - phase_started
+                    )
+
             if self._cancel:
                 raise DrawCancelled()
-            points = segment.points
-            if not points:
-                continue
-            last = segment
-            if segment.type == "travel":
-                pen_down, held = await self._travel(points, held, pen_down)
-                if not pen_down:
-                    # Lápiz arriba y sin órdenes en vuelo: momento seguro para
-                    # devolver J4 si un empujón la giró.
-                    await self.ensure_j4()
-            else:
-                pen_down, held = await self._draw_segment(points, held, pen_down)
-            done += segment.length
-            await on_progress(min(1.0, done / total), segment)
-
-        if self._cancel:
-            raise DrawCancelled()
-        if pen_down and held is not None:
-            await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
-        await self._drain()
-        if self._cancel:
-            raise DrawCancelled()
-        await on_progress(1.0, last)
+            if pen_down and held is not None:
+                await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0)
+            await self._drain()
+            if self._cancel:
+                raise DrawCancelled()
+            if await self._wait_tip():
+                remaining = max(0.0, self._progress_total - self._progress_done)
+                await self._record_progress(remaining, self._progress_segment)
+        finally:
+            self._on_progress = None
 
     async def _draw_segment(
         self,
@@ -777,10 +823,28 @@ class MG400Client(RobotClient):
             # que ve el visitante.
             if held is not None and _distance(held, point) < self.min_step_mm and point is not points[-1]:
                 continue
-            if await self._goto(point[0], point[1], self.z_draw,  self.speed_factor, self.cp_draw):
+            progress_mm = _distance(held, point) if held is not None else 0.0
+            if await self._goto(
+                point[0],
+                point[1],
+                self.z_draw,
+                self.speed_factor,
+                self.cp_draw,
+                progress_mm=progress_mm,
+                progress_segment=self._progress_segment,
+            ):
                 held = point
         if held is not None and _distance(held, points[-1]) > 1e-6:
-            if await self._goto(points[-1][0], points[-1][1], self.z_draw,  self.speed_factor, self.cp_draw):
+            progress_mm = _distance(held, points[-1])
+            if await self._goto(
+                points[-1][0],
+                points[-1][1],
+                self.z_draw,
+                self.speed_factor,
+                self.cp_draw,
+                progress_mm=progress_mm,
+                progress_segment=self._progress_segment,
+            ):
                 held = points[-1]
         return pen_down, held if held is not None else start
 
@@ -821,12 +885,17 @@ class MG400Client(RobotClient):
         z: float,
         speed: int,
         cp: int,
+        *,
+        progress_mm: float = 0.0,
+        progress_segment: Segment | None = None,
     ) -> bool:
         """Manda el punto. False si quedó fuera del brazo y se saltó para seguir dibujando."""
         if self._cancel:
             raise DrawCancelled()
         robot_x, robot_y, real_z, rotation = self._map(x, y, z)
         if self._mas_adentro(robot_x, robot_y):
+            self._motion["skipped_orders"] = int(self._motion["skipped_orders"]) + 1
+            self._progress_total = max(1e-6, self._progress_total - progress_mm)
             logger.warning(
                 "salto %.1f,%.1f: queda mas cerca del brazo que un punto que no cupo",
                 robot_x,
@@ -846,11 +915,17 @@ class MG400Client(RobotClient):
         if not en_vuelo:
             # Cambiar de altura o pasear con órdenes pendientes dejaría el
             # lápiz abajo mientras el brazo todavía va en camino.
+            queue_started = self._clock()
             await self._drain()
+            self._motion["queue_s"] = float(self._motion["queue_s"]) + (
+                self._clock() - queue_started
+            )
         await self._pace(target, speed)
         await self._move(command)
         if en_vuelo:
-            self._pending.append((robot_x, robot_y, distance, speed))
+            self._pending.append(
+                (robot_x, robot_y, distance, speed, progress_mm, progress_segment)
+            )
             while len(self._pending) >= self.pipeline:
                 await self._wait_pending()
         else:
@@ -891,7 +966,90 @@ class MG400Client(RobotClient):
                     await self._unstick()
                     await self._move(command)
                     await self._wait_arrival(robot_x, robot_y, distance, speed)
+            await self._record_progress(progress_mm, progress_segment)
         self._last_point = target
+        return True
+
+    def _sheet_path(self, trajectory: Trajectory) -> list[tuple[float, float, float]]:
+        """Vértices en XY del robot, con los milímetros de hoja ya recorridos."""
+        points: list[tuple[float, float, float]] = []
+        covered = 0.0
+        previous: list[float] | None = None
+        for segment in trajectory.segments:
+            z = self.z_draw if segment.type == "draw" else self.z_travel
+            for point in segment.points:
+                if previous is not None:
+                    covered += (
+                        (point[0] - previous[0]) ** 2 + (point[1] - previous[1]) ** 2
+                    ) ** 0.5
+                robot_x, robot_y, _z, _r = self._map(point[0], point[1], z)
+                points.append((robot_x, robot_y, covered))
+                previous = point
+        return points
+
+    def _note_pose(self, actual: tuple) -> None:
+        points = getattr(self, "_arm_points", None)
+        if not points:
+            return
+        fraction, cursor = fraction_along(
+            points,
+            (float(actual[0]), float(actual[1])),
+            self._arm_cursor,
+            self.arrival_tolerance_mm,
+        )
+        self._arm_cursor = cursor
+        self._along = fraction
+
+    async def _publish_pose(self) -> None:
+        """Compatibilidad de la espera de llegada.
+
+        El progreso público se publica desde `_record_progress` cuando cada
+        MovL de tinta sale de `_wait_arrival`; la pose no puede recorrer una
+        lista que contiene puntos que el brazo ya rechazó por alcance.
+        """
+        return
+
+    async def _wait_tip(self) -> bool:
+        """Espera a la punta en el último punto. Recortar una esquina no cuenta.
+
+        Si no hay pose, o el reloj de una prueba no avanza, no se bloquea el
+        envío: ahí no hay un brazo al que seguir.
+        """
+        if not self.wait_arrival or not self._arm_points:
+            self._tip_landed = True
+            return True
+        pose_fn = getattr(self._link, "pose", None)
+        if pose_fn is None:
+            self._tip_landed = True
+            return True
+        # Unos segundos, no el largo del retrato. La cola ya se vació en
+        # `_drain`. Esperar path/10 s dejaba el brazo quieto ~2 min y el
+        # trabajo moría sin llegar al último vértice (CP recorta la esquina).
+        deadline = self._clock() + min(2.0, max(0.2, self.arrival_extra_s))
+        while self._clock() < deadline:
+            if self._cancel:
+                raise DrawCancelled()
+            try:
+                actual = await asyncio.to_thread(pose_fn)
+            except Exception:  # noqa: BLE001 - sin lectura no hay punta que seguir
+                self._tip_landed = True
+                return True
+            self._note_pose(actual)
+            await self._publish_pose()
+            if self._along >= 1.0:
+                self._tip_landed = True
+                return True
+            before = self._clock()
+            await self._sleep(self.arrival_poll_s)
+            if self._clock() <= before:
+                self._tip_landed = True
+                return True
+        if self._along < 1.0:
+            logger.warning(
+                "la punta no calzó el último vértice (avance %.0f%%); el trazo ya se mandó",
+                self._along * 100,
+            )
+        self._tip_landed = True
         return True
 
     async def _drain(self) -> None:
@@ -900,9 +1058,12 @@ class MG400Client(RobotClient):
             await self._wait_pending()
 
     async def _wait_pending(self) -> None:
-        robot_x, robot_y, distance, speed = self._pending.pop(0)
+        robot_x, robot_y, distance, speed, progress_mm, progress_segment = self._pending.pop(0)
         if await self._wait_arrival(robot_x, robot_y, distance, speed) == "short":
             self._marcar_borde(robot_x, robot_y)
+            self._progress_total = max(1e-6, self._progress_total - progress_mm)
+            return
+        await self._record_progress(progress_mm, progress_segment)
 
     async def _wait_arrival(
         self,
@@ -932,6 +1093,7 @@ class MG400Client(RobotClient):
         limite = time.monotonic() + presupuesto
         mejor = float("inf")
         inicial: float | None = None
+        quieto_desde: float | None = None
         while time.monotonic() < limite:
             if self._cancel:
                 raise DrawCancelled()
@@ -939,6 +1101,8 @@ class MG400Client(RobotClient):
                 actual = await asyncio.to_thread(pose)
             except Exception:  # noqa: BLE001 - sin lectura seguimos dibujando
                 return "ok"
+            self._note_pose(actual)
+            await self._publish_pose()
             distancia = (
                 (float(actual[0]) - robot_x) ** 2 + (float(actual[1]) - robot_y) ** 2
             ) ** 0.5
@@ -948,8 +1112,21 @@ class MG400Client(RobotClient):
                 return "ok"
             if ya_paso(mejor, distancia, self.arrival_tolerance_mm):
                 return "ok"
+            # Ya está junto al punto y no se acerca más: no es un fallo de
+            # alcance. Seguir hasta el colchón de 6 s es la pausa entre trazos,
+            # y tratarlo como "no llegó" marca un radio que se come el rótulo.
+            ahora = time.monotonic()
+            if distancia + 0.3 < mejor:
+                quieto_desde = None
+            elif distancia <= _SETTLED_MM:
+                if quieto_desde is None:
+                    quieto_desde = ahora
+                elif ahora - quieto_desde >= _SETTLED_S:
+                    return "ok"
             mejor = min(mejor, distancia)
             await asyncio.sleep(self.arrival_poll_s)
+        if mejor <= _SETTLED_MM:
+            return "ok"
         lejos = mejor if mejor < float("inf") else -1.0
         logger.warning(
             "el brazo no llego a %.1f,%.1f en %.1f s; sigue a %.1f mm",
@@ -1386,6 +1563,54 @@ def _distance(left: list[float] | None, right: list[float]) -> float:
     if left is None:
         return float("inf")
     return ((left[0] - right[0]) ** 2 + (left[1] - right[1]) ** 2) ** 0.5
+
+
+# CP=100 no pisa el vértice: la punta pasa a unos milímetros por dentro.
+# 0.5 mm dejaba el porcentaje clavado y el cierre esperando un punto imposible.
+_BLEND_REACH_MM = 12.0
+
+
+def fraction_along(
+    points: list[tuple[float, float, float]],
+    pose: tuple[float, float],
+    cursor: int,
+    tolerance_mm: float,
+) -> tuple[float, int]:
+    """Fracción de la trayectoria que la pose ya dejó atrás.
+
+    `points` es (x del robot, y del robot, milímetros recorridos en la hoja).
+    El cursor solo avanza, hasta el punto más cercano que siga cerca de la
+    punta. Recortar una esquina cuenta: si no, el porcentaje se congela.
+    """
+    if not points:
+        return 0.0, 0
+    total = points[-1][2] or 1.0
+    last = len(points) - 1
+    if cursor > last:
+        return 1.0, cursor
+    cursor = min(max(0, cursor), last)
+    reach = max(float(tolerance_mm), _BLEND_REACH_MM)
+    px, py = pose
+    best = cursor
+    best_d = math.hypot(px - points[cursor][0], py - points[cursor][1])
+    worsen = 0
+    for index in range(cursor + 1, last + 1):
+        dist = math.hypot(px - points[index][0], py - points[index][1])
+        if dist <= best_d:
+            best_d = dist
+            best = index
+            worsen = 0
+            continue
+        worsen += 1
+        if worsen >= 6 and best_d <= reach:
+            break
+    if best_d > reach:
+        if cursor <= 0:
+            return 0.0, cursor
+        return min(0.999, points[cursor - 1][2] / total), cursor
+    if best >= last:
+        return 1.0, last + 1
+    return min(0.999, points[best][2] / total), best
 
 
 def ya_paso(mejor_mm: float, actual_mm: float, tolerancia_mm: float) -> bool:
