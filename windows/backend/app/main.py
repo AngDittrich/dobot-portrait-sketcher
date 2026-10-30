@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field  # noqa: E402
 from starlette.concurrency import run_in_threadpool  # noqa: E402
 
 from app.imaging import decode_data_url, encode_data_url, fit_max_side  # noqa: E402
+from app import archive as archive_ops  # noqa: E402
 from app.pipeline import providers  # noqa: E402
 from app.pipeline import vectorize as vectorize_ops  # noqa: E402
 from app.pipeline.caption import append_caption  # noqa: E402
@@ -211,9 +212,10 @@ def build_sketch(
     """
     ai_meta: dict | None = None
     mask = None
+    stages: dict = {}
     if params.use_ai:
         try:
-            mask, ai_meta = providers.generate_mask(
+            mask, ai_meta, stages = providers.generate_mask(
                 image, models_dir=MODELS_DIR, traits=traits, style=style
             )
         except providers.SketchProviderError as exc:
@@ -268,6 +270,8 @@ def build_sketch(
     ordered = [stroke for stroke, _ in vectorize_ops.order_strokes(strokes_px)]
     caption_from = len(ordered)
     ordered, crop_height = append_caption(ordered, crop_width, crop_height)
+    strokes_before = len(ordered)
+    before = vectorize_ops.render_black_strokes(ordered, crop_width, crop_height, thickness=2)
     planned = plan_robot_path(
         ordered,
         mask,
@@ -282,6 +286,7 @@ def build_sketch(
     ordered = planned["strokes"]
     trajectory_stats = planned["stats"]
     trajectory_segments = planned["segments"]
+    strokes_after = len(ordered)
 
     # Vista previa: los mismos contornos que va a trazar el robot.
     preview = vectorize_ops.render_black_strokes(ordered, crop_width, crop_height, thickness=2)
@@ -297,6 +302,14 @@ def build_sketch(
     }
     if ai_meta:
         stats["ai"] = ai_meta
+    estimated = trajectory_stats.get("est_total_seconds")
+    notes = {
+        "05-trazos.png": f"Línea central, antes de recortar por tiempo. {strokes_before} trazos.",
+        "06-vector.png": (
+            f"Lo que ve el visitante y dibuja el robot. {strokes_after} trazos, "
+            f"estimado {estimated} s."
+        ),
+    }
 
     return {
         "preview": encode_data_url(preview),
@@ -306,6 +319,23 @@ def build_sketch(
         ],
         "segments": trajectory_segments,
         "stats": stats,
+        "archive": {
+            "images": {
+                "01-original.jpg": image,
+                "04-tinta.png": mask,
+                "05-trazos.png": before,
+                "06-vector.png": preview,
+                **stages,
+            },
+            "info": {
+                "model": (ai_meta or {}).get("model") or (ai_meta or {}).get("provider"),
+                "ai_seconds": (ai_meta or {}).get("seconds"),
+                "strokes_before": strokes_before,
+                "strokes_after": strokes_after,
+                "estimated_seconds": estimated,
+                "notes": notes,
+            },
+        },
     }
 
 
@@ -325,6 +355,17 @@ def _portrait_width_mm() -> float:
     if frame is not None:
         return frame_ops.portrait_width_mm(frame, getattr(robot, "margin_mm", frame_ops.DEFAULT_MARGIN_MM))
     return sheet_ops.draw_width_mm(sheet_ops.DEFAULT)
+
+
+def _store_archive(sketch_id: str, result: dict) -> None:
+    """Saca las imágenes del resultado (no van en el JSON) y las deja en disco."""
+    bundle = result.pop("archive", None)
+    if not bundle:
+        return
+    try:
+        archive_ops.save_visit(sketch_id, bundle["images"], bundle["info"])
+    except Exception:
+        robot_log.exception("no se pudo guardar el archivo de %s", sketch_id)
 
 
 @app.post("/api/sketch")
@@ -347,6 +388,7 @@ async def create_sketch(payload: SketchRequest) -> dict:
         raise HTTPException(status_code=500, detail=f"Error generando el boceto: {exc}") from exc
 
     sketch_id = f"sk_{uuid.uuid4().hex[:10]}"
+    _store_archive(sketch_id, result)
     sketches.put(
         sketch_id,
         Sketch(
@@ -386,6 +428,7 @@ async def create_job(payload: JobRequest) -> dict:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=f"Error generando el boceto: {exc}") from exc
         sketch_id = f"sk_{uuid.uuid4().hex[:10]}"
+        _store_archive(sketch_id, result)
         sketch = Sketch(
             id=sketch_id,
             preview=result["preview"],
@@ -425,19 +468,30 @@ async def create_job(payload: JobRequest) -> dict:
                 job.eta_seconds = remaining_eta_seconds(estimated_seconds, started)
 
             await robot.draw(trajectory, on_progress)
+            if not getattr(robot, "_tip_landed", True):
+                raise TimeoutError("el brazo no llegó al último punto del retrato")
             job.status = "done"
             job.progress = 1.0
             job.eta_seconds = 0.0
             activity_totals["done"] += 1
             elapsed = time.monotonic() - started
+            motion = getattr(robot, "motion_stats", {})
             robot_log.info(
-                "%s: terminado en %.1f s; %s ordenes, %s subidas, %.0f mm dibujados, estimado %.1f s",
+                (
+                    "%s: terminado en %.1f s; %s ordenes, %s subidas, %.0f mm dibujados, "
+                    "estimado %.1f s; tinta %.1f s, pluma arriba %.1f s, cola %.1f s, "
+                    "%s ordenes saltadas"
+                ),
                 job.id,
                 elapsed,
                 sketch.stats.get("orders", "?"),
                 sketch.stats.get("lifts", "?"),
                 float(sketch.stats.get("draw_length_mm", 0.0)),
                 estimated_seconds,
+                float(motion.get("draw_s", 0.0)),
+                float(motion.get("air_s", 0.0)),
+                float(motion.get("queue_s", 0.0)),
+                int(motion.get("skipped_orders", 0)),
             )
         except DrawCancelled:
             await _mark_cancelled(job)
@@ -824,6 +878,8 @@ async def admin_test_draw(
                 job.progress = value
 
             await robot.draw(trajectory, on_progress, sheet_mm=True)  # type: ignore[attr-defined]
+            if not getattr(robot, "_tip_landed", True):
+                raise TimeoutError("el brazo no llegó al último punto del retrato")
             job.status = "done"
             job.progress = 1.0
             activity_totals["done"] += 1
@@ -844,6 +900,29 @@ async def admin_test_draw(
 
     asyncio.create_task(run())
     return {"job_id": job.id, "text": "SYSCOM"}
+
+
+@app.get("/api/admin/archive")
+def admin_archive(x_admin_token: str | None = Header(default=None)) -> dict:
+    """Visitas guardadas en disco, de la más reciente a la más vieja."""
+    _require_admin(x_admin_token)
+    return {"visits": archive_ops.list_visits()}
+
+
+@app.get("/api/admin/archive/{folder}/{filename}")
+def admin_archive_image(
+    folder: str,
+    filename: str,
+    token: str = Query(default=""),
+    x_admin_token: str | None = Header(default=None),
+) -> Response:
+    """Una etapa del boceto. El `<img>` manda el token en la query."""
+    _require_admin(x_admin_token or token)
+    path = archive_ops.image_path(folder, filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="etapa no encontrada")
+    media = "image/jpeg" if path.suffix == ".jpg" else "image/png"
+    return Response(content=path.read_bytes(), media_type=media)
 
 
 @app.get("/api/admin/activity")

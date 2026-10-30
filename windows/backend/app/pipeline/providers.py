@@ -569,8 +569,12 @@ def generate_mask(
     models_dir: Path | None = None,
     traits: list[str] | None = None,
     style: str | None = None,
-) -> tuple[np.ndarray, dict]:
-    """Foto -> máscara de tinta entregada por el proveedor activo."""
+) -> tuple[np.ndarray, dict, dict[str, np.ndarray | bytes]]:
+    """Foto -> máscara de tinta, metadatos y las imágenes previas al trazado.
+
+    El tercer valor lleva el recorte enviado al modelo y el PNG crudo. No
+    viaja en la respuesta al visitante: `build_sketch` lo guarda en el archivo.
+    """
     settings = settings or load_settings()
     prompt = build_prompt(traits, style)
     providers = available_providers(settings)
@@ -611,5 +615,9 @@ def generate_mask(
             meta["reference_sha"] = hashlib.sha256(reference.tobytes()).hexdigest()[:12]
             meta["size"] = f"{reference.shape[1]}x{reference.shape[0]}"
             meta["face_box"] = list(face_box) if face_box is not None else None
-            return mask, meta
+            marked = reference.copy()
+            if face_box is not None:
+                x, y, w, h = (int(round(value)) for value in face_box)
+                cv2.rectangle(marked, (x, y), (x + w, y + h), (40, 70, 220), 2)
+            return mask, meta, {"02-referencia.png": marked, "03-ia.png": png}
     raise SketchProviderError("; ".join(errors) or "sin proveedores")

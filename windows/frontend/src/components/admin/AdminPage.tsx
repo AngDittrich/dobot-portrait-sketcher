@@ -6,6 +6,7 @@ import { useAdminStatus } from '../../hooks/useAdminStatus'
 import { ActivitySection } from './ActivitySection'
 import { ConfigSection } from './ConfigSection'
 import { ControlSection } from './ControlSection'
+import { DebugSection } from './DebugSection'
 import { SECTIONS } from './sections'
 import type { SectionId } from './sections'
 import { StatusSection } from './StatusSection'
@@ -203,6 +204,7 @@ export function AdminPage({
               cancelling={cancelling}
             />
           )}
+          {active === 'depuracion' && <DebugSection token={token} />}
         </main>
       </div>
     </div>

@@ -21,7 +21,8 @@ _RENDER = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_RENDER)
 
 
-def test_la_poda_quita_el_pelo_y_conserva_los_ojos() -> None:
+def test_un_retrato_que_no_cabe_se_conserva() -> None:
+    """Ocho segundos no alcanzan. Antes se tiraba el pelo y el aviso seguía alto."""
     mask = np.zeros((220, 200), dtype=np.uint8)
     cv2.circle(mask, (70, 90), 14, 255, 2)
     cv2.circle(mask, (130, 90), 14, 255, 2)
@@ -42,7 +43,35 @@ def test_la_poda_quita_el_pelo_y_conserva_los_ojos() -> None:
     centers = [stroke.mean(axis=0) for stroke in planned["strokes"]]
     assert any(center[0] < 100 and 60 < center[1] < 120 for center in centers)
     assert any(center[0] > 100 and 60 < center[1] < 120 for center in centers)
-    assert all(center[1] > 45 for center in centers)
+    assert any(center[1] < 45 for center in centers)
+
+
+def test_la_poda_no_borra_la_mejilla_fuera_de_la_caja() -> None:
+    """La caja sale de la foto y el modelo no dibuja la cara en el mismo sitio.
+
+    Una mejilla a la derecha del rectángulo está a la altura de los ojos.
+    Borrarla deja el retrato partido, que es lo que se vio en la cabina.
+    """
+    mask = np.zeros((220, 280), dtype=np.uint8)
+    cv2.circle(mask, (100, 100), 14, 255, 2)
+    cv2.line(mask, (210, 70), (230, 150), 255, 3)
+    cv2.line(mask, (10, 20), (260, 24), 255, 3)
+    strokes = strokes_from_centerline(mask, min_length_px=6, bridge_gap_px=0)
+
+    planned = plan_robot_path(
+        strokes,
+        mask,
+        280,
+        220,
+        caption_from=len(strokes),
+        target_width_mm=40.0,
+        max_seconds=8.0,
+        face_box=(40.0, 55.0, 120.0, 70.0),
+    )
+
+    centers = [stroke.mean(axis=0) for stroke in planned["strokes"]]
+    assert any(center[0] > 190 for center in centers)
+    assert any(center[1] < 45 for center in centers)
 
 
 def test_el_conector_solo_se_aprueba_sobre_tinta() -> None:
@@ -54,6 +83,31 @@ def test_el_conector_solo_se_aprueba_sobre_tinta() -> None:
 
     assert connector_on_ink(start, over_ink, mask, max_mm=8.0, mm_per_px=0.2)
     assert not connector_on_ink(start, over_paper, mask, max_mm=8.0, mm_per_px=0.2)
+
+
+def test_reordena_trazos_para_unir_extremos_que_pisan_tinta() -> None:
+    """El vecino que viene en la lista puede estar lejos; no debe forzar una levantada."""
+    mask = np.zeros((30, 100), dtype=np.uint8)
+    cv2.line(mask, (0, 10), (40, 10), 255, 2)
+    cv2.line(mask, (80, 10), (95, 10), 255, 2)
+    strokes = [
+        np.array([[0.0, 10.0], [20.0, 10.0]]),
+        np.array([[80.0, 10.0], [95.0, 10.0]]),
+        np.array([[20.0, 10.0], [40.0, 10.0]]),
+    ]
+
+    planned = plan_robot_path(
+        strokes,
+        mask,
+        100,
+        30,
+        caption_from=3,
+        target_width_mm=100.0,
+        max_seconds=150.0,
+    )
+
+    assert len(planned["strokes"]) == 2
+    assert any(stroke[:, 0].min() == 0 and stroke[:, 0].max() >= 40 for stroke in planned["strokes"])
 
 
 def test_el_rotulo_conserva_sus_curvas_y_no_se_une() -> None:

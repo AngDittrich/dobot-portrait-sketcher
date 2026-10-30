@@ -308,3 +308,31 @@ export function adminClearJobs(token: string): Promise<{ removed: number }> {
 export function adminSketchPreviewUrl(sketchId: string, token: string): string {
   return `${API_BASE}/api/admin/sketches/${encodeURIComponent(sketchId)}/preview?token=${encodeURIComponent(token)}`
 }
+
+export interface ArchiveStep {
+  file: string
+  title: string
+  note: string
+}
+
+export interface ArchiveVisit {
+  id: string
+  folder: string
+  created_at: number
+  model: string | null
+  ai_seconds: number | null
+  strokes_before: number | null
+  strokes_after: number | null
+  estimated_seconds: number | null
+  steps: ArchiveStep[]
+}
+
+/** Visitas guardadas en disco, para la sección Depuración. */
+export function adminArchive(token: string): Promise<{ visits: ArchiveVisit[] }> {
+  return request<{ visits: ArchiveVisit[] }>('/api/admin/archive', { headers: adminHeaders(token) })
+}
+
+/** Una etapa del boceto. El `<img>` no puede mandar el header del PIN. */
+export function adminArchiveImageUrl(folder: string, file: string, token: string): string {
+  return `${API_BASE}/api/admin/archive/${encodeURIComponent(folder)}/${encodeURIComponent(file)}?token=${encodeURIComponent(token)}`
+}

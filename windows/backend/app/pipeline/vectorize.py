@@ -22,15 +22,19 @@ NEIGHBORS_8 = ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1,
 # El 2-opt es O(n^2) por pasada; con muchos trazos se queda colgado.
 TWO_OPT_MAX_STROKES = 250
 
-# Velocidad real del MG400 con la tubería de 3 órdenes en vuelo: 174 mm en
-# 8.9 s. Con una sola orden en vuelo baja a 7.5 mm/s. El presupuesto de 150 s
-# y el tiempo que anuncia la cabina se calculan con este número medido, no con
-# el ideal de 80 mm/s que el brazo nunca alcanza.
+# Medición vieja, con SpeedL=20: 174 mm en 8.9 s. El simulador todavía la usa.
+# La cabina anuncia otra cosa: SpeedL=50 y AccL=100, la misma física con la
+# que el cliente suelta las órdenes. En pasos de unos milímetros el brazo no
+# llega a 50 mm/s, así que subir la velocidad no acorta el retrato.
 MEASURED_SPEED_MM_S = 19.6
-# Cada MovL tarda al menos esto: 0.51 s medidos por orden, con 3 en vuelo.
 MIN_COMMAND_S = 0.17
-# Vaciar la cola al subir y bajar la pluma. Medido en el MG400.
 PEN_LIFT_S = 3.0
+BOOTH_DRAW_SPEED_MM_S = 50.0
+BOOTH_ACC_MM_S2 = 100.0
+# Igual que `speed_travel` del cliente: min(100, speed_factor * 2).
+BOOTH_TRAVEL_SPEED_MM_S = 100.0
+# Subida de la pluma en la hoja enseñada. No es un coste fijo de 3 s.
+BOOTH_LIFT_MM = 8.0
 
 
 @dataclass
@@ -629,28 +633,67 @@ def strokes_from_skeleton(
     )
 
 
+def _move_seconds(distance_mm: float, speed_mm_s: float, acc_mm_s2: float) -> float:
+    """Segundos de un tramo, con la misma velocidad efectiva que el ritmo del brazo."""
+    if distance_mm <= 0 or speed_mm_s <= 0:
+        return 0.0
+    # Import perezoso: el cliente ya importa este módulo al arrancar.
+    from app.robot.client import PACE_EFFICIENCY, effective_speed_mm_s
+
+    rate = effective_speed_mm_s(distance_mm, speed_mm_s, acc_mm_s2) * PACE_EFFICIENCY
+    return float(distance_mm) / rate
+
+
+def estimate_motion(
+    strokes: list[np.ndarray],
+    width: int,
+    target_width_mm: float = 140.0,
+    speed_mm_s: float = BOOTH_DRAW_SPEED_MM_S,
+    acc_mm_s2: float = BOOTH_ACC_MM_S2,
+    lift_mm: float = BOOTH_LIFT_MM,
+) -> tuple[float, float]:
+    """Segundos de tinta y segundos de pluma arriba.
+
+    Cada arista tarda lo que tarda en acelerar, no 0.17 s fijos. Cada hueco
+    sube la pluma `lift_mm`, viaja y vuelve a bajar: eso es el movimiento,
+    no los 3 s de cuando vaciar la cola era parte de la levantada.
+    """
+    if not strokes:
+        return 0.0, 0.0
+    mm_per_px = float(target_width_mm) / max(1, width)
+    travel_speed = min(100.0, max(1.0, float(speed_mm_s) * 2.0))
+    draw_s = 0.0
+    for stroke in strokes:
+        points = np.asarray(stroke, dtype=np.float64)
+        for start, end in zip(points, points[1:]):
+            distance = float(np.hypot(*(end - start))) * mm_per_px
+            draw_s += _move_seconds(distance, speed_mm_s, acc_mm_s2)
+    air_s = 0.0
+    for previous, current in zip(strokes, strokes[1:]):
+        gap = float(np.hypot(*(current[0] - previous[-1]))) * mm_per_px
+        air_s += _move_seconds(float(lift_mm), travel_speed, acc_mm_s2) * 2.0
+        air_s += _move_seconds(gap, travel_speed, acc_mm_s2)
+    return draw_s, air_s
+
+
 def estimate_seconds(
     strokes: list[np.ndarray],
     width: int,
     target_width_mm: float = 140.0,
-    speed_mm_s: float = MEASURED_SPEED_MM_S,
+    speed_mm_s: float = BOOTH_DRAW_SPEED_MM_S,
+    acc_mm_s2: float = BOOTH_ACC_MM_S2,
+    lift_mm: float = BOOTH_LIFT_MM,
 ) -> float:
     """Segundos que tardará el robot (sin rehacer la trayectoria completa)."""
-    if not strokes:
-        return 0.0
-    mm_per_px = float(target_width_mm) / max(1, width)
-    draw_s = 0.0
-    for stroke in strokes:
-        length_mm = _polyline_length(stroke) * mm_per_px
-        edges = max(1, len(stroke) - 1)
-        draw_s += max(length_mm / max(1.0, speed_mm_s), MIN_COMMAND_S * edges)
-        draw_s += MIN_COMMAND_S
-    travel_s = 0.0
-    for previous, current in zip(strokes, strokes[1:]):
-        travel_mm = float(np.hypot(*(current[0] - previous[-1]))) * mm_per_px
-        travel_s += max(travel_mm / max(1.0, speed_mm_s * 1.6), MIN_COMMAND_S)
-    lifts = max(0, len(strokes) - 1)
-    return draw_s + travel_s + lifts * PEN_LIFT_S
+    draw_s, air_s = estimate_motion(
+        strokes,
+        width,
+        target_width_mm=target_width_mm,
+        speed_mm_s=speed_mm_s,
+        acc_mm_s2=acc_mm_s2,
+        lift_mm=lift_mm,
+    )
+    return draw_s + air_s
 
 
 def prune_to_budget(
@@ -658,7 +701,7 @@ def prune_to_budget(
     width: int,
     max_seconds: float,
     target_width_mm: float = 140.0,
-    speed_mm_s: float = MEASURED_SPEED_MM_S,
+    speed_mm_s: float = BOOTH_DRAW_SPEED_MM_S,
     min_strokes: int = 12,
 ) -> list[np.ndarray]:
     """Quita los trazos más cortos hasta que el dibujo quepa en el tiempo.
@@ -830,7 +873,7 @@ def build_trajectory(
     width: int,
     height: int,
     target_width_mm: float = 140.0,
-    speed_mm_s: float = MEASURED_SPEED_MM_S,
+    speed_mm_s: float = BOOTH_DRAW_SPEED_MM_S,
     rotate: bool = False,
 ) -> VectorResult:
     """Convierte los trazos ordenados en una trayectoria en milímetros.
@@ -890,11 +933,10 @@ def build_trajectory(
         if len(path):
             current = path[-1]
 
-    draw_seconds = draw_length_mm / max(1.0, speed_mm_s)
-    travel_seconds = travel_length_mm / max(1.0, speed_mm_s * 1.6)
-    estimated_total_seconds = estimate_seconds(
+    draw_seconds, air_seconds = estimate_motion(
         strokes, width, target_width_mm=target_width_mm, speed_mm_s=speed_mm_s
     )
+    estimated_total_seconds = draw_seconds + air_seconds
     result.stats = {
         "strokes": len(result.strokes),
         "draw_length_mm": round(draw_length_mm, 1),

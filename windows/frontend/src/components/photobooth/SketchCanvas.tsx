@@ -45,6 +45,10 @@ export function SketchCanvas({ strokes, progress }: SketchCanvasProps) {
   const progressRef = useRef<number | null>(null)
 
   useEffect(() => {
+    // La demo de 14 s no debe quedarse pintada cuando llega el primer reporte.
+    if (progress !== null && progressRef.current === null) {
+      shownRef.current = progress
+    }
     progressRef.current = progress
   }, [progress])
 
@@ -73,14 +77,6 @@ export function SketchCanvas({ strokes, progress }: SketchCanvasProps) {
       }
       lengths.push(length)
       total += length
-      // El backend también suma este viaje con el lápiz levantado al progreso
-      // del trabajo. Incluirlo mantiene la animación y la punta de la pluma
-      // al mismo ritmo que el MG400.
-      const next = strokes[index + 1]?.points
-      if (points.length > 0 && next && next.length > 0) {
-        const end = points[points.length - 1]
-        total += Math.hypot(next[0][0] - end[0], next[0][1] - end[1])
-      }
     }
 
     if (!Number.isFinite(minX)) {

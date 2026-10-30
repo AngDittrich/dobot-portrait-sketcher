@@ -423,6 +423,7 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
     } catch (error) {
       // Sin backend (fetch no llega) la cabina sigue como demo. Si el backend
       // contestó con un error, el trabajo no existe y hay que avisar.
+      setRobotJob(null)
       if (error instanceof Error && error.message.startsWith('Backend ')) {
         console.error('[robot] el backend rechazó el trabajo:', error.message)
         dispatch({ type: 'ROBOT_FAILED' })
@@ -448,6 +449,15 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
   const release = useCallback(() => dispatch({ type: 'RELEASE' }), [])
 
   const accept = useCallback(() => {
+    // Progreso 0 antes del POST: si el trabajo aún no existe, la hoja no se
+    // dibuja sola en 14 s y luego se niega a volver atrás.
+    setRobotJob({
+      jobId: '',
+      status: 'queued',
+      progress: 0,
+      etaSeconds: 0,
+      error: null,
+    })
     dispatch({ type: 'DRAW' })
     void startRobotJob()
   }, [startRobotJob])
@@ -455,7 +465,13 @@ export function usePhotobooth(webcamRef: RefObject<Webcam | null>) {
   /** Desde robotError: vuelve a mandar el mismo boceto. */
   const retryRobot = useCallback(() => {
     stopRobotPolling()
-    setRobotJob(null)
+    setRobotJob({
+      jobId: '',
+      status: 'queued',
+      progress: 0,
+      etaSeconds: 0,
+      error: null,
+    })
     dispatch({ type: 'DRAW' })
     void startRobotJob()
   }, [startRobotJob, stopRobotPolling])
