@@ -190,6 +190,9 @@ class SketchRequest(BaseModel):
     traits: list[str] = Field(default_factory=list)
     # retrato, caricatura, anime o cartoon. Otro valor cae en caricatura.
     style: str = DEFAULT_STYLE
+    # photo: la misma ruta que un visitante. ink: calca lo oscuro, sin modelo
+    # y sin el rótulo SYSCOM ROBOTICS.
+    source: str = Field("photo", pattern="^(photo|ink)$")
 
 
 class JobRequest(BaseModel):
@@ -202,6 +205,7 @@ def build_sketch(
     params: SketchParams,
     traits: list[str] | None = None,
     style: str | None = None,
+    source: str = "photo",
 ) -> dict:
     """Foto -> líneas -> trazos -> SVG + trayectoria en mm.
 
@@ -209,11 +213,23 @@ def build_sketch(
     hay key o el modelo falla, se cae al XDoG congelado y la cabina sigue
     funcionando: un boceto peor es mejor que una pantalla de error delante del
     visitante.
+
+    `source="ink"` no llama al modelo: lo oscuro de la imagen ya es la tinta,
+    y no se le agrega el rótulo.
     """
+    if source not in {"photo", "ink"}:
+        raise ValueError("source tiene que ser photo o ink")
     ai_meta: dict | None = None
     mask = None
     stages: dict = {}
-    if params.use_ai:
+    with_caption = True
+    if source == "ink":
+        mask = vectorize_ops.mask_from_dark(image)
+        if int(mask.max()) == 0:
+            raise ValueError("la imagen no tiene líneas oscuras")
+        ai_meta = {"provider": "tinta", "model": "calco", "seconds": 0}
+        with_caption = False
+    elif params.use_ai:
         try:
             mask, ai_meta, stages = providers.generate_mask(
                 image, models_dir=MODELS_DIR, traits=traits, style=style
@@ -243,8 +259,10 @@ def build_sketch(
             bridge_gap_px=params.ai_bridge_gap_px,
             bridge_angle_deg=params.ai_bridge_angle_deg,
         )
+        if source == "ink" and not strokes_px:
+            raise ValueError("no salió ningún trazo de esa imagen")
         portrait_ms = int(float((ai_meta or {}).get("seconds") or 0) * 1000)
-        face_detected = True
+        face_detected = source != "ink"
     else:
         portrait = renderer.render(
             image,
@@ -269,7 +287,8 @@ def build_sketch(
 
     ordered = [stroke for stroke, _ in vectorize_ops.order_strokes(strokes_px)]
     caption_from = len(ordered)
-    ordered, crop_height = append_caption(ordered, crop_width, crop_height)
+    if with_caption:
+        ordered, crop_height = append_caption(ordered, crop_width, crop_height)
     strokes_before = len(ordered)
     before = vectorize_ops.render_black_strokes(ordered, crop_width, crop_height, thickness=2)
     planned = plan_robot_path(
@@ -382,8 +401,15 @@ async def create_sketch(payload: SketchRequest) -> dict:
     payload.params.target_width_mm = _portrait_width_mm()
     try:
         result = await run_in_threadpool(
-            build_sketch, image, payload.params, payload.traits, payload.style
+            build_sketch,
+            image,
+            payload.params,
+            payload.traits,
+            payload.style,
+            payload.source,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Error generando el boceto: {exc}") from exc
 

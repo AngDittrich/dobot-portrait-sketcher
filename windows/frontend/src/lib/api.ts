@@ -56,17 +56,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
-/** Foto (data URL) y rasgos elegidos -> boceto en el servidor. */
+/** Foto (data URL) y rasgos elegidos -> boceto en el servidor.
+
+ * `source: 'ink'` calca lo oscuro, sin modelo y sin el rótulo.
+ * `remember: false` no pisa el boceto que la cabina está por mandar.
+ */
 export async function postSketch(
   image: string,
   traits: string[] = [],
   style = 'caricatura',
+  source: 'photo' | 'ink' = 'photo',
+  remember = true,
 ): Promise<SketchResponse> {
   const data = await request<SketchResponse>('/api/sketch', {
     method: 'POST',
-    body: JSON.stringify({ image, traits, style }),
+    body: JSON.stringify({ image, traits, style, source }),
   })
-  lastSketchId = data.id
+  if (remember) lastSketchId = data.id
   return data
 }
 
