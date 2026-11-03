@@ -949,6 +949,48 @@
   gap: 0.55rem;
 }
 
+/* ---------- Sección Dibujar ---------- */
+.admin-draw {
+  display: grid;
+  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.admin-draw-file {
+  display: none;
+}
+
+.admin-draw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.admin-draw-sheet {
+  background: #f4f1ea;
+}
+
+.admin-draw-sheet h3 {
+  color: rgba(30, 41, 59, 0.55);
+}
+
+.admin-draw-sheet img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.admin-draw-sheet .admin-empty {
+  color: rgba(30, 41, 59, 0.55);
+}
+
+.admin-draw .admin-progress {
+  margin-top: 0.8rem;
+}
+
 /* ---------- Sección Depuración ---------- */
 .admin-debug {
   display: grid;
@@ -1630,7 +1672,8 @@
     grid-template-columns: 1fr;
   }
 
-  .admin-debug {
+  .admin-debug,
+  .admin-draw {
     grid-template-columns: 1fr;
   }
 

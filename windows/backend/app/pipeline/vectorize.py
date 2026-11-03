@@ -420,6 +420,23 @@ def _centerline_paths(
     return paths
 
 
+# Por debajo de esto el píxel es tinta. Una línea negra sobre papel blanco entra;
+# el fondo claro no.
+INK_DARK_MAX = 180
+
+
+def mask_from_dark(image: np.ndarray, threshold: int = INK_DARK_MAX) -> np.ndarray:
+    """Máscara 0/255: lo oscuro queda en blanco, que es tinta para el trazador.
+
+    Sirve para calcar un logo o un boceto ya dibujado, sin pasar por el modelo.
+    """
+    if image.ndim == 2:
+        gray = image
+    else:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    return np.where(gray < int(threshold), 255, 0).astype(np.uint8)
+
+
 def strokes_from_centerline(
     mask: np.ndarray,
     min_length_px: float = 8.0,

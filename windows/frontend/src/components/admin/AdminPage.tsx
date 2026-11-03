@@ -7,6 +7,7 @@ import { ActivitySection } from './ActivitySection'
 import { ConfigSection } from './ConfigSection'
 import { ControlSection } from './ControlSection'
 import { DebugSection } from './DebugSection'
+import { DrawSection } from './DrawSection'
 import { SECTIONS } from './sections'
 import type { SectionId } from './sections'
 import { StatusSection } from './StatusSection'
@@ -193,6 +194,7 @@ export function AdminPage({
           {active === 'control' && (
             <ControlSection status={status} token={token} send={send} onNotice={setNotice} />
           )}
+          {active === 'dibujar' && <DrawSection status={status} />}
           {active === 'configuracion' && (
             <ConfigSection status={status} token={token} onNotice={setNotice} />
           )}
