@@ -80,11 +80,20 @@
   stroke-width: 1;
 }
 
-/* Mechas quietas: cabeza cuadrada encendida y una estela larga que se apaga.
-   Sin animación: la línea se lee como un pulso que ya pasó. */
+/* Mechas: cabeza cuadrada encendida y una estela larga que se apaga.
+   El pulso recorre la traza en bucle; cada mecha lleva su propio ritmo. */
 .circuit-streak path {
   stroke-linecap: butt;
   stroke-linejoin: miter;
+  animation-name: circuit-run;
+  animation-duration: 10s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes circuit-run {
+  from { stroke-dashoffset: 1000; }
+  to { stroke-dashoffset: 0; }
 }
 
 .circuit-streak .circuit-head {
@@ -1953,6 +1962,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .circuit-streak path {
+    animation: none;
+  }
+
   .booth-diagonal-glow.is-waiting {
     animation: none;
     opacity: 0.5;

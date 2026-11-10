@@ -45,14 +45,23 @@ interface StreakProps {
   d: string
   at: number
   tone: string
+  duration: number
 }
 
 /**
- * Una mecha quieta: cabeza cuadrada encendida y una estela larga que se apaga
- * hacia atrás. No se anima: la línea se lee como si el pulso ya hubiera pasado.
+ * Una mecha recorriendo su traza: cabeza cuadrada encendida y una estela larga
+ * que se apaga hacia atrás. El desfase negativo deja la estela ya colocada en
+ * su punto de la pista, y la animación la hace avanzar en bucle.
  */
-function Streak({ d, at, tone }: StreakProps) {
+function Streak({ d, at, tone, duration }: StreakProps) {
   const offset = (start: number) => (1000 - (start % 1000) + 1000) % 1000
+  const phase = (position: number) => -((1000 - offset(position)) / 1000) * duration
+
+  const motion = (position: number) => ({
+    animationDuration: `${duration}s`,
+    animationDelay: `${phase(position)}s`,
+    strokeDashoffset: offset(position),
+  })
 
   return (
     <g className="circuit-streak">
@@ -63,8 +72,8 @@ function Streak({ d, at, tone }: StreakProps) {
           pathLength={1000}
           className={`circuit-tail ${tail.className} ${tone}`}
           style={{
+            ...motion(at - tail.len),
             strokeDasharray: `${tail.len} ${1000 - tail.len}`,
-            strokeDashoffset: offset(at - tail.len),
           }}
         />
       ))}
@@ -73,8 +82,8 @@ function Streak({ d, at, tone }: StreakProps) {
         pathLength={1000}
         className={`circuit-head ${tone}`}
         style={{
+          ...motion(at),
           strokeDasharray: '1.5 998.5',
-          strokeDashoffset: offset(at),
         }}
       />
     </g>
@@ -118,11 +127,17 @@ export function CircuitBackdrop() {
         <g className="circuit-live">
           {TRACES.map((trace, index) => {
             const tone = index % 3 === 0 ? 'is-blue' : 'is-celeste'
+            const duration = 9 + (index % 4) * 2.4
             return (
               <g key={trace.d}>
-                <Streak d={trace.d} at={trace.at} tone={tone} />
+                <Streak d={trace.d} at={trace.at} tone={tone} duration={duration} />
                 {trace.dense && (
-                  <Streak d={trace.d} at={(trace.at + 500) % 1000} tone={tone} />
+                  <Streak
+                    d={trace.d}
+                    at={(trace.at + 500) % 1000}
+                    tone={tone}
+                    duration={duration}
+                  />
                 )}
               </g>
             )
