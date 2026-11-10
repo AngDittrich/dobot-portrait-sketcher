@@ -7,10 +7,12 @@ import type { PhotoboothStatus } from '../../hooks/usePhotobooth'
 import { AdminDesk } from './AdminDesk'
 import { BoothControls } from './BoothControls'
 import { CameraStage } from './CameraStage'
+import { CircuitBackdrop } from './CircuitBackdrop'
 import { IdleRing } from './IdleRing'
 import { ConfettiCanvas } from './ConfettiCanvas'
 import { DrawingScreen } from './DrawingScreen'
 import { RobotErrorScreen } from './RobotErrorScreen'
+import { StylePicker } from './StylePicker'
 import { ThanksScreen } from './ThanksScreen'
 import { Toast } from './Toast'
 import { WelcomeScreen } from './WelcomeScreen'
@@ -51,11 +53,22 @@ const STATUS_MESSAGES: Record<PhotoboothStatus, string> = {
 }
 
 const headingAnimation = {
-  initial: { opacity: 0, y: 10, filter: 'blur(4px)' },
-  animate: { opacity: 1, y: 0, filter: 'blur(0px)' },
-  exit: { opacity: 0, y: -8, filter: 'blur(4px)' },
-  transition: { duration: 0.28, ease: [0.4, 0, 0.2, 1] },
+  initial: { opacity: 0, y: 8 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -6 },
+  transition: { duration: 0.22, ease: [0.4, 0, 0.2, 1] },
 } as const
+
+/** Una línea de apoyo por paso: qué se espera del visitante, sin numerar pasos. */
+const RAIL_HINTS: Partial<Record<PhotoboothStatus, string>> = {
+  camera: 'Ponte dentro de la silueta y la foto se toma sola.',
+  countdown: 'Quieta, ya casi está.',
+  capture: 'Guardando la foto.',
+  review: 'Si no te gusta, puedes repetirla.',
+  style: 'Un estilo, una profesión y un accesorio. Todo es opcional menos el estilo.',
+  reveal: 'Esto tarda unos segundos.',
+  confirm: 'Tu retrato está listo. El robot lo pasa al papel.',
+}
 
 /**
  * Wizard de una sola pantalla sobre el backend de main:
@@ -126,22 +139,19 @@ export function PhotoboothApp({ onOpenAdmin }: { onOpenAdmin: () => void }) {
 
   return (
     <div className="booth-shell">
-      <div className="booth-ambient" aria-hidden="true">
-        <span className="booth-aurora booth-aurora--a" />
-        <span className="booth-aurora booth-aurora--b" />
-        <span className="booth-noise" />
-      </div>
-
+      {booth.status === 'attract' && <CircuitBackdrop />}
       <header className="booth-brandbar">
         <div className="booth-brandbar-inner">
-          <img
-            src="/brand/syscomLargeLogo.webp"
-            alt="SYSCOM"
-            className="booth-logo"
-            draggable={false}
-          />
-          <span className="booth-brand-divider" aria-hidden="true" />
-          <span className="booth-product">Robot Dobot</span>
+          <div className="booth-brand-lockup">
+            <img
+              src="/brand/syscomLargeLogo.webp"
+              alt="SYSCOM"
+              className="booth-logo"
+              draggable={false}
+            />
+            <span className="booth-brand-divider" aria-hidden="true" />
+            <span className="booth-product">Robot Dobot</span>
+          </div>
           <span className="booth-demo-note">Conectado al backend del robot</span>
           <AdminDesk onOpenAdmin={onOpenAdmin} />
         </div>
@@ -154,54 +164,129 @@ export function PhotoboothApp({ onOpenAdmin }: { onOpenAdmin: () => void }) {
           {booth.inCameraFlow && (
             <motion.div
               key="camera-flow"
-              className="booth-flow"
+              className={`booth-flow booth-flow--${booth.status}`}
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
             >
               <div className="booth-heading">
-                <AnimatePresence mode="wait">
-                  {heading && (
-                    <motion.h1 key={booth.status} className="booth-title" {...headingAnimation}>
-                      {heading}
-                    </motion.h1>
+                <div className="booth-heading-text">
+                  <AnimatePresence mode="wait">
+                    {heading && (
+                      <motion.h1 key={booth.status} className="booth-title" {...headingAnimation}>
+                        {heading}
+                      </motion.h1>
+                    )}
+                  </AnimatePresence>
+                  {RAIL_HINTS[booth.status] && (
+                    <p className="booth-hint">{RAIL_HINTS[booth.status]}</p>
                   )}
-                </AnimatePresence>
+                </div>
+                {booth.idleLeftMs !== null && (
+                  <IdleRing leftMs={booth.idleLeftMs} onReset={booth.resetIdle} />
+                )}
               </div>
 
               <div className="booth-stage-wrap">
-                <CameraStage
-                  webcamRef={webcamRef}
-                  webcamKey={webcamKey}
-                  status={booth.status}
-                  countdown={booth.countdown}
-                  photo={booth.photo}
-                  traits={booth.traits}
-                  styleId={booth.styleId}
-                  onToggleTrait={booth.toggleTrait}
-                  onStyle={booth.chooseStyle}
-                  sketch={booth.sketch}
-                  progress={booth.progress}
-                  cameraError={cameraError}
-                  videoConstraints={videoConstraints}
-                  pose={pose ?? 'off'}
-                  onCameraReady={handleCameraReady}
-                  onCameraError={handleCameraError}
-                  onRetryCamera={retryCamera}
-                >
-                  <BoothControls
+                {booth.status === 'style' && booth.photo ? (
+                  <StylePicker
+                    photo={booth.photo}
+                    traits={booth.traits}
+                    styleId={booth.styleId}
+                    onToggle={booth.toggleTrait}
+                    onStyle={booth.chooseStyle}
+                  />
+                ) : (
+                  <CameraStage
+                    webcamRef={webcamRef}
+                    webcamKey={webcamKey}
                     status={booth.status}
                     countdown={booth.countdown}
+                    photo={booth.photo}
+                    sketch={booth.sketch}
                     progress={booth.progress}
                     cameraError={cameraError}
-                    onStart={() => {
-                      autoShot.current = false
-                      booth.start()
-                    }}
+                    videoConstraints={videoConstraints}
+                    pose={pose ?? 'off'}
+                    onCameraReady={handleCameraReady}
+                    onCameraError={handleCameraError}
+                    onRetryCamera={retryCamera}
                   />
-                </CameraStage>
+                )}
               </div>
+
+              <AnimatePresence>
+                {!cameraError &&
+                  (booth.status === 'camera' ||
+                    booth.status === 'countdown' ||
+                    booth.status === 'capture' ||
+                    booth.status === 'reveal' ||
+                    booth.status === 'review' ||
+                    booth.status === 'style' ||
+                    booth.status === 'confirm') && (
+                    <motion.div
+                      key={`actions-${booth.status}`}
+                      className="booth-actions"
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+                    >
+                      {(booth.status === 'camera' ||
+                        booth.status === 'countdown' ||
+                        booth.status === 'capture' ||
+                        booth.status === 'reveal') && (
+                        <BoothControls
+                          status={booth.status}
+                          countdown={booth.countdown}
+                          progress={booth.progress}
+                          onStart={() => {
+                            autoShot.current = false
+                            booth.start()
+                          }}
+                        />
+                      )}
+
+                      {(booth.status === 'review' || booth.status === 'confirm') && (
+                        <button
+                          type="button"
+                          className="btn booth-choice booth-choice--no"
+                          onClick={booth.retake}
+                        >
+                          TOMAR OTRA
+                        </button>
+                      )}
+                      {booth.status === 'review' && (
+                        <button
+                          type="button"
+                          className="btn booth-choice booth-choice--yes"
+                          onClick={booth.like}
+                        >
+                          ME GUSTA
+                        </button>
+                      )}
+                      {booth.status === 'style' && (
+                        <button
+                          type="button"
+                          className="btn booth-choice booth-choice--yes"
+                          onClick={booth.proceed}
+                        >
+                          CONTINUAR
+                        </button>
+                      )}
+                      {booth.status === 'confirm' && (
+                        <button
+                          type="button"
+                          className="btn booth-choice booth-choice--yes"
+                          onClick={booth.accept}
+                        >
+                          ¡SÍ!
+                        </button>
+                      )}
+                    </motion.div>
+                  )}
+              </AnimatePresence>
             </motion.div>
           )}
 
@@ -217,60 +302,31 @@ export function PhotoboothApp({ onOpenAdmin }: { onOpenAdmin: () => void }) {
           {booth.status === 'thanks' && <ThanksScreen key="thanks" />}
           {booth.status === 'robotError' && <RobotErrorScreen key="robot-error" />}
         </AnimatePresence>
+
+        <AnimatePresence>
+          {booth.status === 'robotError' && (
+            <motion.div
+              key="robot-error-actions"
+              className="booth-actions booth-actions--scene"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+            >
+              <button type="button" className="btn booth-choice booth-choice--no" onClick={booth.home}>
+                INICIO
+              </button>
+              <button
+                type="button"
+                className="btn booth-choice booth-choice--yes"
+                onClick={booth.retryRobot}
+              >
+                REINTENTAR
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
-
-      <AnimatePresence>
-        {booth.status === 'robotError' && (
-          <motion.div
-            key="robot-error"
-            className="booth-choices"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 12 }}
-            transition={{ type: 'spring', stiffness: 280, damping: 24 }}
-          >
-            <button type="button" className="btn booth-choice booth-choice--no" onClick={booth.home}>
-              INICIO
-            </button>
-            <button type="button" className="btn booth-choice booth-choice--yes" onClick={booth.retryRobot}>
-              REINTENTAR
-            </button>
-          </motion.div>
-        )}
-        {(booth.status === 'review' || booth.status === 'style' || booth.status === 'confirm') && (
-          <motion.div
-            key={booth.status}
-            className="booth-choices"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 12 }}
-            transition={{ type: 'spring', stiffness: 280, damping: 24 }}
-          >
-            <button type="button" className="btn booth-choice booth-choice--no" onClick={booth.retake}>
-              TOMAR OTRA
-            </button>
-            {booth.status === 'review' && (
-              <button type="button" className="btn booth-choice booth-choice--yes" onClick={booth.like}>
-                ME GUSTA
-              </button>
-            )}
-            {booth.status === 'style' && (
-              <button type="button" className="btn booth-choice booth-choice--yes" onClick={booth.proceed}>
-                CONTINUAR
-              </button>
-            )}
-            {booth.status === 'confirm' && (
-              <button type="button" className="btn booth-choice booth-choice--yes" onClick={booth.accept}>
-                ¡SÍ!
-              </button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {booth.idleLeftMs !== null && (
-        <IdleRing leftMs={booth.idleLeftMs} onReset={booth.resetIdle} />
-      )}
 
       <Toast toast={booth.toast} onDismiss={booth.dismissToast} />
       <ConfettiCanvas trigger={booth.celebrationId} />
