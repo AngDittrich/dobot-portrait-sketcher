@@ -41,6 +41,12 @@
   -webkit-mask-image: radial-gradient(130% 100% at 50% 0%, #000 30%, transparent 92%);
 }
 
+/* En el home manda la retícula del SVG: la del shell es de 64 px y, al
+   escalarse la escena, quedaba desfasada y duplicaba los cuadros. */
+.booth-shell:has(.circuit-backdrop)::before {
+  opacity: 0;
+}
+
 /* Home: trazas de circuito recorridas por un segmento de luz.
    La base queda quieta; la luz viaja como una moto sobre su estela. */
 .circuit-backdrop {
@@ -60,49 +66,70 @@
 }
 
 .circuit-grid-line {
-  stroke: rgba(125, 211, 252, 0.14);
+  stroke: rgba(56, 189, 248, 0.2);
   stroke-width: 1;
 }
 
 .circuit-grid-major path {
-  stroke: rgba(96, 165, 250, 0.2);
-  stroke-width: 1;
+  stroke: rgba(59, 130, 246, 0.38);
+  stroke-width: 1.1;
 }
 
 .circuit-base path {
-  stroke: rgba(125, 211, 252, 0.26);
-  stroke-width: 1.2;
+  stroke: rgba(56, 189, 248, 0.52);
+  stroke-width: 1.3;
 }
 
 .circuit-base rect {
-  fill: rgba(147, 197, 253, 0.55);
-  stroke: rgba(8, 24, 47, 0.8);
+  fill: rgba(125, 211, 252, 0.9);
+  stroke: rgba(8, 24, 47, 0.9);
   stroke-width: 1;
 }
 
-/* Mechas quietas: cabeza cuadrada encendida y una estela larga que se apaga.
-   Sin animación: la línea se lee como un pulso que ya pasó. */
+/* Mechas: cabeza cuadrada encendida y una estela larga que se apaga.
+   El pulso recorre la traza en bucle; cada mecha lleva su propio ritmo. */
 .circuit-streak path {
   stroke-linecap: butt;
   stroke-linejoin: miter;
+  animation-name: circuit-run;
+  animation-duration: 10s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes circuit-run {
+  from { stroke-dashoffset: 1000; }
+  to { stroke-dashoffset: 0; }
 }
 
 .circuit-streak .circuit-head {
   stroke-linecap: square;
-  stroke-width: 4.2;
+  stroke-width: 4.6;
 }
 
 .circuit-streak .circuit-tail {
-  stroke-width: 2.8;
+  stroke-width: 3;
 }
 
-.circuit-streak .circuit-head.is-celeste { stroke: #c8f8ff; }
-.circuit-streak .circuit-head.is-blue { stroke: #7aa8ff; }
-.circuit-streak .circuit-tail.is-celeste { stroke: #7dd3fc; }
-.circuit-streak .circuit-tail.is-blue { stroke: #3b82f6; }
-.circuit-streak .circuit-tail.is-near { opacity: 0.72; }
-.circuit-streak .circuit-tail.is-mid { opacity: 0.38; }
-.circuit-streak .circuit-tail.is-far { opacity: 0.14; }
+.circuit-streak .circuit-head.is-celeste {
+  stroke: #e6feff;
+  filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.8));
+}
+.circuit-streak .circuit-head.is-blue {
+  stroke: #bfdbfe;
+  filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.7));
+}
+.circuit-streak .circuit-tail.is-celeste {
+  stroke: #22d3ee;
+  filter: drop-shadow(0 0 5px rgba(34, 211, 238, 0.38));
+}
+.circuit-streak .circuit-tail.is-blue {
+  stroke: #3b82f6;
+  filter: drop-shadow(0 0 5px rgba(59, 130, 246, 0.34));
+}
+.circuit-streak .circuit-tail.is-near { opacity: 0.95; }
+.circuit-streak .circuit-tail.is-mid { opacity: 0.7; }
+.circuit-streak .circuit-tail.is-far { opacity: 0.4; }
 
 /* ---------- Barra de marca: 56 px, regla fina ---------- */
 .booth-brandbar {
@@ -1780,11 +1807,11 @@
   }
 
   .circuit-grid-line {
-    stroke: rgba(125, 211, 252, 0.2);
+    stroke: rgba(56, 189, 248, 0.26);
   }
 
   .circuit-grid-major path {
-    stroke: rgba(96, 165, 250, 0.32);
+    stroke: rgba(59, 130, 246, 0.5);
   }
 }
 
@@ -1953,6 +1980,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .circuit-streak path {
+    animation: none;
+  }
+
   .booth-diagonal-glow.is-waiting {
     animation: none;
     opacity: 0.5;
