@@ -2227,3 +2227,22 @@
     animation: none;
   }
 }
+
+/* Tablet vertical: el panel de estilos se ajusta a sus tarjetas. Antes la
+   fila sobrante se estiraba y dejaba un bloque oscuro vacío bajo ESTILO. */
+@media (min-width: 900px) and (max-width: 1023px) and (orientation: portrait) {
+  .booth-style {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .booth-style-panel {
+    align-self: start;
+    height: auto;
+    overflow: hidden;
+  }
+
+  .booth-style-groups,
+  .booth-style-group {
+    flex: 0 0 auto;
+  }
+}
