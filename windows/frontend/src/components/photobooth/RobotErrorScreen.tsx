@@ -8,7 +8,7 @@ import { motion } from 'framer-motion'
 export function RobotErrorScreen() {
   return (
     <motion.section
-      className="booth-scene"
+      className="booth-scene booth-scene--error"
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
