@@ -61,7 +61,6 @@ const TABS: { id: TabId; label: string }[] = [
 export function StylePicker({ photo, traits, styleId, onToggle, onStyle }: StylePickerProps) {
   const [tab, setTab] = useState<TabId>('estilo')
   const [open, setOpen] = useState(true)
-  const category = TRAIT_CATEGORIES.find((item) => item.id === tab) ?? null
 
   return (
     <div className={`booth-style${open ? '' : ' is-collapsed'}`}>
@@ -81,18 +80,17 @@ export function StylePicker({ photo, traits, styleId, onToggle, onStyle }: Style
         )}
       </figure>
 
-      {open && (
       <div className="booth-style-panel" id="booth-style-panel">
-        <div
-          key={tab}
-          className="booth-style-track"
-          id={`booth-style-track-${tab}`}
-          role="tabpanel"
-          aria-label={TABS.find((item) => item.id === tab)?.label}
-          tabIndex={0}
-        >
-          {tab === 'estilo'
-            ? DRAWING_STYLES.map((style) => {
+        <div className="booth-style-groups">
+          <section
+            className={`booth-style-group${tab === 'estilo' ? ' is-active' : ''}`}
+            aria-labelledby="booth-style-group-estilo"
+          >
+            <h3 className="booth-style-group-title" id="booth-style-group-estilo">
+              Estilo
+            </h3>
+            <div className="booth-style-track" id="booth-style-track-estilo" role="tabpanel" tabIndex={0}>
+              {DRAWING_STYLES.map((style) => {
                 const selected = styleId === style.id
                 return (
                   <button
@@ -108,28 +106,49 @@ export function StylePicker({ photo, traits, styleId, onToggle, onStyle }: Style
                     <span className="booth-style-tile-label">{style.label}</span>
                   </button>
                 )
-              })
-            : category?.options.map((option) => {
-                const selected = traits[category.id] === option.id
-                // Si el otro grupo ya ocupa ese espacio, el botón se apaga en
-                // vez de apilar dos sombreros sobre la misma cabeza.
-                const blocked = traitConflicts(traits, category.id, option.id)
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    className={`booth-style-tile${selected ? ' is-on' : ''}`}
-                    aria-pressed={selected}
-                    disabled={blocked}
-                    onClick={() => onToggle(category.id, option.id)}
-                  >
-                    <span className="booth-style-tile-art">
-                      <TraitGlyph id={option.id} />
-                    </span>
-                    <span className="booth-style-tile-label">{option.label}</span>
-                  </button>
-                )
               })}
+            </div>
+          </section>
+
+          {TRAIT_CATEGORIES.map((category) => (
+            <section
+              key={category.id}
+              className={`booth-style-group${tab === category.id ? ' is-active' : ''}`}
+              aria-labelledby={`booth-style-group-${category.id}`}
+            >
+              <h3 className="booth-style-group-title" id={`booth-style-group-${category.id}`}>
+                {category.title}
+              </h3>
+              <div
+                className="booth-style-track"
+                id={`booth-style-track-${category.id}`}
+                role="tabpanel"
+                tabIndex={0}
+              >
+                {category.options.map((option) => {
+                  const selected = traits[category.id] === option.id
+                  // Si el otro grupo ya ocupa ese espacio, el botón se apaga en
+                  // vez de apilar dos sombreros sobre la misma cabeza.
+                  const blocked = traitConflicts(traits, category.id, option.id)
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`booth-style-tile${selected ? ' is-on' : ''}`}
+                      aria-pressed={selected}
+                      disabled={blocked}
+                      onClick={() => onToggle(category.id, option.id)}
+                    >
+                      <span className="booth-style-tile-art">
+                        <TraitGlyph id={option.id} />
+                      </span>
+                      <span className="booth-style-tile-label">{option.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          ))}
         </div>
 
         <div className="booth-style-footer">
@@ -160,7 +179,6 @@ export function StylePicker({ photo, traits, styleId, onToggle, onStyle }: Style
           </button>
         </div>
       </div>
-      )}
     </div>
   )
 }
