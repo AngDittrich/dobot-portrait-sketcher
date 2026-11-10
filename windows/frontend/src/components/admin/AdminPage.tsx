@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { LogOut, Menu, OctagonX, ScrollText, Trash2 } from 'lucide-react'
+import { LogOut, Menu, OctagonX, ScrollText, Trash2, X } from 'lucide-react'
 import { adminActivity, adminClearJobs, adminCommand, cancelActiveJob } from '../../lib/api'
 import type { AdminActivity, AdminCommand, AdminStatus } from '../../lib/api'
 import { useAdminStatus } from '../../hooks/useAdminStatus'
@@ -210,6 +210,17 @@ export function AdminPage({
 
       <div className="admin-body">
         <nav id="admin-nav" className={navOpen ? 'admin-nav is-open' : 'admin-nav'} aria-label="Secciones del panel">
+          <div className="admin-nav-head">
+            <span>Secciones</span>
+            <button
+              type="button"
+              className="admin-nav-close"
+              aria-label="Cerrar el menú"
+              onClick={() => setNavOpen(false)}
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+          </div>
           {SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}

@@ -59,46 +59,50 @@
   height: 100%;
 }
 
-.circuit-base path {
-  stroke: rgba(125, 211, 252, 0.2);
+.circuit-grid-line {
+  stroke: rgba(125, 211, 252, 0.14);
   stroke-width: 1;
 }
 
-.circuit-base rect {
-  fill: rgba(125, 211, 252, 0.38);
+.circuit-grid-major path {
+  stroke: rgba(96, 165, 250, 0.2);
+  stroke-width: 1;
 }
 
-/* La luz es una línea fina: cabeza cuadrada y estela que se apaga.
-   Sin halos, sin puntas redondeadas. */
-.circuit-spark path {
+.circuit-base path {
+  stroke: rgba(125, 211, 252, 0.26);
+  stroke-width: 1.2;
+}
+
+.circuit-base rect {
+  fill: rgba(147, 197, 253, 0.55);
+  stroke: rgba(8, 24, 47, 0.8);
+  stroke-width: 1;
+}
+
+/* Mechas quietas: cabeza cuadrada encendida y una estela larga que se apaga.
+   Sin animación: la línea se lee como un pulso que ya pasó. */
+.circuit-streak path {
   stroke-linecap: butt;
   stroke-linejoin: miter;
-  animation-name: circuit-run;
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
 }
 
-.circuit-spark .circuit-head {
+.circuit-streak .circuit-head {
   stroke-linecap: square;
-  stroke-width: 3.4;
+  stroke-width: 4.2;
 }
 
-.circuit-spark .circuit-tail {
-  stroke-width: 2.6;
+.circuit-streak .circuit-tail {
+  stroke-width: 2.8;
 }
 
-.circuit-spark .circuit-head.is-celeste { stroke: #8ff4ff; }
-.circuit-spark .circuit-head.is-blue { stroke: #4c8dff; }
-.circuit-spark .circuit-tail.is-celeste { stroke: #7ff0ff; }
-.circuit-spark .circuit-tail.is-blue { stroke: #3b82f6; }
-.circuit-spark .circuit-tail.is-near { opacity: 0.6; }
-.circuit-spark .circuit-tail.is-mid { opacity: 0.28; }
-.circuit-spark .circuit-tail.is-far { opacity: 0.12; }
-
-@keyframes circuit-run {
-  from { stroke-dashoffset: 1000; }
-  to { stroke-dashoffset: 0; }
-}
+.circuit-streak .circuit-head.is-celeste { stroke: #c8f8ff; }
+.circuit-streak .circuit-head.is-blue { stroke: #7aa8ff; }
+.circuit-streak .circuit-tail.is-celeste { stroke: #7dd3fc; }
+.circuit-streak .circuit-tail.is-blue { stroke: #3b82f6; }
+.circuit-streak .circuit-tail.is-near { opacity: 0.72; }
+.circuit-streak .circuit-tail.is-mid { opacity: 0.38; }
+.circuit-streak .circuit-tail.is-far { opacity: 0.14; }
 
 /* ---------- Barra de marca: 56 px, regla fina ---------- */
 .booth-brandbar {
@@ -146,11 +150,14 @@
 }
 
 .booth-product {
+  min-width: 0;
+  overflow: hidden;
   color: rgba(226, 232, 240, 0.92);
   font-size: 0.82rem;
   font-weight: 600;
   letter-spacing: 0.01em;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .booth-demo-note {
@@ -753,6 +760,42 @@
   background: rgba(9, 31, 62, 0.6);
 }
 
+.booth-style-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+}
+
+.booth-style-group {
+  display: none;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.booth-style-group.is-active {
+  display: flex;
+}
+
+.booth-style-group-title {
+  display: none;
+  margin: 0;
+  color: rgba(226, 232, 240, 0.58);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.booth-style.is-collapsed {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.booth-style.is-collapsed .booth-style-panel {
+  display: none;
+}
+
 /* Cerrar el menú para mirar la foto completa. */
 .booth-style-toggle {
   position: absolute;
@@ -944,20 +987,20 @@
   background: rgba(255, 255, 255, 0.12);
 }
 
-/* En laptop la foto llena el ancho y la elección baja junto a los botones,
-   así no queda un hueco muerto al lado. */
-@media (min-width: 1024px) and (min-aspect-ratio: 5/4) {
+/* Escritorio: la foto manda a la izquierda y las opciones viven a la
+   derecha, en tarjetas. Nada de apilar el selector debajo de una foto
+   gigante: ahí sobra ancho, no alto. */
+@media (min-width: 1024px) {
   .booth-flow:has(.booth-style) {
-    grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+    grid-template-columns: minmax(0, 1.28fr) minmax(360px, 0.92fr);
     grid-template-rows: auto minmax(0, 1fr) auto;
     grid-template-areas:
       'heading heading'
-      'photo photo'
-      'dock actions';
-    align-content: stretch;
+      'photo panel'
+      'photo actions';
+    gap: 0.7rem clamp(1.25rem, 2vw, 2rem);
   }
 
-  /* La tarjeta y el dock pasan a ser piezas del flujo de la pantalla. */
   .booth-flow:has(.booth-style) .booth-style,
   .booth-flow:has(.booth-style) .booth-stage-wrap {
     display: contents;
@@ -966,10 +1009,7 @@
   .booth-flow:has(.booth-style) .booth-style-photo-card {
     grid-area: photo;
     align-self: stretch;
-  }
-
-  .booth-flow:has(.booth-style) .booth-style-panel {
-    grid-area: dock;
+    min-height: 0;
   }
 
   .booth-flow:has(.booth-style) .booth-style-photo {
@@ -978,61 +1018,91 @@
     width: 100%;
     height: 100%;
     aspect-ratio: auto;
+    object-position: 50% 30%;
     border-radius: var(--radius-lg);
   }
-}
-/* En pantallas grandes el visor ocupa todo el alto y los mandos viven
-   dentro del encuadre: el título arriba y la acción abajo al centro. */
-@media (min-width: 1440px) and (min-aspect-ratio: 4/3) {
-  .booth-flow--camera,
-  .booth-flow--countdown,
-  .booth-flow--capture,
-  .booth-flow--reveal {
-    position: relative;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
-    grid-template-areas: 'stage';
+
+  .booth-flow:has(.booth-style) .booth-style-panel {
+    grid-area: panel;
+    align-self: stretch;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0.85rem;
+    background: rgba(9, 31, 62, 0.78);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
   }
 
-  .booth-flow--camera .booth-stage-wrap,
-  .booth-flow--countdown .booth-stage-wrap,
-  .booth-flow--capture .booth-stage-wrap,
-  .booth-flow--reveal .booth-stage-wrap {
+  .booth-flow:has(.booth-style) .booth-style-panel::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .booth-flow:has(.booth-style) .booth-style-panel::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.45);
+  }
+
+  .booth-flow:has(.booth-style) .booth-actions {
+    grid-area: actions;
+    align-self: end;
+  }
+
+  .booth-flow:has(.booth-style) .booth-style-groups {
+    gap: 0.55rem;
+  }
+
+  .booth-flow:has(.booth-style) .booth-style-group {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+    padding: 0.7rem;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  .booth-flow:has(.booth-style) .booth-style-group-title {
     display: block;
-    height: 100%;
   }
 
-  .booth-flow--camera .booth-stage,
-  .booth-flow--countdown .booth-stage,
-  .booth-flow--capture .booth-stage,
-  .booth-flow--reveal .booth-stage {
-    aspect-ratio: auto;
-    width: 100%;
-    height: 100%;
+  .booth-flow:has(.booth-style) .booth-style-track {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
+    overflow: visible;
   }
 
-  .booth-flow--camera .booth-heading,
-  .booth-flow--countdown .booth-heading,
-  .booth-flow--capture .booth-heading,
-  .booth-flow--reveal .booth-heading {
-    position: absolute;
-    top: 1.1rem;
-    left: 1.5rem;
-    right: 1.5rem;
-    z-index: 3;
-    pointer-events: none;
+  .booth-flow:has(.booth-style) .booth-style-tile {
+    flex: none;
+    max-width: none;
+    min-width: 0;
   }
 
-  .booth-flow--camera .booth-actions,
-  .booth-flow--countdown .booth-actions,
-  .booth-flow--capture .booth-actions,
-  .booth-flow--reveal .booth-actions {
-    position: absolute;
-    left: 50%;
-    bottom: 1.35rem;
-    z-index: 3;
-    transform: translateX(-50%);
-    width: min(380px, 46%);
+  .booth-flow:has(.booth-style) .booth-style-footer,
+  .booth-flow:has(.booth-style) .booth-style-toggle {
+    display: none;
+  }
+}
+
+/* Pantallas grandes: se acota la composición y el rail se agrupa arriba.
+   El visor ya no se estira hasta el borde: 1384 px de negro era un vacío. */
+@media (min-width: 1440px) and (min-aspect-ratio: 4/3) {
+  .booth-main {
+    max-width: 1360px;
+  }
+
+  .booth-flow:not(:has(.booth-style)) {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 340px);
+  }
+
+  .booth-flow .booth-actions {
+    align-self: start;
+    margin-top: 0.15rem;
+  }
+
+  .booth-flow .booth-stage {
+    max-width: 1040px;
   }
 }
 
@@ -1591,6 +1661,85 @@
   .booth-sheet {
     height: min(52vh, 440px);
   }
+
+  /* La foto y las opciones se reparten el alto: el selector deja de ser
+     una franja diminuta al pie de una foto enorme. */
+  .booth-style {
+    grid-template-rows: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  }
+
+  .booth-style-panel {
+    align-self: stretch;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .booth-style-groups {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .booth-style-group {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .booth-style-track {
+    align-items: stretch;
+  }
+
+  /* El titular del paso nunca se recorta: en confirm había desaparecido. */
+  .booth-heading {
+    min-height: 3.35rem;
+    overflow: visible;
+  }
+
+  .booth-heading-text {
+    gap: 0.3rem;
+  }
+
+  .booth-title {
+    display: block;
+    overflow: visible;
+  }
+
+  /* Cierre: la imagen de entrega se contiene y el texto respira arriba. */
+  .booth-scene--thanks {
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      'copy'
+      'art';
+    gap: 0.8rem;
+  }
+
+  .booth-thanks-art {
+    width: auto;
+    max-width: 100%;
+    height: auto;
+    max-height: 42dvh;
+    object-fit: contain;
+    align-self: center;
+  }
+
+  .booth-scene--thanks .booth-scene-copy {
+    align-items: center;
+    padding-top: 0.25rem;
+  }
+
+  /* Error: la ilustración acompaña, no se come la pantalla. */
+  .booth-scene .booth-robot:not(.booth-robot--drawing) {
+    width: min(100%, 210px);
+    max-height: 210px;
+    object-fit: contain;
+  }
+
+  .booth-scene-title {
+    font-size: clamp(1.45rem, 7vw, 1.9rem);
+  }
+
+  .booth-robot--drawing {
+    max-height: 190px;
+  }
 }
 
 /* Tablet en vertical: el visor se vuelve vertical, igual que la hoja que
@@ -1620,6 +1769,22 @@
 
   .booth-demo-note {
     display: none;
+  }
+
+  /* En el teléfono la retícula también se ve: el encuadre central queda
+     limpio, pero las trazas largas y el cuadrado mayor llegan a los bordes. */
+  .circuit-backdrop {
+    opacity: 1;
+    mask-image: radial-gradient(125% 100% at 50% 44%, transparent 0 15%, #000 68%);
+    -webkit-mask-image: radial-gradient(125% 100% at 50% 44%, transparent 0 15%, #000 68%);
+  }
+
+  .circuit-grid-line {
+    stroke: rgba(125, 211, 252, 0.2);
+  }
+
+  .circuit-grid-major path {
+    stroke: rgba(96, 165, 250, 0.32);
   }
 }
 
@@ -1770,6 +1935,23 @@
   }
 }
 
+/* Error en móvil: el bloque completo se centra, sin un hueco enorme
+   entre la ilustración y el título. */
+@media (max-width: 700px) {
+  .booth-main:has(> .booth-scene:not(.booth-scene--thanks):not(.booth-scene--drawing)) {
+    justify-content: center;
+    gap: 1rem;
+  }
+
+  .booth-main:has(> .booth-scene:not(.booth-scene--thanks):not(.booth-scene--drawing)) > .booth-scene {
+    flex: 0 0 auto;
+    grid-template-rows: auto auto;
+    align-content: center;
+    gap: 1rem;
+    padding: 0.5rem 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .booth-diagonal-glow.is-waiting {
     animation: none;
@@ -1784,11 +1966,6 @@
   }
 
   .booth-scan::after {
-    display: none;
-  }
-
-  /* Sin motos de luz: queda la retícula de trazas, quieta. */
-  .circuit-spark {
     display: none;
   }
 
