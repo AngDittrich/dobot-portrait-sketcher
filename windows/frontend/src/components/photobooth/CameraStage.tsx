@@ -1,16 +1,13 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { CameraOff } from 'lucide-react'
 import Webcam from 'react-webcam'
-import type { ReactNode, RefObject } from 'react'
+import type { RefObject } from 'react'
 import type { PhotoboothStatus } from '../../hooks/usePhotobooth'
 import type { FramingPose } from '../../hooks/useFraming'
 import { CountdownOverlay } from './CountdownOverlay'
 import { FlashOverlay } from './FlashOverlay'
 import { FramingGuide } from './FramingGuide'
 import { ProcessingOverlay } from './ProcessingOverlay'
-import { StylePicker } from './StylePicker'
-import type { TraitGroup, TraitSelection } from '../../lib/traits'
-import type { DrawingStyleId } from '../../lib/drawingStyles'
 
 interface CameraStageProps {
   webcamRef: RefObject<Webcam | null>
@@ -19,10 +16,6 @@ interface CameraStageProps {
   status: PhotoboothStatus
   countdown: number
   photo: string | null
-  traits: TraitSelection
-  styleId: DrawingStyleId
-  onToggleTrait: (group: TraitGroup, id: string) => void
-  onStyle: (id: DrawingStyleId) => void
   sketch: string | null
   progress: number
   cameraError: boolean
@@ -33,8 +26,6 @@ interface CameraStageProps {
   onCameraReady: () => void
   onCameraError: () => void
   onRetryCamera: () => void
-  /** Dock de controles (BoothControls), flotando sobre el borde inferior. */
-  children: ReactNode
 }
 
 /**
@@ -49,10 +40,6 @@ export function CameraStage({
   status,
   countdown,
   photo,
-  traits,
-  styleId,
-  onToggleTrait,
-  onStyle,
   sketch,
   progress,
   cameraError,
@@ -61,7 +48,6 @@ export function CameraStage({
   onCameraReady,
   onCameraError,
   onRetryCamera,
-  children,
 }: CameraStageProps) {
   const liveVisible = status === 'camera' || status === 'countdown'
   const showFrame = !cameraError && (status === 'camera' || status === 'countdown' || status === 'capture')
@@ -69,8 +55,7 @@ export function CameraStage({
     status === 'camera' ||
     status === 'countdown' ||
     status === 'capture' ||
-    status === 'review' ||
-    status === 'style'
+    status === 'review'
 
   return (
     <div className={`booth-stage is-${status}`}>
@@ -108,16 +93,6 @@ export function CameraStage({
         )}
       </AnimatePresence>
 
-      {status === 'style' && photo && (
-        <StylePicker
-          photo={photo}
-          traits={traits}
-          styleId={styleId}
-          onToggle={onToggleTrait}
-          onStyle={onStyle}
-        />
-      )}
-
       {status === 'reveal' && photo && (
         <ProcessingOverlay photo={photo} sketch={sketch} progress={progress} />
       )}
@@ -140,9 +115,6 @@ export function CameraStage({
         )}
       </AnimatePresence>
 
-      {/* Barrido de luz ambiental mientras el robot espera */}
-      {status === 'camera' && !cameraError && <div className="booth-scan" aria-hidden="true" />}
-
       {liveVisible && !cameraError && <FramingGuide pose={pose} />}
 
       {showFrame && (
@@ -159,10 +131,10 @@ export function CameraStage({
           <CountdownOverlay key="countdown" value={countdown} />
         )}
       </AnimatePresence>
-      <AnimatePresence>{status === 'capture' && <FlashOverlay key="flash" />}</AnimatePresence>
 
-      {/* Dock de controles flotante */}
-      <div className="booth-dock-wrap">{children}</div>
+      {/* El cuenta regresiva barre el visor: la foto se está escaneando. */}
+      {status === 'countdown' && <span className="booth-scan" aria-hidden="true" />}
+      <AnimatePresence>{status === 'capture' && <FlashOverlay key="flash" />}</AnimatePresence>
 
       {/* Estado vacío: permisos de cámara denegados */}
       {cameraError && (

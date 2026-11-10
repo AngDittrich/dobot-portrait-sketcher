@@ -13,18 +13,6 @@ export function WelcomeScreen({ onBegin }: { onBegin: () => void }) {
       exit={{ opacity: 0, y: -12 }}
       transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
     >
-      <motion.img
-        src="/robot/dobotsayinghello.webp"
-        alt="Robot Dobot saludando"
-        className="booth-robot"
-        draggable={false}
-        initial={{ opacity: 0, y: 24 }}
-        animate={{ opacity: 1, y: [0, -10, 0] }}
-        transition={{
-          opacity: { duration: 0.45 },
-          y: { duration: 5.2, repeat: Infinity, ease: 'easeInOut' },
-        }}
-      />
       <div className="booth-welcome-copy">
         <p className="booth-kicker">Cabina de retratos</p>
         <h1 className="booth-welcome-title">Hola</h1>
@@ -35,6 +23,21 @@ export function WelcomeScreen({ onBegin }: { onBegin: () => void }) {
           COMENZAR
         </button>
       </div>
+      <figure className="booth-welcome-art">
+        <motion.img
+          src="/robot/dobotsayinghello.webp"
+          alt="Robot Dobot saludando"
+          className="booth-robot"
+          draggable={false}
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: [0, -10, 0] }}
+          transition={{
+            opacity: { duration: 0.45 },
+            y: { duration: 5.2, repeat: Infinity, ease: 'easeInOut' },
+          }}
+        />
+        <figcaption className="booth-art-caption">MG400 · Estación 01</figcaption>
+      </figure>
     </motion.section>
   )
 }

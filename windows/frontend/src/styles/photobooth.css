@@ -1,181 +1,261 @@
 /* ============================================================
-   Robot Dobot — Modo escenario inmersivo (docs §17)
-   - Una sola pantalla: 100dvh, sin scroll
-   - Escenario navy oscuro con aurora, grano y glows
-   - Dock "liquid glass", impresión tipo polaroid, toast oscuro
-   - Sin badges de estado genéricos (regla AGENTS.MD / docs §17.6)
+   Robot Dobot — Cabina de retratos
+   Sistema: instrumento de medición, no escenario.
+   - Una sola pantalla (100dvh, sin scroll) sobre el navy de marca
+   - Retícula técnica de 1 px, marcas de registro y reglas finas
+   - Ni aurora, ni grano, ni glow: el estado se lee por composición
+   - Sin badges ni pills decorativas (regla AGENTS.MD)
    ============================================================ */
 
-/* ---------- Shell: escenario oscuro a viewport completo ---------- */
+/* ---------- Shell: navy plano con retícula técnica ---------- */
 .booth-shell {
-  --booth-chrome: 13.5rem; /* header + heading + paddings (para encajar el visor) */
+  --booth-chrome: 5.5rem; /* header + paddings: deja sitio al visor 4:3 */
   position: relative;
   height: 100dvh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  color: #e2e8f0;
-  /* Acostado, el agujero de la camara frontal queda en un borde de la pantalla.
-     Con viewport-fit=cover el escenario llega hasta el borde, pero el contenido
-     no puede meterse debajo: este relleno lo devuelve a la zona visible sin
-     dejar una franja muerta, porque el fondo se pinta tambien bajo el relleno. */
+  color: #e6edf7;
+  /* Acostado, el agujero de la cámara frontal queda en un borde de la pantalla.
+     Con viewport-fit=cover el fondo llega hasta el borde y este relleno
+     devuelve el contenido a la zona visible. */
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
   background:
-    radial-gradient(1100px 640px at 50% -18%, #12294f 0%, transparent 62%),
-    radial-gradient(900px 620px at 112% 112%, rgba(26, 58, 107, 0.4), transparent 58%),
-    radial-gradient(700px 500px at -12% 108%, rgba(42, 84, 148, 0.22), transparent 55%),
-    linear-gradient(180deg, #070f20 0%, #04091a 100%);
+    radial-gradient(1200px 700px at 50% -30%, #0d2a4f 0%, transparent 62%),
+    linear-gradient(180deg, #08182f 0%, #061121 58%, #040d1b 100%);
 }
 
-/* ---------- Ambient: aurora lenta + grano de película ---------- */
-.booth-ambient {
+/* Retícula casi invisible: se adivina, no se mira. */
+.booth-shell::before {
+  content: '';
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  overflow: hidden;
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(130% 100% at 50% 0%, #000 30%, transparent 92%);
+  -webkit-mask-image: radial-gradient(130% 100% at 50% 0%, #000 30%, transparent 92%);
 }
 
-.booth-aurora {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(90px);
-}
-
-.booth-aurora--a {
-  width: 44vw;
-  height: 44vw;
-  left: -12vw;
-  top: -14vw;
-  background: radial-gradient(circle, rgba(26, 58, 107, 0.55), transparent 65%);
-  animation: boothDriftA 26s ease-in-out infinite alternate;
-}
-
-.booth-aurora--b {
-  width: 38vw;
-  height: 38vw;
-  right: -10vw;
-  bottom: -16vw;
-  background: radial-gradient(circle, rgba(42, 84, 148, 0.4), transparent 65%);
-  animation: boothDriftB 32s ease-in-out infinite alternate;
-}
-
-@keyframes boothDriftA {
-  to {
-    transform: translate(6vw, 5vh) scale(1.12);
-  }
-}
-
-@keyframes boothDriftB {
-  to {
-    transform: translate(-5vw, -6vh) scale(1.08);
-  }
-}
-
-.booth-noise {
-  position: absolute;
+/* Home: trazas de circuito recorridas por un segmento de luz.
+   La base queda quieta; la luz viaja como una moto sobre su estela. */
+.circuit-backdrop {
+  position: fixed;
   inset: 0;
-  opacity: 0.05;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  z-index: 0;
+  pointer-events: none;
+  /* El centro queda limpio: las trazas se adivinan en los bordes. */
+  mask-image: radial-gradient(78% 86% at 50% 52%, transparent 0%, transparent 34%, #000 100%);
+  -webkit-mask-image: radial-gradient(78% 86% at 50% 52%, transparent 0%, transparent 34%, #000 100%);
 }
 
-/* ---------- Brand bar: glass navy ---------- */
+.circuit-backdrop svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.circuit-base path {
+  stroke: rgba(125, 211, 252, 0.2);
+  stroke-width: 1;
+}
+
+.circuit-base rect {
+  fill: rgba(125, 211, 252, 0.38);
+}
+
+/* La luz es una línea fina: cabeza cuadrada y estela que se apaga.
+   Sin halos, sin puntas redondeadas. */
+.circuit-spark path {
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+  animation-name: circuit-run;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.circuit-spark .circuit-head {
+  stroke-linecap: square;
+  stroke-width: 3.4;
+}
+
+.circuit-spark .circuit-tail {
+  stroke-width: 2.6;
+}
+
+.circuit-spark .circuit-head.is-celeste { stroke: #8ff4ff; }
+.circuit-spark .circuit-head.is-blue { stroke: #4c8dff; }
+.circuit-spark .circuit-tail.is-celeste { stroke: #7ff0ff; }
+.circuit-spark .circuit-tail.is-blue { stroke: #3b82f6; }
+.circuit-spark .circuit-tail.is-near { opacity: 0.6; }
+.circuit-spark .circuit-tail.is-mid { opacity: 0.28; }
+.circuit-spark .circuit-tail.is-far { opacity: 0.12; }
+
+@keyframes circuit-run {
+  from { stroke-dashoffset: 1000; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* ---------- Barra de marca: 56 px, regla fina ---------- */
 .booth-brandbar {
   position: relative;
-  z-index: 1;
-  height: 64px;
-  flex-shrink: 0;
+  z-index: 2;
+  flex: 0 0 auto;
+  height: 56px;
   display: flex;
   align-items: center;
-  background: rgba(7, 15, 32, 0.55);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(5, 15, 33, 0.72);
+  border-bottom: 1px solid var(--hairline-soft);
 }
 
 .booth-brandbar-inner {
-  width: min(1180px, 100%);
+  width: 100%;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 0 1.25rem;
+  padding: 0 clamp(0.9rem, 2.2vw, 1.75rem);
   display: flex;
   align-items: center;
   gap: 0.9rem;
+  min-width: 0;
+}
+
+.booth-brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
 }
 
 /* Logo oficial: el asset es negro → se invierte a blanco sobre oscuro (docs §2) */
 .booth-logo {
-  height: 26px;
+  height: 22px;
   width: auto;
+  flex-shrink: 0;
   filter: brightness(0) invert(1);
 }
 
 .booth-brand-divider {
   width: 1px;
-  height: 24px;
-  background: rgba(255, 255, 255, 0.2);
+  height: 20px;
+  flex-shrink: 0;
+  background: var(--hairline);
 }
 
 .booth-product {
-  color: rgba(255, 255, 255, 0.85);
-  font-size: 0.875rem;
-  font-weight: 500;
+  color: rgba(226, 232, 240, 0.92);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
 .booth-demo-note {
   margin-left: auto;
-  font-size: 0.72rem;
+  min-width: 0;
+  font-size: 0.74rem;
   font-weight: 500;
-  letter-spacing: 0.02em;
-  color: rgba(226, 232, 240, 0.45);
+  color: rgba(203, 213, 225, 0.48);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* ---------- Main + encabezado dinámico ---------- */
+/* ---------- Main ---------- */
 .booth-main {
   position: relative;
   z-index: 1;
   flex: 1;
   min-height: 0;
-  width: min(1180px, 100%);
+  width: 100%;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 1rem 1.25rem 1.25rem;
+  padding: clamp(0.85rem, 2vh, 1.5rem) clamp(0.9rem, 2.2vw, 1.75rem);
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 1rem;
+  align-items: stretch;
 }
 
-/* Altura reservada fija: el visor nunca salta cuando cambia el texto */
+/* ---------- Flujo del wizard: visor + panel de mando ---------- */
+.booth-flow {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 300px);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    'stage heading'
+    'stage actions';
+  gap: 0.75rem clamp(1.25rem, 2.4vw, 2rem);
+}
+
 .booth-heading {
-  min-height: 4.5rem;
+  grid-area: heading;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+  min-width: 0;
+  padding-top: 0.15rem;
+}
+
+.booth-heading-text {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 0.3rem;
-  text-align: center;
+  gap: 0.4rem;
+  min-width: 0;
 }
 
 .booth-title {
-  font-size: clamp(1.3rem, 2vw + 0.6rem, 1.8rem);
+  font-size: clamp(1.2rem, 0.9vw + 0.95rem, 1.6rem);
   font-weight: 800;
   color: #fff;
   letter-spacing: -0.02em;
   line-height: 1.15;
 }
 
+.booth-hint {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: rgba(203, 213, 225, 0.62);
+}
+
 .booth-subtitle {
-  color: rgba(203, 213, 225, 0.72);
-  font-size: 0.92rem;
+  color: rgba(203, 213, 225, 0.62);
+  font-size: 0.9rem;
+}
+
+/* Panel de acciones: columna en escritorio, fila en el resto. */
+.booth-actions {
+  grid-area: actions;
+  align-self: end;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.booth-actions--scene {
+  align-self: center;
+  flex-direction: row;
+  justify-content: center;
+  gap: 0.75rem;
+  width: min(420px, 100%);
+  margin: 0.5rem auto 0;
 }
 
 /* ---------- Visor (stage) ---------- */
 .booth-stage-wrap {
-  flex: 1;
+  grid-area: stage;
+  min-width: 0;
   min-height: 0;
-  width: 100%;
   display: flex;
   justify-content: center;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .booth-stage {
@@ -184,24 +264,11 @@
   /* El ancho se deriva del alto disponible: siempre cabe sin scroll */
   width: min(100%, calc((100dvh - var(--booth-chrome)) * 4 / 3));
   max-height: 100%;
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   background: #050b18;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow:
-    0 30px 80px rgba(2, 8, 20, 0.6),
-    0 0 120px rgba(26, 58, 107, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-/* Viñeta interna sutil: profundidad de visor fotográfico */
-.booth-stage::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  box-shadow: inset 0 0 110px rgba(2, 8, 20, 0.45);
-  pointer-events: none;
+  border: 1px solid var(--hairline);
+  box-shadow: 0 18px 36px -26px rgba(0, 0, 0, 0.95);
 }
 
 .booth-video {
@@ -227,51 +294,46 @@
   background: #fff;
 }
 
-/* ---------- Esquinas viewfinder con glow ---------- */
+/* ---------- Marcas de registro del visor (1 px, sin glow) ---------- */
 .booth-corner {
   position: absolute;
   z-index: 11;
-  width: 34px;
-  height: 34px;
-  border: 2.5px solid rgba(255, 255, 255, 0.85);
-  filter: drop-shadow(0 0 6px rgba(42, 84, 148, 0.8));
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
   pointer-events: none;
   transition: border-color 0.15s ease;
 }
 
 .booth-corner--tl {
-  top: 18px;
-  left: 18px;
+  top: 14px;
+  left: 14px;
   border-right: 0;
   border-bottom: 0;
-  border-top-left-radius: 8px;
 }
 
 .booth-corner--tr {
-  top: 18px;
-  right: 18px;
+  top: 14px;
+  right: 14px;
   border-left: 0;
   border-bottom: 0;
-  border-top-right-radius: 8px;
 }
 
 .booth-corner--bl {
-  bottom: 18px;
-  left: 18px;
+  bottom: 14px;
+  left: 14px;
   border-right: 0;
   border-top: 0;
-  border-bottom-left-radius: 8px;
 }
 
 .booth-corner--br {
-  bottom: 18px;
-  right: 18px;
+  bottom: 14px;
+  right: 14px;
   border-left: 0;
   border-top: 0;
-  border-bottom-right-radius: 8px;
 }
 
-/* Anticipación durante la cuenta regresiva */
+/* Anticipación durante la cuenta regresiva: las marcas respiran. */
 .booth-stage.is-countdown .booth-corner {
   border-color: #fff;
   animation: boothCornerPulse 1s ease-in-out infinite;
@@ -282,38 +344,9 @@
   100% {
     opacity: 1;
   }
+
   50% {
-    opacity: 0.3;
-  }
-}
-
-/* ---------- Barrido ambiental (idle): luz que "respira" ---------- */
-.booth-scan {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -20%;
-  height: 18%;
-  z-index: 4;
-  background: linear-gradient(180deg, transparent, rgba(157, 184, 220, 0.1), transparent);
-  pointer-events: none;
-  animation: boothScan 5.2s ease-in-out infinite;
-}
-
-@keyframes boothScan {
-  0% {
-    top: -20%;
-    opacity: 0;
-  }
-  14% {
-    opacity: 1;
-  }
-  86% {
-    opacity: 1;
-  }
-  100% {
-    top: 108%;
-    opacity: 0;
+    opacity: 0.25;
   }
 }
 
@@ -342,20 +375,64 @@
 
 .booth-silhouette.is-off .booth-silhouette-line {
   stroke: #f87171;
-  filter: drop-shadow(0 0 7px rgba(248, 113, 113, 0.8));
 }
 
 .booth-silhouette.is-ready .booth-silhouette-line {
   stroke: #4ade80;
   stroke-dasharray: none;
-  filter: drop-shadow(0 0 9px rgba(74, 222, 128, 0.85));
 }
 
 .booth-silhouette.is-ready .booth-silhouette-dim {
   fill: rgba(4, 9, 20, 0.2);
 }
 
-/* ---------- Cuenta regresiva cinematográfica ---------- */
+/* ---------- Barrido de escaneo: la cuenta regresiva también barre el visor ---------- */
+.booth-scan {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.booth-scan::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #f05252;
+  box-shadow: 0 0 20px 3px rgba(239, 68, 68, 0.45);
+  animation: booth-scan-sweep 1s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+}
+
+/* Estela sobre la línea: marca lo ya barrido sin lavar la imagen. */
+.booth-scan::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 72px;
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0), rgba(239, 68, 68, 0.12));
+  animation: booth-scan-trail 1s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+}
+
+@keyframes booth-scan-sweep {
+  0% { top: -2px; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+@keyframes booth-scan-trail {
+  0% { top: -72px; opacity: 0; }
+  14% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+/* ---------- Cuenta regresiva ---------- */
 .booth-countdown {
   position: absolute;
   inset: 0;
@@ -372,25 +449,19 @@
 }
 
 .booth-countdown-number {
-  font-size: clamp(5.5rem, 17vw, 10rem);
+  font-size: clamp(5rem, 15vw, 9rem);
   font-weight: 800;
   line-height: 1;
   color: #fff;
-  text-shadow:
-    0 0 80px rgba(59, 130, 196, 0.85),
-    0 0 28px rgba(212, 224, 237, 0.55),
-    0 4px 24px rgba(2, 8, 20, 0.6);
+  text-shadow: 0 2px 6px rgba(2, 8, 20, 0.5);
 }
 
 .booth-countdown-ring {
   position: absolute;
-  width: clamp(9rem, 24vw, 14rem);
-  height: clamp(9rem, 24vw, 14rem);
+  width: clamp(8.5rem, 22vw, 13rem);
+  height: clamp(8.5rem, 22vw, 13rem);
   border-radius: 50%;
-  border: 3px solid rgba(212, 224, 237, 0.8);
-  box-shadow:
-    0 0 30px rgba(59, 130, 196, 0.5),
-    inset 0 0 30px rgba(59, 130, 196, 0.3);
+  border: 2px solid rgba(212, 224, 237, 0.75);
 }
 
 /* ---------- Flash ---------- */
@@ -413,10 +484,9 @@
   position: absolute;
   left: 0;
   right: 0;
-  height: 2px;
+  height: 1px;
   z-index: 6;
-  background: linear-gradient(90deg, transparent, rgba(191, 219, 254, 0.95), transparent);
-  box-shadow: 0 0 24px 6px rgba(59, 130, 196, 0.55);
+  background: rgba(212, 224, 237, 0.85);
   transition: top 0.08s linear;
   pointer-events: none;
 }
@@ -426,16 +496,17 @@
   left: 0;
   right: 0;
   bottom: 0;
-  height: 4px;
+  height: 3px;
   z-index: 9;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .booth-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--syscom-blue-accent), var(--blue-500), #3b82c4);
-  box-shadow: 0 0 16px rgba(59, 130, 196, 0.8);
-  transition: width 0.1s linear;
+  width: 100%;
+  transform-origin: left center;
+  background: var(--blue-100);
+  transition: transform 0.1s linear;
 }
 
 /* Puntos suspensivos animados */
@@ -448,12 +519,15 @@
   0% {
     content: '';
   }
+
   25% {
     content: '.';
   }
+
   50% {
     content: '..';
   }
+
   75% {
     content: '...';
   }
@@ -469,12 +543,12 @@
   }
 }
 
-/* ---------- Dock de controles: liquid glass ---------- */
+/* ---------- Controles sobre el visor: sin dock de cristal ---------- */
 .booth-dock-wrap {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 20px;
+  bottom: 18px;
   z-index: 16;
   display: flex;
   justify-content: center;
@@ -486,86 +560,65 @@
   pointer-events: auto;
   display: flex;
   align-items: center;
-  gap: 1rem;
-  background: rgba(7, 15, 32, 0.58);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: var(--radius-pill);
-  padding: 0.55rem 0.6rem 0.55rem 1.4rem;
-  box-shadow:
-    0 16px 48px rgba(2, 8, 20, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-/* Cuando el dock solo contiene el CTA, padding simétrico */
-.booth-dock:has(> .booth-cta:only-child) {
-  padding-left: 0.6rem;
+  gap: 0.75rem;
 }
 
 .booth-dock-text {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
-  color: #e2e8f0;
+  gap: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: var(--radius-sm);
+  background: rgba(6, 17, 36, 0.88);
+  border: 1px solid var(--hairline);
+  color: #e6edf7;
   font-weight: 600;
-  font-size: 0.95rem;
-  padding-right: 0.4rem;
+  font-size: 0.9rem;
   white-space: nowrap;
 }
 
 .booth-dock-text strong {
   color: #fff;
-  font-size: 1.1rem;
+  font-size: 1.02rem;
 }
 
-/* CTA tipo obturador: blanco sobre el escenario oscuro */
+/* CTA: botón de aparato. Blanco, 48 px, sin halo. */
 .booth-cta {
-  border-radius: var(--radius-pill);
-  padding: 0.8rem 1.9rem;
-  min-height: 50px;
-  font-size: 1rem;
+  border-radius: var(--radius-sm);
+  padding: 0 1.5rem;
+  min-height: 48px;
+  font-size: 0.95rem;
   font-weight: 700;
+  letter-spacing: 0.06em;
   background: #fff;
+  border-color: #fff;
   color: var(--syscom-blue);
-  box-shadow:
-    0 10px 30px rgba(2, 8, 20, 0.4),
-    0 0 40px rgba(42, 84, 148, 0.35);
+  box-shadow: 0 10px 18px -14px rgba(0, 0, 0, 0.9);
 }
 
 .booth-cta:hover:not(:disabled) {
   background: var(--blue-50);
-  transform: translateY(-2px) scale(1.02);
-  box-shadow:
-    0 14px 36px rgba(2, 8, 20, 0.45),
-    0 0 56px rgba(42, 84, 148, 0.5);
+  border-color: var(--blue-100);
 }
 
 .booth-cta:active:not(:disabled) {
-  transform: scale(0.98);
+  transform: translateY(1px);
 }
 
-/* Variante glass: acciones secundarias sobre el escenario */
+/* Variante translúcida: acciones secundarias sobre el visor */
 .booth-cta--glass {
-  background: rgba(255, 255, 255, 0.09);
-  color: #e2e8f0;
-  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--hairline);
+  color: #e6edf7;
   box-shadow: none;
 }
 
 .booth-cta--glass:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.15);
-  box-shadow: none;
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
-/* Review dentro del dock */
-.booth-review-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-/* ---------- Impresión tipo polaroid (review) ---------- */
+/* ---------- Impresión (confirm) ---------- */
 .booth-print {
   position: absolute;
   inset: 0;
@@ -582,12 +635,11 @@
   min-height: 0;
   max-width: 86%;
   max-height: 100%;
-  background: #fdfdfc;
-  padding: 12px 12px 42px;
-  border-radius: 4px;
-  box-shadow:
-    0 40px 90px rgba(2, 8, 20, 0.65),
-    0 0 0 1px rgba(2, 8, 20, 0.2);
+  background: #fbfaf7;
+  padding: 10px 10px 36px;
+  border-radius: 2px;
+  border: 1px solid rgba(2, 8, 20, 0.16);
+  box-shadow: 0 24px 44px -30px rgba(0, 0, 0, 0.95);
 }
 
 .booth-print-frame img {
@@ -596,23 +648,23 @@
   min-height: 0;
   max-width: 100%;
   object-fit: contain;
-  border-radius: 2px;
+  border-radius: 1px;
 }
 
 .booth-print-caption {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 12px;
+  bottom: 11px;
   text-align: center;
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--slate-400);
 }
 
-/* ---------- Empty state (permisos de cámara) sobre el escenario ---------- */
+/* ---------- Estado vacío: permisos de cámara ---------- */
 .booth-empty {
   position: absolute;
   inset: 0;
@@ -621,25 +673,25 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
-  color: rgba(203, 213, 225, 0.75);
-  text-align: center;
+  gap: 0.7rem;
   padding: 1.5rem;
+  text-align: center;
+  color: rgba(203, 213, 225, 0.75);
 }
 
 .booth-empty-icon {
-  width: 3.5rem;
-  height: 3.5rem;
-  border-radius: 50%;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--hairline);
   display: grid;
   place-items: center;
   color: rgba(226, 232, 240, 0.7);
 }
 
 .booth-empty-title {
-  font-size: 1.05rem;
+  font-size: 1.02rem;
   font-weight: 700;
   color: #fff;
 }
@@ -654,243 +706,440 @@
   margin-top: 0.35rem;
 }
 
-/* ---------- Toast oscuro glass ---------- */
-.booth-toast-wrap {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 1.5rem;
-  z-index: 400;
-  display: flex;
-  justify-content: center;
-  pointer-events: none;
-}
-
-.booth-toast {
-  pointer-events: auto;
-  display: flex;
-  align-items: center;
+/* ---------- Elige tu dibujo: foto grande + carrusel con pestañas ---------- */
+.booth-style {
+  width: min(100%, 1120px);
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.6rem;
-  background: rgba(7, 15, 32, 0.78);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: var(--radius);
-  box-shadow: 0 20px 60px rgba(2, 8, 20, 0.6);
-  padding: 0.7rem 0.9rem;
-  max-width: min(440px, calc(100vw - 2rem));
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #e2e8f0;
 }
 
-.booth-toast-icon {
+/* La foto manda: tarjeta vertical que se lleva todo el alto sobrante. */
+.booth-style-photo-card {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  margin: 0;
   display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   place-items: center;
-  flex-shrink: 0;
-  color: var(--blue-100);
+  overflow: hidden;
 }
 
-.booth-toast-close {
-  display: grid;
-  place-items: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  flex-shrink: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(226, 232, 240, 0.5);
+.booth-style-photo {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  object-position: 50% 32%;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+}
+
+/* Panel de elección: el carrusel arriba, las pestañas al pie. */
+.booth-style-panel {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.55rem 0.6rem 0.35rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: rgba(9, 31, 62, 0.6);
+}
+
+/* Cerrar el menú para mirar la foto completa. */
+.booth-style-toggle {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 34px;
+  padding: 0 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: var(--radius-sm);
+  background: rgba(9, 31, 62, 0.74);
+  color: #e8eef7;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   cursor: pointer;
   transition:
     background 0.15s ease,
-    color 0.15s ease;
+    border-color 0.15s ease;
 }
 
-.booth-toast-close:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #e2e8f0;
+.booth-style-toggle:hover {
+  background: rgba(26, 58, 107, 0.95);
+  border-color: rgba(255, 255, 255, 0.42);
 }
 
-/* ---------- Confetti ---------- */
-.booth-confetti {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 350;
+.booth-style-track {
+  display: flex;
+  justify-content: safe center;
+  gap: 0.5rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
 }
 
-/* ---------- Focus visible sobre escenario oscuro ---------- */
-.booth-shell button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(157, 184, 220, 0.4);
+.booth-style-track::-webkit-scrollbar {
+  display: none;
 }
 
-/* ---------- Utilidades ---------- */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-/* ---------- Responsive y alturas cortas ---------- */
-@media (max-height: 720px) {
-  .booth-shell {
-    --booth-chrome: 10.5rem;
-  }
-
-  .booth-heading {
-    min-height: 3rem;
-  }
-
-  .booth-subtitle {
-    display: none;
-  }
-}
-
-@media (max-width: 768px) {
-  .booth-main {
-    padding: 0.9rem 0.9rem 1rem;
-  }
-
-  .booth-dock {
-    flex-wrap: wrap;
-    justify-content: center;
-    border-radius: 24px;
-    padding: 0.7rem 0.9rem;
-    row-gap: 0.6rem;
-  }
-
-  .booth-dock-text {
-    white-space: normal;
-    justify-content: center;
-  }
-
-  .booth-cta {
-    padding: 0.75rem 1.4rem;
-    min-height: 48px;
-  }
-
-  .booth-review-actions {
-    width: 100%;
-    justify-content: center;
-  }
-}
-
-@media (max-width: 640px) {
-  .booth-product,
-  .booth-brand-divider {
-    display: none;
-  }
-
-  .booth-demo-note {
-    font-size: 0.66rem;
-  }
-}
-
-@media (max-width: 480px) {
-  .booth-title {
-    font-size: 1.3rem;
-  }
-
-  .booth-stage {
-    border-radius: 14px;
-  }
-
-  .booth-corner {
-    width: 26px;
-    height: 26px;
-  }
-
-  .booth-dock-wrap {
-    bottom: 12px;
-  }
-}
-
-/* ---------- Wizard ---------- */
-.booth-flow {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
+.booth-style-tile {
+  flex: 1 0 104px;
+  max-width: 132px;
+  scroll-snap-align: start;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 0.85rem;
+  gap: 0.3rem;
+  padding: 0.3rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e8eef7;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.72rem;
+  line-height: 1.15;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
+.booth-style-tile-art {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.booth-style-tile-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  background: #fff;
+}
+
+.booth-style-tile-art svg {
+  width: 2.1rem;
+  height: 2.1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.booth-style-tile-art svg circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+.booth-style-tile-label {
+  text-align: center;
+}
+
+.booth-style-tile:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #fff;
+}
+
+.booth-style-tile.is-on,
+.booth-style-tile.is-on:hover {
+  background: #fff;
+  border-color: #fff;
+  color: var(--syscom-blue);
+}
+
+.booth-style-tile.is-on .booth-style-tile-art {
+  background: rgba(9, 31, 62, 0.07);
+}
+
+.booth-style-tile:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+/* Pestañas: texto con fondo, no pastilla. La X vive aquí, en la tarjeta. */
+.booth-style-footer {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35rem;
+  border-top: 1px solid var(--hairline-soft);
+  padding-top: 0.25rem;
+}
+
+.booth-style-tabs {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.booth-style-close {
+  flex: 0 0 auto;
+  width: 40px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(203, 213, 225, 0.7);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.booth-style-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.booth-style-tabs button {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0.35rem 0.3rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(203, 213, 225, 0.62);
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.booth-style-tabs button:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.booth-style-tabs button.is-on {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* En laptop la foto llena el ancho y la elección baja junto a los botones,
+   así no queda un hueco muerto al lado. */
+@media (min-width: 1024px) and (min-aspect-ratio: 5/4) {
+  .booth-flow:has(.booth-style) {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'heading heading'
+      'photo photo'
+      'dock actions';
+    align-content: stretch;
+  }
+
+  /* La tarjeta y el dock pasan a ser piezas del flujo de la pantalla. */
+  .booth-flow:has(.booth-style) .booth-style,
+  .booth-flow:has(.booth-style) .booth-stage-wrap {
+    display: contents;
+  }
+
+  .booth-flow:has(.booth-style) .booth-style-photo-card {
+    grid-area: photo;
+    align-self: stretch;
+  }
+
+  .booth-flow:has(.booth-style) .booth-style-panel {
+    grid-area: dock;
+  }
+
+  .booth-flow:has(.booth-style) .booth-style-photo {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+    border-radius: var(--radius-lg);
+  }
+}
+/* En pantallas grandes el visor ocupa todo el alto y los mandos viven
+   dentro del encuadre: el título arriba y la acción abajo al centro. */
+@media (min-width: 1440px) and (min-aspect-ratio: 4/3) {
+  .booth-flow--camera,
+  .booth-flow--countdown,
+  .booth-flow--capture,
+  .booth-flow--reveal {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: 'stage';
+  }
+
+  .booth-flow--camera .booth-stage-wrap,
+  .booth-flow--countdown .booth-stage-wrap,
+  .booth-flow--capture .booth-stage-wrap,
+  .booth-flow--reveal .booth-stage-wrap {
+    display: block;
+    height: 100%;
+  }
+
+  .booth-flow--camera .booth-stage,
+  .booth-flow--countdown .booth-stage,
+  .booth-flow--capture .booth-stage,
+  .booth-flow--reveal .booth-stage {
+    aspect-ratio: auto;
+    width: 100%;
+    height: 100%;
+  }
+
+  .booth-flow--camera .booth-heading,
+  .booth-flow--countdown .booth-heading,
+  .booth-flow--capture .booth-heading,
+  .booth-flow--reveal .booth-heading {
+    position: absolute;
+    top: 1.1rem;
+    left: 1.5rem;
+    right: 1.5rem;
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  .booth-flow--camera .booth-actions,
+  .booth-flow--countdown .booth-actions,
+  .booth-flow--capture .booth-actions,
+  .booth-flow--reveal .booth-actions {
+    position: absolute;
+    left: 50%;
+    bottom: 1.35rem;
+    z-index: 3;
+    transform: translateX(-50%);
+    width: min(380px, 46%);
+  }
+}
+
+/* ---------- Bienvenida: 50/50 en escritorio ---------- */
 .booth-welcome,
 .booth-scene {
   flex: 1;
   min-height: 0;
-  width: min(1080px, 100%);
-  display: flex;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  grid-template-areas: 'copy art';
   align-items: center;
-  justify-content: center;
-  gap: clamp(1.25rem, 4vw, 3.5rem);
-}
-
-.booth-robot {
-  max-height: min(62vh, 560px);
-  max-width: min(48%, 520px);
-  width: auto;
-  object-fit: contain;
-  mix-blend-mode: lighten;
-  filter: drop-shadow(0 24px 48px rgba(2, 8, 20, 0.45));
-  user-select: none;
+  gap: clamp(1.5rem, 4vw, 3.5rem);
 }
 
 .booth-welcome-copy,
 .booth-scene-copy {
+  grid-area: copy;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.85rem;
-  max-width: 28rem;
+  max-width: 30rem;
+}
+
+.booth-welcome-art {
+  grid-area: art;
+  position: relative;
+  margin: 0;
+  min-width: 0;
+  height: 100%;
+  max-height: min(66vh, 560px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+}
+
+.booth-robot {
+  max-height: 100%;
+  max-width: 100%;
+  width: auto;
+  object-fit: contain;
+  mix-blend-mode: lighten;
+  filter: drop-shadow(0 22px 34px rgba(2, 8, 20, 0.55));
+  user-select: none;
+}
+
+.booth-art-caption {
+  flex: 0 0 auto;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(203, 213, 225, 0.42);
 }
 
 .booth-kicker {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   margin: 0;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: rgba(203, 213, 225, 0.55);
 }
 
+.booth-kicker::before {
+  content: '';
+  width: 26px;
+  height: 1px;
+  background: rgba(203, 213, 225, 0.45);
+}
+
 .booth-welcome-title {
   margin: 0;
-  font-size: clamp(3.2rem, 7vw, 5.4rem);
+  font-size: clamp(2.6rem, 5.2vw, 4.2rem);
   font-weight: 800;
-  line-height: 0.9;
+  line-height: 0.92;
   letter-spacing: -0.04em;
   color: #fff;
 }
 
 .booth-welcome-text {
   margin: 0;
-  font-size: clamp(1.05rem, 1.6vw, 1.35rem);
-  line-height: 1.45;
-  color: rgba(226, 232, 240, 0.82);
+  font-size: clamp(1rem, 1.3vw, 1.2rem);
+  line-height: 1.5;
+  color: rgba(226, 232, 240, 0.78);
 }
 
 .booth-cta--xl {
-  min-height: 64px;
-  padding: 0.95rem 2.6rem;
-  font-size: 1.15rem;
-  letter-spacing: 0.12em;
+  min-height: 48px;
+  margin-top: 0.35rem;
+  padding: 0 2rem;
+  font-size: 0.98rem;
+  letter-spacing: 0.1em;
 }
 
 .booth-scene-title {
   margin: 0;
-  font-size: clamp(1.7rem, 3vw, 2.6rem);
+  font-size: clamp(1.5rem, 2.4vw, 2.1rem);
   font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 1.15;
@@ -898,21 +1147,19 @@
 }
 
 .booth-thanks-art {
-  width: min(420px, 42vw);
-  max-height: min(52vh, 460px);
-  object-fit: cover;
-  border-radius: 16px;
-  box-shadow:
-    0 30px 70px rgba(2, 8, 20, 0.55),
-    0 0 0 1px rgba(255, 255, 255, 0.08);
+  grid-area: art;
+  width: 100%;
+  max-height: min(56vh, 480px);
+  object-fit: contain;
+  user-select: none;
 }
 
 .booth-thanks-art--handoff {
-  width: min(560px, 50vw);
-  max-height: min(62vh, 560px);
-  object-fit: contain;
+  max-height: min(64vh, 560px);
 }
 
+/* Mientras la IA dibuja: una banda recorre la foto sin prisa, en lugar de
+   dejar la imagen congelada esperando. Es movimiento, no una etiqueta. */
 .booth-diagonal-glow {
   position: absolute;
   inset: 0;
@@ -920,13 +1167,11 @@
   pointer-events: none;
 }
 
-/* Mientras la IA dibuja: una banda de grafito recorre la foto sin prisa, en
-   lugar de dejar la imagen congelada esperando. Es movimiento, no una etiqueta. */
 .booth-diagonal-glow.is-waiting {
   background-image: linear-gradient(
     135deg,
     transparent 44%,
-    rgba(191, 219, 254, 0.55) 50%,
+    rgba(191, 219, 254, 0.5) 50%,
     transparent 56%
   );
   background-size: 260% 260%;
@@ -943,559 +1188,26 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .booth-diagonal-glow.is-waiting {
-    animation: none;
-    opacity: 0.5;
-  }
-}
-
 .booth-stage.is-confirm .booth-print {
-  padding-bottom: 12%;
+  padding-bottom: 10%;
 }
 
-.booth-style {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  display: grid;
-  grid-template-columns: minmax(0, 0.58fr) minmax(0, 1.42fr);
-  gap: 0.7rem;
-  padding: 0.7rem 0.7rem 6.6rem;
-  background: #050b18;
-}
-
-.booth-style-photo {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 14px;
-}
-
-.booth-style-options {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 0.85rem;
-}
-
-.booth-style-group h2 {
-  margin: 0 0 0.35rem;
-  font-size: 0.92rem;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  color: #f8fafc;
-}
-
-.booth-style-samples {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.4rem;
-}
-
-.booth-style-samples button {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.28rem;
-  min-width: 0;
-  padding: 0.28rem 0.28rem 0.4rem;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.05);
-  color: #e8eef7;
-  font: inherit;
-  font-weight: 700;
-  font-size: 0.78rem;
-  line-height: 1.1;
-  cursor: pointer;
-}
-
-.booth-style-samples button img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: 10px;
-  background: #fff;
-}
-
-.booth-style-samples button span {
-  text-align: center;
-}
-
-.booth-style-samples button:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.booth-style-samples button.is-on {
-  background: #efece4;
-  color: #141820;
-  border-color: transparent;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
-}
-
-.booth-style-samples button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(157, 184, 220, 0.85);
-}
-
-.booth-style-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.4rem;
-}
-
-.booth-style-group:last-child .booth-style-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.booth-style-grid button {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.22rem;
-  min-height: 3.55rem;
-  padding: 0.28rem 0.15rem 0.32rem;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.05);
-  color: #e8eef7;
-  font: inherit;
-  font-weight: 700;
-  font-size: 0.82rem;
-  line-height: 1.1;
-  cursor: pointer;
-}
-
-.booth-style-grid button svg {
-  width: 1.65rem;
-  height: 1.65rem;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.75;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.booth-style-grid button svg circle {
-  fill: currentColor;
-  stroke: none;
-}
-
-.booth-style-grid button:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.booth-style-grid button.is-on {
-  background: #efece4;
-  color: #141820;
-  border-color: transparent;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
-}
-
-.booth-style-grid button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(157, 184, 220, 0.85);
-}
-
-/* Ocupado por el otro grupo: se apaga en vez de apilar dos sombreros. */
-.booth-style-grid button:disabled {
-  opacity: 0.28;
-  cursor: default;
-}
-
-.booth-style-grid button:disabled:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-@media (max-height: 720px) {
-  .booth-style {
-    padding-bottom: 5.6rem;
-    gap: 0.45rem;
-  }
-
-  .booth-style-options {
-    gap: 0.45rem;
-  }
-
-  .booth-style-group h2 {
-    margin-bottom: 0.25rem;
-    font-size: 0.86rem;
-  }
-
-  .booth-style-samples button {
-    font-size: 0.68rem;
-    padding: 0.18rem 0.18rem 0.28rem;
-  }
-
-  .booth-style-grid button {
-    min-height: 3.35rem;
-    font-size: 0.72rem;
-    border-radius: 12px;
-  }
-
-  .booth-style-grid button svg {
-    width: 1.3rem;
-    height: 1.3rem;
-  }
-}
-
-@media (max-width: 800px) {
-  .booth-style {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 0.42fr) minmax(0, 1fr);
-  }
-}
-
-.idle-ring {
-  position: fixed;
-  top: 76px;
-  right: 18px;
-  z-index: 40;
-  width: 72px;
-  height: 72px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: rgba(7, 15, 32, 0.78);
-  color: #f8fafc;
-  cursor: pointer;
-}
-
-.idle-ring svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.idle-ring-track,
-.idle-ring-value {
-  fill: none;
-  stroke-width: 3;
-}
-
-.idle-ring-track {
-  stroke: rgba(255, 255, 255, 0.18);
-}
-
-.idle-ring-value {
-  stroke: #f8fafc;
-  stroke-linecap: round;
-}
-
-.idle-ring-time {
-  position: relative;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  font-size: 0.95rem;
-}
-
-.booth-choices {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 1.35rem;
-  z-index: 30;
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0 1.5rem;
-  pointer-events: none;
-}
-
-.booth-choice {
-  pointer-events: auto;
-  min-width: min(360px, 46vw);
-  min-height: 108px;
-  padding: 1.25rem 2.4rem;
-  border-radius: var(--radius-pill);
-  font-size: clamp(1.45rem, 2.6vw, 2rem);
-  font-weight: 800;
-  letter-spacing: 0.08em;
-}
-
-.booth-choice--no {
-  background: var(--red-600);
-  color: #fff;
-  border-color: transparent;
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.16),
-    0 18px 44px rgba(220, 38, 38, 0.5),
-    0 0 56px rgba(220, 38, 38, 0.42);
-}
-
-.booth-choice--no:hover:not(:disabled) {
-  background: #b91c1c;
-  color: #fff;
-  transform: translateY(-4px) scale(1.04);
-  box-shadow:
-    0 24px 56px rgba(220, 38, 38, 0.6),
-    0 0 80px rgba(220, 38, 38, 0.5);
-}
-
-.booth-choice--yes {
-  background: #fff;
-  color: var(--syscom-blue);
-  box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.95),
-    0 0 32px 10px rgba(255, 255, 255, 0.7),
-    0 0 90px 28px rgba(212, 224, 237, 0.65),
-    0 0 160px 48px rgba(42, 84, 148, 0.4),
-    0 28px 70px rgba(2, 8, 20, 0.45);
-}
-
-.booth-choice--yes:hover:not(:disabled) {
-  background: #fff;
-  color: var(--syscom-blue);
-  transform: translateY(-4px) scale(1.05);
-  box-shadow:
-    0 0 0 2px #fff,
-    0 0 40px 14px rgba(255, 255, 255, 0.85),
-    0 0 110px 36px rgba(212, 224, 237, 0.75),
-    0 0 190px 60px rgba(42, 84, 148, 0.5),
-    0 32px 80px rgba(2, 8, 20, 0.4);
-}
-
-.booth-shell .booth-choice--no:focus-visible {
-  outline: none;
-  box-shadow:
-    0 0 0 3px rgba(254, 202, 202, 0.7),
-    0 18px 44px rgba(220, 38, 38, 0.5),
-    0 0 56px rgba(220, 38, 38, 0.42);
-}
-
-.booth-shell .booth-choice--yes:focus-visible {
-  outline: none;
-  box-shadow:
-    0 0 0 3px rgba(157, 184, 220, 0.85),
-    0 0 32px 10px rgba(255, 255, 255, 0.7),
-    0 0 90px 28px rgba(212, 224, 237, 0.65),
-    0 0 160px 48px rgba(42, 84, 148, 0.4);
-}
-
-/* Apilar sólo si además hay altura donde apilar. Un teléfono en horizontal
-   entra en «ancho chico» (851 px en el A55) pero sólo tiene ~390 px de alto:
-   ahí apilar el robot sobre el texto empujaba el botón fuera de la pantalla. */
-@media (max-width: 860px) and (min-height: 560px) {
-  .booth-welcome,
-  .booth-scene {
-    flex-direction: column;
-    gap: 0.8rem;
-    text-align: center;
-  }
-
-  .booth-robot {
-    max-width: min(78%, 360px);
-    max-height: 36vh;
-  }
-
-  .booth-welcome-copy,
-  .booth-scene-copy {
-    align-items: center;
-  }
-
-  .booth-thanks-art {
-    width: min(300px, 70vw);
-    max-height: 32vh;
-  }
-}
-
-@media (max-height: 720px) {
-  .booth-robot {
-    max-height: 40vh;
-  }
-
-  .booth-welcome-title {
-    font-size: 3rem;
-  }
-
-  .booth-choice {
-    min-height: 88px;
-    font-size: 1.25rem;
-  }
-}
-
-/* Pantalla de teléfono en horizontal: mucho ancho, poco alto. Se conserva la
-   fila y se comprime la escala, en vez de apilar y perder el botón. */
-@media (max-height: 480px) {
-  .booth-welcome,
-  .booth-scene {
-    gap: clamp(0.9rem, 3vw, 2.2rem);
-  }
-
-  .booth-robot {
-    max-height: 72vh;
-    max-width: min(44%, 300px);
-  }
-
-  .booth-welcome-copy,
-  .booth-scene-copy {
-    gap: 0.5rem;
-    max-width: 24rem;
-  }
-
-  .booth-kicker {
-    font-size: 0.62rem;
-  }
-
-  .booth-welcome-title {
-    font-size: clamp(2.1rem, 5.5vw, 2.8rem);
-  }
-
-  .booth-welcome-text {
-    font-size: 0.92rem;
-    line-height: 1.35;
-    /* Tres líneas de texto son las que caben; más y se come el botón. */
-    max-width: 22rem;
-  }
-
-  .booth-cta--xl {
-    min-height: 50px;
-    padding: 0.65rem 1.8rem;
-    font-size: 0.98rem;
-  }
-
-  .booth-scene-title {
-    font-size: clamp(1.35rem, 3.4vw, 1.9rem);
-  }
-
-  .booth-thanks-art {
-    max-height: 60vh;
-    width: min(240px, 42vw);
-  }
-
-  .booth-choice {
-    min-height: 62px;
-    font-size: 1.1rem;
-    padding: 0.4rem 1.4rem;
-  }
-}
-
-/* Teléfono en horizontal, etapa de decisión: sobra ancho y falta alto, así que
-   los botones se van a los costados de la foto. Antes iban abajo en fixed y se
-   comían 108 px del alto, dejando el visor en 288 px de ancho y tapándolo. */
-@media (max-height: 480px) {
-  .booth-heading {
-    display: none;
-  }
-
-  .booth-shell {
-    --booth-chrome: 5.5rem;
-  }
-
-  .booth-choices {
-    bottom: 50%;
-    transform: translateY(50%);
-    align-items: center;
-    padding: 0 0.9rem;
-  }
-
-  .booth-choice {
-    min-width: 0;
-    width: min(22vw, 190px);
-    min-height: 76px;
-    padding: 0.5rem 1rem;
-    font-size: 1rem;
-  }
-
-  /* El anillo de inactividad caía justo encima del botón derecho; abajo a la
-     izquierda hay sitio libre y sigue viéndose. */
-  .idle-ring {
-    top: auto;
-    bottom: 6px;
-    left: 8px;
-    right: auto;
-    width: 52px;
-    height: 52px;
-  }
-
-  .idle-ring-time {
-    font-size: 0.7rem;
-  }
-}
-
-/* Teléfono en vertical: la pantalla es alta y angosta. El visor pasa a 3:4 para
-   aprovechar el alto, y los dos botones se reparten el ancho en vez de quedar
-   uno encima del otro (sus mínimos de escritorio sumaban 418 px en 384). */
-@media (orientation: portrait) and (max-width: 560px) {
-  .booth-stage {
-    aspect-ratio: 3 / 4;
-    width: min(100%, calc((100dvh - var(--booth-chrome)) * 3 / 4));
-  }
-
-  .booth-choices {
-    bottom: 0.9rem;
-    gap: 0.7rem;
-    padding: 0 0.85rem;
-  }
-
-  .booth-choice {
-    min-width: 0;
-    flex: 1 1 0;
-    min-height: 78px;
-    padding: 0.6rem 0.9rem;
-    font-size: 1.05rem;
-  }
-
-  .idle-ring {
-    width: 56px;
-    height: 56px;
-    top: 68px;
-    right: 12px;
-  }
-
-  .idle-ring-time {
-    font-size: 0.72rem;
-  }
-}
-
-/* En una pantalla de bolsillo el escenario se quedaba con demasiada luz: el
-   halo azul del botón y la aurora de 90 px ocupan una porción grande de un
-   teléfono y leen como un reflejo, no como una luz de escenario. Se atenúan
-   solo aquí; en el monitor de la cabina el diseño queda como estaba. */
-@media (max-height: 480px), (orientation: portrait) and (max-width: 560px) {
-  .booth-shell {
-    background:
-      radial-gradient(620px 340px at 50% -20%, #102344 0%, transparent 62%),
-      radial-gradient(680px 460px at 112% 112%, rgba(26, 58, 107, 0.26), transparent 58%),
-      linear-gradient(180deg, #070f20 0%, #04091a 100%);
-  }
-
-  .booth-aurora {
-    filter: blur(64px);
-    opacity: 0.5;
-  }
-
-  .booth-cta {
-    box-shadow: 0 10px 24px rgba(2, 8, 20, 0.5);
-  }
-
-  .booth-cta:hover:not(:disabled) {
-    box-shadow: 0 14px 30px rgba(2, 8, 20, 0.55);
-  }
-}
-/* Hoja que se va dibujando mientras el robot trabaja                  */
-/* ------------------------------------------------------------------ */
-
+/* ---------- Escena de dibujo: hoja en papel ---------- */
 .booth-scene--drawing {
-  width: min(1180px, 100%);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
 }
 
 .booth-sheet {
+  grid-area: copy;
+  justify-self: center;
   position: relative;
-  height: min(64vh, 620px);
+  height: min(62vh, 600px);
   aspect-ratio: 3 / 4;
   flex: 0 0 auto;
-  border-radius: 0.35rem;
+  border-radius: 3px;
   background: #fbfaf7;
-  box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.16),
-    0 28px 60px -22px rgba(2, 6, 23, 0.55);
+  border: 1px solid rgba(2, 8, 20, 0.16);
+  box-shadow: 0 28px 52px -34px rgba(0, 0, 0, 0.95);
   overflow: hidden;
 }
 
@@ -1504,7 +1216,7 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(150deg, rgba(255, 255, 255, 0.85), rgba(226, 232, 240, 0.28));
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.85), rgba(226, 232, 240, 0.24));
   pointer-events: none;
 }
 
@@ -1528,55 +1240,559 @@
 }
 
 .booth-scene-copy--drawing {
+  grid-area: art;
   align-items: center;
   text-align: center;
   max-width: 24rem;
+  margin: 0 auto;
 }
 
 .booth-robot--drawing {
-  max-height: min(38vh, 340px);
-  max-width: min(100%, 320px);
-  margin-bottom: -0.5rem;
-}
-
-@media (max-width: 860px) {
-  .booth-sheet {
-    height: min(52vh, 460px);
-  }
+  max-height: min(34vh, 300px);
+  max-width: min(100%, 300px);
+  margin-bottom: -0.25rem;
 }
 
 .booth-clock {
   margin: 0;
   display: flex;
   align-items: baseline;
-  gap: 0.6rem;
+  gap: 0.55rem;
   font-variant-numeric: tabular-nums;
-  font-size: 1.05rem;
-  letter-spacing: 0.01em;
-  color: rgba(255, 255, 255, 0.92);
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .booth-clock-rest {
-  font-size: 0.92rem;
-  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.86rem;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .booth-cancel {
-  margin-top: 1.15rem;
-  min-height: 64px;
-  padding: 0 1.8rem;
-  border: 0;
-  border-radius: 16px;
-  background: linear-gradient(180deg, #ef4444, #b91c1c);
-  color: #fff;
-  font-weight: 800;
-  font-size: 1rem;
-  letter-spacing: 0.08em;
+  margin-top: 1rem;
+  min-height: 44px;
+  padding: 0 1.4rem;
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  border-radius: var(--radius-sm);
+  background: rgba(220, 38, 38, 0.14);
+  color: #fecaca;
+  font-weight: 700;
+  font-size: 0.9rem;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
-  box-shadow: 0 10px 24px rgba(185, 28, 28, 0.35);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.booth-cancel:hover {
+  background: rgba(220, 38, 38, 0.24);
+  border-color: rgba(248, 113, 113, 0.75);
+  color: #fff;
 }
 
 .booth-cancel:active {
-  transform: translateY(1px) scale(0.98);
+  transform: translateY(1px);
+}
+
+/* ---------- Decisiones: botón de mando, no cartel ---------- */
+.booth-choice {
+  pointer-events: auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0.65rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  box-shadow: none;
+}
+
+.booth-choice--no {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.22);
+  color: rgba(235, 241, 250, 0.82);
+}
+
+.booth-choice--no:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #fff;
+}
+
+.booth-choice--yes {
+  background: #fff;
+  border-color: #fff;
+  color: var(--syscom-blue);
+}
+
+.booth-choice--yes:hover:not(:disabled) {
+  background: var(--blue-50);
+  border-color: var(--blue-100);
+  color: var(--syscom-blue);
+}
+
+/* Mismo sitio y misma altura que el botón, pero solo informa. */
+.booth-choice--wait {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 0;
+  background: transparent;
+  border-color: transparent;
+  color: rgba(226, 232, 240, 0.7);
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.booth-shell .booth-choice--no:focus-visible,
+.booth-shell .booth-choice--yes:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--blue-100);
+}
+
+/* ---------- Toast ---------- */
+.booth-toast-wrap {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 1.25rem;
+  z-index: 400;
+  display: flex;
+  justify-content: center;
+  padding: 0 1rem;
+  pointer-events: none;
+}
+
+.booth-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(6, 17, 36, 0.96);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 32px -24px rgba(0, 0, 0, 0.9);
+  padding: 0.65rem 0.85rem;
+  max-width: min(440px, calc(100vw - 2rem));
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #e6edf7;
+}
+
+.booth-toast-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--blue-100);
+}
+
+.booth-toast-message {
+  min-width: 0;
+}
+
+.booth-toast-close {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.5);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.booth-toast-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e6edf7;
+}
+
+/* ---------- Anillo de inactividad ---------- */
+.idle-ring {
+  position: relative;
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: transparent;
+  color: #f8fafc;
+  cursor: pointer;
+}
+
+.idle-ring svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.idle-ring-track,
+.idle-ring-value {
+  fill: none;
+  stroke-width: 2;
+}
+
+.idle-ring-track {
+  stroke: rgba(255, 255, 255, 0.16);
+}
+
+.idle-ring-value {
+  stroke: #f8fafc;
+  stroke-linecap: round;
+}
+
+.idle-ring-time {
+  position: relative;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 0.86rem;
+}
+
+/* ---------- Confetti ---------- */
+.booth-confetti {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 350;
+}
+
+/* ---------- Foco visible ---------- */
+.booth-shell :focus-visible {
+  outline: 2px solid var(--blue-100);
+  outline-offset: 2px;
+}
+
+/* ---------- Utilidades ---------- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ============================================================
+   Adaptación: escritorio → tablet → teléfono
+   ============================================================ */
+
+/* Pantallas medianas: el panel de mando se aprieta, no se dobla. */
+@media (max-width: 1180px) {
+  .booth-flow {
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+}
+
+/* Tablet y teléfono: una columna. El visor manda, los controles abajo. */
+/* Una columna también en tablet vertical: ahí el ancho no es el recurso que
+   sobra, el alto lo es, y el rail lateral solo robaría visor. */
+@media (max-width: 1023px), (orientation: portrait) and (max-width: 1100px) {
+  .booth-shell {
+    --booth-chrome: 15rem;
+  }
+
+  .booth-flow {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'heading'
+      'stage'
+      'actions';
+    gap: 0.65rem;
+    align-items: stretch;
+  }
+
+  .booth-heading {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .booth-heading-text {
+    align-items: flex-start;
+  }
+
+  .booth-hint {
+    font-size: 0.82rem;
+  }
+
+  .booth-actions {
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0.65rem;
+  }
+
+  .booth-choice {
+    flex: 1 1 0;
+    width: auto;
+  }
+
+  .booth-actions--scene {
+    width: min(100%, 420px);
+    margin: 0 auto 0.25rem;
+  }
+
+  /* Bienvenida y escenas: robot arriba, texto abajo. */
+  .booth-welcome,
+  .booth-scene {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'art'
+      'copy';
+    justify-items: center;
+    text-align: center;
+    gap: 1rem;
+  }
+
+  .booth-welcome-copy,
+  .booth-scene-copy {
+    align-items: center;
+    max-width: min(32rem, 100%);
+  }
+
+  .booth-welcome-art {
+    height: 100%;
+    max-height: min(46vh, 380px);
+    width: 100%;
+  }
+
+  .booth-thanks-art {
+    max-height: min(44vh, 340px);
+    width: auto;
+  }
+
+  .booth-scene--drawing {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'copy'
+      'art';
+  }
+
+  .booth-sheet {
+    height: min(52vh, 440px);
+  }
+}
+
+/* Tablet en vertical: el visor se vuelve vertical, igual que la hoja que
+   dibuja el robot. Así la pantalla alta no queda con aire muerto arriba y
+   abajo del encuadre. */
+@media (orientation: portrait) and (min-width: 561px) {
+  .booth-shell {
+    --booth-chrome: 18rem;
+  }
+
+  .booth-stage {
+    aspect-ratio: 3 / 4;
+    width: min(100%, calc((100dvh - var(--booth-chrome)) * 3 / 4));
+  }
+
+  .booth-sheet {
+    height: min(58vh, 520px);
+  }
+}
+
+/* Teléfono: la barra de marca se queda con logo y producto; la nota del
+   backend es información de operador y no cabe sin recortar el nombre. */
+@media (max-width: 640px) {
+  .booth-brandbar-inner {
+    gap: 0.6rem;
+  }
+
+  .booth-demo-note {
+    display: none;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 560px) {
+  .booth-shell {
+    --booth-chrome: 14.5rem;
+  }
+
+  .booth-stage {
+    aspect-ratio: 3 / 4;
+    width: min(100%, calc((100dvh - var(--booth-chrome)) * 3 / 4));
+  }
+
+  .booth-title {
+    font-size: 1.2rem;
+  }
+
+  .booth-welcome {
+    gap: 0.75rem;
+  }
+
+  .booth-welcome-title {
+    font-size: clamp(2.2rem, 12vw, 3rem);
+  }
+
+  .booth-welcome-text {
+    font-size: 0.95rem;
+    max-width: 22rem;
+  }
+
+  .booth-cta--xl {
+    width: 100%;
+    max-width: 22rem;
+  }
+
+  .booth-welcome-art {
+    max-height: 34vh;
+  }
+
+  .booth-style-tile {
+    flex: 1 0 76px;
+    max-width: 92px;
+    font-size: 0.68rem;
+  }
+
+  .booth-style-tile-art svg {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+
+  .idle-ring {
+    width: 46px;
+    height: 46px;
+  }
+
+  .idle-ring-time {
+    font-size: 0.66rem;
+  }
+}
+
+/* Horizontal con poca altura (teléfono acostado): se conserva la columna
+   del visor y el mando se va a la derecha, porque el alto es lo escaso. */
+@media (max-height: 560px) and (min-width: 640px) {
+  .booth-shell {
+    --booth-chrome: 4.3rem;
+  }
+
+  .booth-main {
+    padding: 0.4rem 0.9rem;
+  }
+
+  .booth-flow {
+    grid-template-columns: minmax(0, 1fr) 190px;
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      'stage heading'
+      'stage actions';
+    gap: 0.4rem 0.9rem;
+    align-items: start;
+  }
+
+  .booth-heading {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .booth-hint,
+  .booth-brand-divider {
+    display: none;
+  }
+
+  .booth-title {
+    font-size: 1rem;
+  }
+
+  .booth-actions {
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .booth-choice {
+    width: 100%;
+    min-height: 42px;
+    font-size: 0.8rem;
+    padding: 0.4rem 0.6rem;
+  }
+
+  .booth-welcome,
+  .booth-scene {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: 'copy art';
+    text-align: left;
+    gap: 1.25rem;
+  }
+
+  .booth-welcome-copy,
+  .booth-scene-copy {
+    align-items: flex-start;
+  }
+
+  .booth-welcome-title {
+    font-size: clamp(1.9rem, 4.5vw, 2.4rem);
+  }
+
+  .booth-welcome-text {
+    font-size: 0.9rem;
+  }
+
+  .booth-cta--xl {
+    width: auto;
+  }
+
+  .booth-welcome-art {
+    max-height: 78vh;
+  }
+
+  .booth-art-caption {
+    display: none;
+  }
+
+  .booth-dock-wrap {
+    bottom: 10px;
+  }
+
+  .booth-cta {
+    min-height: 42px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .booth-diagonal-glow.is-waiting {
+    animation: none;
+    opacity: 0.5;
+  }
+
+  /* Sin barrido: una línea fija a media altura mantiene la idea de escaneo. */
+  .booth-scan::before {
+    animation: none;
+    top: 50%;
+    opacity: 0.7;
+  }
+
+  .booth-scan::after {
+    display: none;
+  }
+
+  /* Sin motos de luz: queda la retícula de trazas, quieta. */
+  .circuit-spark {
+    display: none;
+  }
+
+  .booth-stage.is-countdown .booth-corner {
+    animation: none;
+  }
 }

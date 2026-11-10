@@ -38,17 +38,22 @@
   --amber-50: #fffbeb;
   --amber-600: #d97706;
 
-  /* --- 5. Radios (familia cuadrada de esquinas generosas) --- */
-  --radius-sm: 8px;    /* Botones, inputs */
-  --radius: 10px;      /* Estándar del sistema (cards) */
-  --radius-lg: 12px;   /* Cards grandes */
-  --radius-modal: 14px;
-  --radius-pill: 999px;
+  /* --- 5. Radios: instrumento, no burbuja --- */
+  --radius-sm: 10px;   /* Botones, inputs (esquinas de aparato) */
+  --radius: 12px;      /* Estándar del sistema (cards) */
+  --radius-lg: 14px;   /* Cards grandes */
+  --radius-modal: 16px;
+  --radius-pill: 999px; /* Solo para cosas que de verdad son círculos */
 
-  /* --- 6. Sombras y elevación --- */
-  --shadow: 0 1px 3px rgba(8, 26, 51, 0.08), 0 4px 16px rgba(8, 26, 51, 0.06);
-  --shadow-lg: 0 8px 32px rgba(8, 26, 51, 0.14);
-  --focus-ring: 0 0 0 3px var(--blue-100);
+  /* --- 6. Sombras: una sola elevación, sin halo --- */
+  --shadow: 0 1px 2px rgba(8, 26, 51, 0.1), 0 2px 8px rgba(8, 26, 51, 0.06);
+  --shadow-lg: 0 4px 16px rgba(8, 26, 51, 0.12);
+  --focus-ring: 0 0 0 2px var(--syscom-blue-accent);
+
+  /* --- 7. Retícula técnica: 1 px casi invisible, decoración del aparato --- */
+  --grid-line: rgba(255, 255, 255, 0.045);
+  --hairline: rgba(255, 255, 255, 0.14);
+  --hairline-soft: rgba(255, 255, 255, 0.08);
 
   /* --- 9. Motion --- */
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
@@ -99,17 +104,18 @@ img {
   user-select: none;
 }
 
-/* --- 11.3 Botones --- */
+/* --- 11.3 Botones: altura de dedo, esquina de aparato, sin glow --- */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
+  min-height: 44px;
   font-family: inherit;
   font-size: 0.925rem;
   font-weight: 600;
   line-height: 1.2;
-  padding: 0.65rem 1.25rem;
+  padding: 0.6rem 1.15rem;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
@@ -119,11 +125,11 @@ img {
     border-color 0.15s ease,
     color 0.15s ease,
     box-shadow 0.15s ease,
-    transform 0.15s ease;
+    transform 0.12s ease;
 }
 
 .btn:active:not(:disabled) {
-  transform: scale(0.98);
+  transform: translateY(1px);
 }
 
 .btn:disabled {
@@ -139,10 +145,12 @@ img {
 .btn-primary {
   background: var(--syscom-blue);
   color: #fff;
+  border-color: var(--syscom-blue);
 }
 
 .btn-primary:hover:not(:disabled) {
   background: var(--syscom-blue-light);
+  border-color: var(--syscom-blue-accent);
 }
 
 .btn-secondary {

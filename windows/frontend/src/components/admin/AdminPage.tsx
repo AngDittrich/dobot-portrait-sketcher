@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { LogOut, OctagonX, ScrollText, Trash2 } from 'lucide-react'
+import { LogOut, Menu, OctagonX, ScrollText, Trash2 } from 'lucide-react'
 import { adminActivity, adminClearJobs, adminCommand, cancelActiveJob } from '../../lib/api'
 import type { AdminActivity, AdminCommand, AdminStatus } from '../../lib/api'
 import { useAdminStatus } from '../../hooks/useAdminStatus'
@@ -50,6 +50,7 @@ export function AdminPage({
 }) {
   const [notice, setNotice] = useState('')
   const [cancelling, setCancelling] = useState(false)
+  const [navOpen, setNavOpen] = useState(false)
   const { status, pollError } = useAdminStatus(token)
   const [activity, setActivity] = useState<AdminActivity | null>(null)
 
@@ -123,10 +124,36 @@ export function AdminPage({
     (job) => job.status === 'done' || job.status === 'error',
   )
 
+  // El menú plegado se cierra con Escape y al elegir sección: en tablet no
+  // hay sitio para dejarlo abierto sobre el contenido.
+  useEffect(() => {
+    if (!navOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNavOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navOpen])
+
+  const go = (id: SectionId) => {
+    onSection(id)
+    setNavOpen(false)
+  }
+
   return (
     <div className="admin-page">
       <header className={`admin-top is-${mood.key}`}>
         <span className="admin-top-light" aria-hidden="true" />
+        <button
+          type="button"
+          className="admin-menu"
+          aria-expanded={navOpen}
+          aria-controls="admin-nav"
+          onClick={() => setNavOpen((open) => !open)}
+        >
+          <Menu size={20} aria-hidden="true" />
+          <span>Menú</span>
+        </button>
         <button type="button" className="admin-brand" onClick={onDemo} aria-label="Ir al demo">
           <img src="/brand/syscomLargeLogo.webp" alt="" />
         </button>
@@ -138,31 +165,39 @@ export function AdminPage({
           <button
             type="button"
             className={active === 'actividad' ? 'admin-exit is-on' : 'admin-exit'}
-            onClick={() => onSection('actividad')}
+            aria-label="Logs"
+            onClick={() => go('actividad')}
           >
             <ScrollText size={18} aria-hidden="true" />
-            Logs
+            <span className="admin-action-label">Logs</span>
           </button>
           <button
             type="button"
             className="admin-exit"
+            aria-label="Borrar trabajos cerrados"
             onClick={() => void clearLogs()}
             disabled={!hasLogs}
           >
             <Trash2 size={18} aria-hidden="true" />
-            Borrar
+            <span className="admin-action-label">Borrar</span>
           </button>
           <button
             type="button"
             className="admin-estop"
+            aria-label="Paro de emergencia"
             onClick={() => void send({ action: 'estop' })}
           >
-            <OctagonX size={22} aria-hidden="true" />
-            Paro
+            <OctagonX size={20} aria-hidden="true" />
+            <span>Paro</span>
           </button>
-          <button type="button" className="admin-exit" onClick={onClose}>
+          <button
+            type="button"
+            className="admin-exit"
+            aria-label="Salir del panel"
+            onClick={onClose}
+          >
             <LogOut size={18} aria-hidden="true" />
-            Salir
+            <span className="admin-action-label">Salir</span>
           </button>
         </div>
       </header>
@@ -174,20 +209,28 @@ export function AdminPage({
       )}
 
       <div className="admin-body">
-        <nav className="admin-nav" aria-label="Secciones del panel">
+        <nav id="admin-nav" className={navOpen ? 'admin-nav is-open' : 'admin-nav'} aria-label="Secciones del panel">
           {SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
               className={active === id ? 'is-on' : ''}
               aria-current={active === id ? 'page' : undefined}
-              onClick={() => onSection(id)}
+              onClick={() => go(id)}
             >
-              <Icon size={20} aria-hidden="true" />
+              <Icon size={18} aria-hidden="true" />
               <span>{label}</span>
             </button>
           ))}
         </nav>
+        {navOpen && (
+          <button
+            type="button"
+            className="admin-nav-scrim"
+            aria-label="Cerrar el menú"
+            onClick={() => setNavOpen(false)}
+          />
+        )}
 
         <main className="admin-content">
           {active === 'estado' && <StatusSection status={status} activity={activity} />}

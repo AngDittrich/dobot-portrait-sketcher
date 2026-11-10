@@ -3,8 +3,8 @@ import type { RefObject } from 'react'
 import type Webcam from 'react-webcam'
 
 /**
- * Óvalo de la cara dentro del visor (0..1 del escenario).
- * La silueta dibujada usa los mismos números.
+ * Óvalo de la cara dentro del cuadro de la cámara (0..1 del video).
+ * El visor y la silueta lo proyectan con el mismo recorte que `object-fit`.
  */
 export const GUIDE = {
   cx: 0.5,
@@ -80,15 +80,16 @@ function faceInGuide(
   context.drawImage(video, 0, 0, sampleW, sampleH)
   const pixels = context.getImageData(0, 0, sampleW, sampleH).data
 
-  // object-fit: cover — el óvalo está en el escenario, no en el cuadro crudo.
+  // object-fit: cover — el óvalo vive en el cuadro de la cámara y se proyecta
+  // al visor con el mismo factor, así no se deforma si el visor es vertical.
   const scale = Math.max(stageW / videoW, stageH / videoH)
   const offsetX = (videoW * scale - stageW) / 2
   const offsetY = (videoH * scale - stageH) / 2
 
-  const cx = GUIDE.cx * stageW
-  const cy = GUIDE.cy * stageH
-  const rx = GUIDE.rx * stageW
-  const ry = GUIDE.ry * stageH
+  const cx = GUIDE.cx * videoW * scale - offsetX
+  const cy = GUIDE.cy * videoH * scale - offsetY
+  const rx = GUIDE.rx * videoW * scale
+  const ry = GUIDE.ry * videoH * scale
 
   let inside = 0
   let skin = 0
