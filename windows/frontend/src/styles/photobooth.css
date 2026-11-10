@@ -2228,9 +2228,10 @@
   }
 }
 
-/* Tablet vertical: el panel de estilos se ajusta a sus tarjetas. Antes la
-   fila sobrante se estiraba y dejaba un bloque oscuro vacío bajo ESTILO. */
-@media (min-width: 900px) and (max-width: 1023px) and (orientation: portrait) {
+/* Teléfono y tablet vertical: el panel de estilos se ajusta a sus tarjetas.
+   Antes la fila sobrante se estiraba y dejaba un bloque oscuro vacío bajo
+   ESTILO. La foto absorbe ese alto en vez de regalarlo a un hueco. */
+@media (orientation: portrait) and (max-width: 1100px) {
   .booth-style {
     grid-template-rows: minmax(0, 1fr) auto;
   }
