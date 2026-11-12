@@ -170,6 +170,8 @@ export interface AdminCommand {
   z?: number
   r?: number
   speed?: number
+  /** Palanca derecha del control, de -1 a 1. Gira J4. */
+  j4?: number
 }
 
 function adminHeaders(token: string): HeadersInit {

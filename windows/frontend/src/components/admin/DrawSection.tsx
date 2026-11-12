@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { getJob, postJob, postSketch } from '../../lib/api'
+import { cancelActiveJob, getJob, postJob, postSketch } from '../../lib/api'
 import type { AdminStatus, SketchResponse } from '../../lib/api'
 
 const ACCEPT = ['image/jpeg', 'image/png', 'image/webp']
@@ -31,18 +31,23 @@ export function DrawSection({ status }: { status: AdminStatus | null }) {
   const [error, setError] = useState('')
   const [jobId, setJobId] = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
-  const [jobStatus, setJobStatus] = useState<'drawing' | 'done' | 'error' | null>(null)
+  const [jobStatus, setJobStatus] = useState<'drawing' | 'done' | 'error' | 'cancelled' | null>(null)
+  const [cancelling, setCancelling] = useState(false)
 
   const busy = Boolean(status?.busy) || jobStatus === 'drawing'
 
   useEffect(() => {
-    if (!jobId || jobStatus === 'done' || jobStatus === 'error') return
+    if (!jobId || jobStatus === 'done' || jobStatus === 'error' || jobStatus === 'cancelled') return
     let stop = false
     const tick = async () => {
       try {
         const job = await getJob(jobId)
         if (stop) return
         setProgress(job.progress)
+        if (job.status === 'error' && job.error === 'cancelado') {
+          setJobStatus('cancelled')
+          return
+        }
         if (job.status === 'done' || job.status === 'error') {
           setJobStatus(job.status)
           if (job.error) setError(job.error)
@@ -102,6 +107,7 @@ export function DrawSection({ status }: { status: AdminStatus | null }) {
   async function draw() {
     if (!sketch || busy) return
     setError('')
+    setCancelling(false)
     try {
       const job = await postJob(sketch.id)
       setJobId(job.job_id)
@@ -109,6 +115,23 @@ export function DrawSection({ status }: { status: AdminStatus | null }) {
       setProgress(0)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'el robot no arrancó')
+    }
+  }
+
+  async function cancel() {
+    setCancelling(true)
+    setError('')
+    try {
+      const result = await cancelActiveJob()
+      if (!result.cancelled) {
+        setCancelling(false)
+        setError('No hay un dibujo en curso.')
+        return
+      }
+      setJobStatus('cancelled')
+    } catch (reason) {
+      setCancelling(false)
+      setError(reason instanceof Error ? reason.message : 'no se pudo cancelar')
     }
   }
 
@@ -162,9 +185,11 @@ export function DrawSection({ status }: { status: AdminStatus | null }) {
               {estimate !== null ? ` · estimado ${Math.round(estimate)} s` : ''}
               {` · ${sketch.strokes.length} trazos`}
             </p>
-            <button type="button" className="admin-press" disabled={busy} onClick={() => void draw()}>
-              {jobStatus === 'drawing' ? `Dibujando ${percent}%` : 'Dibujar en el papel'}
-            </button>
+            <div className="admin-draw-actions">
+              <button type="button" className="admin-press" disabled={busy} onClick={() => void draw()}>
+                {jobStatus === 'drawing' ? `Dibujando ${percent}%` : 'Dibujar en el papel'}
+              </button>
+            </div>
             {jobStatus === 'drawing' && (
               <span className="admin-progress" aria-hidden="true">
                 <i style={{ width: `${percent}%` }} />
@@ -172,6 +197,16 @@ export function DrawSection({ status }: { status: AdminStatus | null }) {
             )}
             {jobStatus === 'done' && <p className="admin-card-note">Terminado en el papel.</p>}
           </>
+        )}
+        {busy && (
+          <div className="admin-draw-actions">
+            <button type="button" className="admin-press" disabled={cancelling} onClick={() => void cancel()}>
+              {cancelling ? 'Levantando el lápiz…' : 'Cancelar'}
+            </button>
+          </div>
+        )}
+        {jobStatus === 'cancelled' && !busy && (
+          <p className="admin-card-note">Cancelado. El lápiz quedó arriba.</p>
         )}
         {error && <p className="admin-empty">{error}</p>}
       </section>

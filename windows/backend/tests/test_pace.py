@@ -117,6 +117,7 @@ def test_el_envio_espera_para_no_pasar_el_colchon():
         origin_y=92.0,
         queue_retry_s=0.0,
         pace_lead_s=1.0,
+        global_speed=20,
         clock=reloj,
         sleep=reloj.sleep,
     )
@@ -172,6 +173,7 @@ def test_con_cp_alto_el_ritmo_no_se_apaga_aunque_la_pose_diga_que_ya_paso():
         origin_y=92.0,
         queue_retry_s=0.0,
         pace_lead_s=1.0,
+        global_speed=20,
         clock=reloj,
         sleep=reloj.sleep,
     )
@@ -227,6 +229,12 @@ def test_el_dibujo_expone_tiempos_y_ordenes_saltadas():
         "air_s": pytest.approx(0.0, abs=0.1),
         "queue_s": pytest.approx(0.0, abs=0.1),
         "skipped_orders": 0,
+        "pose_reads": 0,
+        "pose_s": 0.0,
+        "pose_max_s": 0.0,
+        "long_waits": 0,
+        "long_wait_s": 0.0,
+        "timeouts": 0,
     }
 
 

@@ -99,7 +99,8 @@ def test_baja_sobre_el_trazo_y_viaja_en_alto():
 
     asyncio.run(correr())
 
-    assert enlace.prepared == 20
+    # La velocidad del trazo va en SpeedL; el global queda al 100 %.
+    assert enlace.prepared == 100
     assert "User(1)" in enlace.dashboard_cmds
     assert "Tool(2)" in enlace.dashboard_cmds
     movimientos = [orden for orden in enlace.moves if orden.startswith("MovL")]

@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { adminCommand } from '../../lib/api'
 import type { AdminCommand, AdminStatus } from '../../lib/api'
 import { useJog } from '../../hooks/useAdminStatus'
+import type { PadState } from '../../hooks/usePad'
 import { JoyStick } from './JoyStick'
 import { JOINTS, PLANE } from './stickSpaces'
 
@@ -13,18 +14,26 @@ export function ControlSection({
   token,
   send,
   onNotice,
+  speed,
+  onSpeed,
+  pad,
 }: {
   status: AdminStatus | null
   token: string
   send: (command: AdminCommand) => Promise<void>
   onNotice: (message: string) => void
+  speed: number
+  onSpeed: (value: number) => void
+  pad: PadState
 }) {
   const [space, setSpace] = useState<'plano' | 'joints'>('plano')
   const [step, setStep] = useState(1)
-  const [speed, setSpeed] = useState(50)
   const [collision, setCollision] = useState(2)
   const [pose, setPose] = useState({ x: '', y: '', z: '', r: '' })
-  const speedRef = useRef(50)
+  const speedRef = useRef(speed)
+  useEffect(() => {
+    speedRef.current = speed
+  }, [speed])
   const collisionRef = useRef(2)
   const busy = Boolean(status?.busy)
 
@@ -115,6 +124,14 @@ export function ControlSection({
             </button>
           </div>
         </header>
+
+        <p className="admin-card-note">
+          {pad.unsupported
+            ? 'Hay un control conectado, pero el navegador no lo reconoce como mando estándar.'
+            : pad.name
+              ? `${pad.name} · ${pad.armed ? 'armado' : 'desarmado'}. El dibujo y el ajuste están en Mando.`
+              : 'Conecta el DualShock por USB. En Mando se ve si responde y se ajusta.'}
+        </p>
 
         <div className="admin-sticks">
           <JoyStick
@@ -214,11 +231,7 @@ export function ControlSection({
                 min={1}
                 max={100}
                 value={speed}
-                onChange={(event) => {
-                  const value = Number(event.target.value)
-                  speedRef.current = value
-                  setSpeed(value)
-                }}
+                onChange={(event) => onSpeed(Number(event.target.value))}
                 onPointerUp={() => void send({ action: 'speed', value: speedRef.current })}
                 onBlur={() => void send({ action: 'speed', value: speedRef.current })}
               />

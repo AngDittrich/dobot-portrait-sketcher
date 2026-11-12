@@ -3,11 +3,14 @@ import { LogOut, OctagonX, ScrollText, Trash2 } from 'lucide-react'
 import { adminActivity, adminClearJobs, adminCommand, cancelActiveJob } from '../../lib/api'
 import type { AdminActivity, AdminCommand, AdminStatus } from '../../lib/api'
 import { useAdminStatus } from '../../hooks/useAdminStatus'
+import { DEFAULT_PAD_TUNE, usePad } from '../../hooks/usePad'
+import type { PadTune } from '../../hooks/usePad'
 import { ActivitySection } from './ActivitySection'
 import { ConfigSection } from './ConfigSection'
 import { ControlSection } from './ControlSection'
 import { DebugSection } from './DebugSection'
 import { DrawSection } from './DrawSection'
+import { PadSection } from './PadSection'
 import { SECTIONS } from './sections'
 import type { SectionId } from './sections'
 import { StatusSection } from './StatusSection'
@@ -50,6 +53,8 @@ export function AdminPage({
 }) {
   const [notice, setNotice] = useState('')
   const [cancelling, setCancelling] = useState(false)
+  const [speed, setSpeed] = useState(50)
+  const [tune, setTune] = useState<PadTune>(DEFAULT_PAD_TUNE)
   const { status, pollError } = useAdminStatus(token)
   const [activity, setActivity] = useState<AdminActivity | null>(null)
 
@@ -104,6 +109,17 @@ export function AdminPage({
       setNotice(error instanceof Error ? error.message : 'no se pudo borrar la bitácora')
     }
   }, [token, loadActivity])
+
+  const pad = usePad({
+    token,
+    speed,
+    setSpeed,
+    busy: Boolean(status?.busy),
+    drag: status?.mode === 6,
+    tune,
+    onClearLogs: () => void clearLogs(),
+    onNotice: setNotice,
+  })
 
   const cancelDraw = useCallback(async () => {
     setCancelling(true)
@@ -192,7 +208,18 @@ export function AdminPage({
         <main className="admin-content">
           {active === 'estado' && <StatusSection status={status} activity={activity} />}
           {active === 'control' && (
-            <ControlSection status={status} token={token} send={send} onNotice={setNotice} />
+            <ControlSection
+              status={status}
+              token={token}
+              send={send}
+              onNotice={setNotice}
+              speed={speed}
+              onSpeed={setSpeed}
+              pad={pad}
+            />
+          )}
+          {active === 'mando' && (
+            <PadSection pad={pad} speed={speed} onSpeed={setSpeed} tune={tune} onTune={setTune} />
           )}
           {active === 'dibujar' && <DrawSection status={status} />}
           {active === 'configuracion' && (
