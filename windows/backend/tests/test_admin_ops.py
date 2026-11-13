@@ -92,3 +92,59 @@ def test_una_pose_en_cero_no_se_pide_en_cero():
 
 def test_la_alarma_17_se_lee_en_claro():
     assert "sin solución" in describe_alarms("[[17],[],[],[],[]]")
+
+
+def test_movj_y_jump_llevan_r_y_van_por_movimiento():
+    command, is_move, prepare = plan(
+        "movj", {"x": 300, "y": -20, "z": -60, "r": 96}, busy=False
+    )
+    assert command == "MovJ(300.000,-20.000,-60.000,96.000)"
+    assert is_move and prepare
+    command, is_move, prepare = plan(
+        "jump", {"x": 300, "y": -20, "z": -60, "r": 96}, busy=False
+    )
+    assert command == "Jump(300.000,-20.000,-60.000,96.000)"
+    assert is_move and prepare
+
+
+def test_durante_un_dibujo_no_hay_movj_jump_arco_ni_cuadrado():
+    for action in ("movj", "jump", "arc", "square"):
+        with pytest.raises(AdminOpError):
+            plan(action, {"x": 300, "y": 0, "z": 0, "r": 0}, busy=True)
+
+
+def test_salidas_y_entradas_del_tool():
+    command, is_move, prepare = plan("do", {"index": 2, "status": 1}, busy=False)
+    assert command == "DO(2,1)"
+    assert not is_move and not prepare
+    with pytest.raises(AdminOpError):
+        plan("do", {"index": 25, "status": 1}, busy=False)
+    with pytest.raises(AdminOpError):
+        plan("do", {"index": 1, "status": 2}, busy=False)
+    command, _, _ = plan("tooldo", {"index": 1, "status": 0}, busy=False)
+    assert command == "ToolDO(1,0)"
+    command, _, _ = plan("tooldi", {"index": 1}, busy=False)
+    assert command == "ToolDI(1)"
+    with pytest.raises(AdminOpError):
+        plan("tooldi", {"index": 9}, busy=False)
+
+
+def test_ratios_y_carga():
+    assert plan("speedl", {"value": 50}, busy=False)[0] == "SpeedL(50)"
+    assert plan("accl", {"value": 50}, busy=False)[0] == "AccL(50)"
+    with pytest.raises(AdminOpError):
+        plan("speedl", {"value": 0}, busy=False)
+    command, is_move, prepare = plan(
+        "payload", {"weight": 0.5, "inertia": 0.01}, busy=False
+    )
+    assert command == "PayLoad(0.500,0.0100)"
+    assert not is_move and not prepare
+    with pytest.raises(AdminOpError):
+        plan("payload", {"weight": 9, "inertia": 0.01}, busy=False)
+
+
+def test_arco_y_cuadrado_son_movimiento_que_prepara():
+    for action in ("arc", "square"):
+        _command, is_move, prepare = plan(action, {}, busy=False)
+        assert is_move and prepare
+        assert rate_for(action, {"speed": 60}) == 60
