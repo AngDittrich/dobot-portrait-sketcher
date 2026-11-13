@@ -112,6 +112,12 @@ export interface AdminStatus {
   j4_fixed?: number | null
   /** Cómo se calcula R: "j1+j4" (lo normal en el MG400) o "j4". */
   j4_model?: string | null
+  /** De dónde sale pose/mode/di/do: "feedback" (puerto 30004, 8 ms) o "sondeo". */
+  source?: string
+  /** Bits de entradas del controlador (feedback 30004). */
+  di_bits?: number | null
+  /** Bits de salidas del controlador (feedback 30004): bit i-1 = DOi. */
+  do_bits?: number | null
 }
 
 export interface AdminSheet {
@@ -165,6 +171,11 @@ export interface AdminCommand {
   value?: number
   on?: boolean
   index?: number
+  /** 0/1 para do/tooldo. */
+  status?: number
+  /** Peso (0-5 kg) e inercia (0-1) para payload. */
+  weight?: number
+  inertia?: number
   x?: number
   y?: number
   z?: number

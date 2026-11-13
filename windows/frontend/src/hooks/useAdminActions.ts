@@ -110,6 +110,20 @@ export function useAdminActions(token: string, options: AdminActionsOptions) {
     }
   }, [token, onNotice, fail])
 
+  /** Lee ToolDI1–ToolDI2 y lo deja en el aviso (Control → Entradas). */
+  const readToolInput = useCallback(
+    async (index: number): Promise<void> => {
+      try {
+        const result = await adminCommand(token, { action: 'tooldi', index })
+        onNotice(`ToolDI${index} ${result.value || 'sin valor'}`)
+      } catch (error) {
+        fail(error, 'no se pudo leer la entrada de la herramienta')
+        throw error
+      }
+    },
+    [token, onNotice, fail],
+  )
+
   /** Pone J4 en -50 antes de enseñar una esquina (Configuración). */
   const homeJ4 = useCallback(async (): Promise<void> => {
     try {
@@ -262,6 +276,7 @@ export function useAdminActions(token: string, options: AdminActionsOptions) {
     clearLogs,
     cancelDraw,
     readInputs,
+    readToolInput,
     homeJ4,
     go,
     markArea,
