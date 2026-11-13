@@ -27,7 +27,9 @@ export function AdminArea({
   const sending = useRef(false)
 
   const raw = path.split('/')[2] ?? ''
-  const section = isSectionId(raw) ? raw : DEFAULT_SECTION
+  // El mando vive dentro de Control. La URL vieja abre esa sección.
+  const asked = raw === 'mando' ? 'control' : raw
+  const section = isSectionId(asked) ? asked : DEFAULT_SECTION
 
   // Completa o corrige la URL (/admin, o una sección que no existe) sin
   // perder el historial: un solo reemplazo, no una pila de redirecciones.

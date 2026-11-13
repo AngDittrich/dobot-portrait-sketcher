@@ -1,11 +1,11 @@
-import { Gamepad2, Gauge, History, Joystick, Layers, PenLine, Settings, Sparkles } from 'lucide-react'
+import { Crosshair, Gauge, History, Joystick, Layers, PenLine, Settings, Sparkles } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 /** Compartido entre `AdminArea` (lee la URL) y `AdminPage` (pinta la barra). */
 export type SectionId =
   | 'estado'
   | 'control'
-  | 'mando'
+  | 'calibracion'
   | 'dibujar'
   | 'ia'
   | 'configuracion'
@@ -14,8 +14,8 @@ export type SectionId =
 
 export const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: 'estado', label: 'Estado', icon: Gauge },
-  { id: 'control', label: 'Control', icon: Gamepad2 },
-  { id: 'mando', label: 'Mando', icon: Joystick },
+  { id: 'control', label: 'Control', icon: Joystick },
+  { id: 'calibracion', label: 'Calibración', icon: Crosshair },
   { id: 'dibujar', label: 'Dibujar', icon: PenLine },
   { id: 'ia', label: 'IA', icon: Sparkles },
   { id: 'configuracion', label: 'Configuración', icon: Settings },

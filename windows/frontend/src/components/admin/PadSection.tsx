@@ -55,12 +55,15 @@ export function PadSection({
   onSpeed,
   tune,
   onTune,
+  embedded = false,
 }: {
   pad: PadState
   speed: number
   onSpeed: (value: number) => void
   tune: PadTune
   onTune: (next: PadTune) => void
+  /** Dentro de Control, junto al interruptor de joysticks. */
+  embedded?: boolean
 }) {
   const [live, setLive] = useState(() => samplePad(tune))
 
@@ -103,7 +106,7 @@ export function PadSection({
       : 'Conecta el DualShock por USB'
 
   return (
-    <div className="admin-section admin-mando">
+    <div className={embedded ? 'admin-mando admin-mando--embedded' : 'admin-section admin-mando'}>
       <section className={`mando-stage${present ? '' : ' is-off'}${pad.armed ? ' is-armed' : ''}`}>
         <div className="mando-triggers" aria-hidden="true">
           <span className={`mando-trigger${live.l2 > 0.05 ? ' is-down' : ''}`}>

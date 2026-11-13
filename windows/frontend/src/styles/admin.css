@@ -141,11 +141,7 @@
   display: flex;
   flex-direction: column;
   color: #fff;
-  background-color: #050c1b;
-  background-image:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 72px 72px;
+  background: #050c1b;
   user-select: none;
 }
 
@@ -659,14 +655,77 @@
 /* ---------- Sección Control ---------- */
 .admin-control {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(340px, 0.95fr);
+  gap: 1rem;
+}
+
+.admin-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
 }
 
-.admin-control-side {
+.admin-control-col {
   display: grid;
   gap: 1rem;
+  align-content: start;
+}
+
+.admin-tile-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.admin-tile-head h3 {
+  margin: 0;
+}
+
+.admin-tile-head p {
+  margin: 0.15rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-transform: none;
+  color: rgba(226, 232, 240, 0.62);
+}
+
+.admin-tile-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(125, 211, 252, 0.12);
+  color: #bae6fd;
+}
+
+.admin-tile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.admin-tile-actions > .admin-pose,
+.admin-tile-actions > .admin-pose--io {
+  flex: 1 1 100%;
+}
+
+.admin-field-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.admin-card-head .admin-card-note {
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+.admin-pose--io {
+  grid-template-columns: minmax(7rem, 9rem);
 }
 
 .admin-pad {
@@ -677,10 +736,11 @@
 
 .admin-sticks {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-evenly;
   gap: 1.25rem;
-  padding: 0.5rem 0 0.25rem;
+  padding: 0.75rem 0 0.35rem;
 }
 
 .admin-stick-wrap {
@@ -865,7 +925,7 @@
 
 .admin-sliders {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 0.9rem;
 }
 
@@ -936,7 +996,8 @@
 }
 
 .admin-pose-actions button {
-  flex: 1;
+  flex: 1 1 auto;
+  white-space: nowrap;
 }
 
 /* ---------- Sección Configuración ---------- */
@@ -945,6 +1006,10 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
   align-items: start;
+}
+
+.admin-config > form {
+  display: contents;
 }
 
 .admin-fields {
@@ -992,11 +1057,10 @@
 }
 
 .admin-fields .admin-check {
+  grid-column: 1 / -1;
   flex-direction: row;
   align-items: center;
-  align-self: end;
   gap: 0.5rem;
-  padding-bottom: 0.45rem;
   text-transform: none;
   letter-spacing: 0;
   font-size: 0.9rem;
@@ -1222,6 +1286,10 @@
 
 /* ---------- Botones y segmentos compartidos ---------- */
 .admin-press {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
   background: transparent;
@@ -1837,13 +1905,21 @@
 
 .admin-segment {
   display: flex;
+  flex-wrap: wrap;
   padding: 2px;
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--hairline-soft);
 }
 
+.admin-pose > .admin-segment {
+  grid-column: 1 / -1;
+}
+
 .admin-segment button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   border: 0;
   border-radius: 8px;
   padding: 0.4rem 0.75rem;
@@ -2179,7 +2255,6 @@
     grid-column: 1 / -1;
   }
 
-  .admin-control,
   .admin-mando {
     grid-template-columns: 1fr;
   }
@@ -2190,10 +2265,6 @@
 
   .admin-debug,
   .admin-draw {
-    grid-template-columns: 1fr;
-  }
-
-  .admin-config {
     grid-template-columns: 1fr;
   }
 
@@ -2250,6 +2321,80 @@
 
   .admin-content {
     padding: 1.1rem;
+  }
+
+  /* El botón de menú no cabe en la misma fila que el título y las acciones. */
+  .admin-top {
+    flex-wrap: wrap;
+    gap: 0.35rem 0.55rem;
+    padding: 0.5rem 0.9rem;
+    min-height: 0;
+  }
+
+  .admin-menu {
+    order: 0;
+  }
+
+  .admin-brand {
+    order: 1;
+    flex: 0 1 150px;
+    min-width: 0;
+    padding: 0.15rem 0.2rem;
+  }
+
+  .admin-brand img {
+    height: 22px;
+    max-width: 100%;
+    object-fit: contain;
+  }
+
+  .admin-top-actions {
+    order: 2;
+    margin-left: auto;
+    gap: 0.35rem;
+  }
+
+  .admin-exit,
+  .admin-estop {
+    min-width: 40px;
+    padding: 0 0.6rem;
+  }
+
+  .admin-action-label,
+  .admin-estop span {
+    display: none;
+  }
+
+  .admin-estop {
+    gap: 0;
+  }
+
+  .admin-top-title {
+    order: 3;
+    flex: 1 1 100%;
+    display: flex;
+    align-items: baseline;
+    gap: 0.55rem;
+    min-width: 0;
+  }
+
+  .admin-top-title h1 {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .admin-top-title p {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .admin-nav {
+    top: 0;
+  }
+
+  .admin-nav-scrim {
+    inset: 0;
   }
 }
 
@@ -2336,6 +2481,12 @@
 
   .admin-content {
     padding: 0.85rem;
+  }
+
+  .admin-control-grid,
+  .admin-config,
+  .admin-sliders {
+    grid-template-columns: 1fr;
   }
 
   .admin-pose-readout,

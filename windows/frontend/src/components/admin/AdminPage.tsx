@@ -8,11 +8,11 @@ import { DEFAULT_PAD_TUNE, usePad } from '../../hooks/usePad'
 import type { PadTune } from '../../hooks/usePad'
 import { ActivitySection } from './ActivitySection'
 import { AiSection } from './AiSection'
+import { CalibrationSection } from './CalibrationSection'
 import { ConfigSection } from './ConfigSection'
 import { ControlSection } from './ControlSection'
 import { DebugSection } from './DebugSection'
 import { DrawSection } from './DrawSection'
-import { PadSection } from './PadSection'
 import { SECTIONS } from './sections'
 import type { SectionId } from './sections'
 import { StatusSection } from './StatusSection'
@@ -61,7 +61,7 @@ export function AdminPage({
   const [navOpen, setNavOpen] = useState(false)
   // En Control y Configuración el brazo se mueve a mano: la pose de hace un
   // segundo se sentía como delay. En las demás pestañas basta con 1 s.
-  const pollMs = active === 'control' || active === 'configuracion' ? 400 : 1000
+  const pollMs = active === 'control' || active === 'calibracion' || active === 'configuracion' ? 400 : 1000
   const { status, pollError } = useAdminStatus(token, pollMs)
   const [activity, setActivity] = useState<AdminActivity | null>(null)
 
@@ -272,15 +272,15 @@ export function AdminPage({
               speed={speed}
               onSpeed={setSpeed}
               pad={pad}
+              tune={tune}
+              onTune={setTune}
             />
           )}
-          {active === 'mando' && (
-            <PadSection pad={pad} speed={speed} onSpeed={setSpeed} tune={tune} onTune={setTune} />
-          )}
+          {active === 'calibracion' && <CalibrationSection status={status} actions={actions} />}
           {active === 'dibujar' && <DrawSection status={status} />}
           {active === 'ia' && <AiSection activity={activity} />}
           {active === 'configuracion' && (
-            <ConfigSection status={status} actions={actions} />
+            <ConfigSection status={status} actions={actions} speed={speed} onSpeed={setSpeed} />
           )}
           {active === 'actividad' && (
             <ActivitySection

@@ -22,10 +22,18 @@ export function StatusSection({
   status: AdminStatus | null
   activity: AdminActivity | null
 }) {
-  const live = status?.pose ?? []
-  const angles = status?.angles ?? []
-  const frame = status?.frame ?? {}
-  const calibration = status?.calibration ?? null
+  if (!status) {
+    return (
+      <div className="admin-section">
+        <p className="admin-empty">Leyendo el robot…</p>
+      </div>
+    )
+  }
+
+  const live = status.pose ?? []
+  const angles = status.angles ?? []
+  const frame = status.frame ?? {}
+  const calibration = status.calibration ?? null
   const currentJob =
     activity?.jobs.find((job) => job.status === 'drawing' || job.status === 'queued') ?? null
 
@@ -56,7 +64,7 @@ export function StatusSection({
         <dl className="admin-facts">
           <div>
             <dt>Modo</dt>
-            <dd>{frame.backend === 'mg400' ? 'Robot' : 'Simulador'}</dd>
+            <dd>{frame.backend === 'mg400' ? 'Robot' : frame.backend === 'mock' ? 'Simulador' : '—'}</dd>
           </div>
           <div>
             <dt>IP</dt>
