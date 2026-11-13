@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.pipeline.vectorize import MEASURED_SPEED_MM_S
+from app.robot import feedback as feedback_ops
 from app.robot import frame as frame_ops
 from app.robot import sheet as sheet_ops
 from app.robot.frame import Frame
@@ -365,6 +366,10 @@ class MG400Client(RobotClient):
         self.j4_fixed = J4_FIXED
         # "j1+j4" (documentación Dobot) o "j4" si al conectar R resulta ser J4.
         self.r_model = "j1+j4"
+        # Lector del puerto 30004: pose y modo cada 8 ms sin preguntar. Solo
+        # vive mientras hay socket real; en seco o con enlace de mentira no
+        # hay nada que escuchar.
+        self._feedback: feedback_ops.FeedbackReader | None = None
         # El MG400 acepta un solo cliente. Dos consultas a la vez no pueden abrir dos sockets.
         self._io = asyncio.Lock()
         # El dashboard del MG400 atiende una orden a la vez y contesta por el
@@ -519,6 +524,21 @@ class MG400Client(RobotClient):
             self._link = await asyncio.to_thread(
                 MG400Link, self.host, move_timeout_s=self.move_timeout_s
             )
+            self._start_feedback()
+
+    def _start_feedback(self) -> None:
+        """Escucha el 30004 en segundo plano. Si no hay robot, calla y reintenta solo."""
+        if self._feedback is not None:
+            return
+        self._feedback = feedback_ops.FeedbackReader(self.host)
+        self._feedback.start()
+
+    def feedback_status(self) -> dict | None:
+        """Último paquete del 30004 si está fresco. None: usar el sondeo clásico."""
+        reader = self._feedback
+        if reader is None:
+            return None
+        return reader.snapshot()
 
     async def _abrir(self) -> None:
         await self._open_socket()
@@ -1332,6 +1352,10 @@ class MG400Client(RobotClient):
         self._ready = False
         # Sin socket, lo preparado ya no vale: al reconectar se hace completo.
         self._prepared_rate = None
+        # El feedback también muere con el socket; al reabrir se arranca otro.
+        reader, self._feedback = self._feedback, None
+        if reader is not None:
+            reader.stop()
         close = getattr(link, "close", None)
         if close is None:
             return

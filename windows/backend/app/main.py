@@ -628,6 +628,40 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
     if robot.name != "mg400":
         snapshot["detail"] = "el backend está en simulador"
         return snapshot
+    get_feedback = getattr(robot, "feedback_status", None)
+    feedback = None
+    if get_feedback is not None:
+        try:
+            feedback = get_feedback()
+        except Exception:  # noqa: BLE001 - sin feedback se sondea como antes
+            feedback = None
+    if feedback is not None:
+        # Paquete del 30004 fresco (cada 8 ms): modo, pose y articulaciones
+        # sin mandar nada. Solo faltan las alarmas, que no vienen en él.
+        snapshot.update(
+            {
+                "connected": True,
+                "source": "feedback",
+                "mode": int(feedback["mode"]),
+                "mode_label": mode_label(int(feedback["mode"])),
+                "pose": [float(value) for value in feedback["pose"]][:4],
+                "angles": [float(value) for value in feedback["angles"]][:4],
+                "di_bits": int(feedback["di_bits"]),
+                "do_bits": int(feedback["do_bits"]),
+            }
+        )
+        try:
+            _, error_value = await robot.ask("GetErrorID()")  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            snapshot["detail"] = str(exc)
+            return snapshot
+        snapshot.update(
+            {
+                "alarms": error_value,
+                "alarm_text": describe_alarms(error_value),
+            }
+        )
+        return snapshot
     try:
         _, mode_value = await robot.ask("RobotMode()")  # type: ignore[attr-defined]
         _, pose_value = await robot.ask("GetPose()")  # type: ignore[attr-defined]
@@ -641,6 +675,7 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
     snapshot.update(
         {
             "connected": True,
+            "source": "sondeo",
             "mode": int(mode) if mode is not None else None,
             "mode_label": mode_label(int(mode)) if mode is not None else "",
             "pose": pose if len(pose) == 4 else [],
