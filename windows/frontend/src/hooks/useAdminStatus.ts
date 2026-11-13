@@ -4,12 +4,16 @@ import type { AdminStatus } from '../lib/api'
 import type { StickId } from '../components/admin/stickSpaces'
 
 /**
- * Sondeo del estado del robot cada 800 ms mientras la página admin está abierta.
+ * Sondeo del estado del robot mientras la página admin está abierta.
  * No dispara otra consulta hasta que la anterior contestó: el dashboard del
  * MG400 atiende una orden a la vez y, si la respuesta tarda más que el
  * intervalo, las peticiones se encimaban y él cortaba la conexión.
+ *
+ * `intervalMs` lo baja el panel a 400 ms en Control/Configuración (mover el
+ * brazo con la pose de hace 800 ms se sentía lento) y lo sube a 1000 ms en
+ * las demás pestañas para no cargar el dashboard.
  */
-export function useAdminStatus(token: string) {
+export function useAdminStatus(token: string, intervalMs = 800) {
   const [status, setStatus] = useState<AdminStatus | null>(null)
   const [pollError, setPollError] = useState('')
 
@@ -33,12 +37,12 @@ export function useAdminStatus(token: string) {
       }
     }
     void tick()
-    const timer = window.setInterval(() => void tick(), 800)
+    const timer = window.setInterval(() => void tick(), Math.max(250, intervalMs))
     return () => {
       stop = true
       window.clearInterval(timer)
     }
-  }, [token])
+  }, [token, intervalMs])
 
   return { status, pollError }
 }
@@ -71,6 +75,10 @@ export function useJog({
   })
 
   const [stickEpoch, setStickEpoch] = useState(0)
+  // Reflejo inmediato de que el stick está pisado: la confirmación del robot
+  // tarda sus viajes TCP más el sondeo, así que sin esto cada arranque del
+  // jog se sentía muerto aunque la orden ya iba en camino.
+  const [moving, setMoving] = useState(false)
   const jogging = useRef(false)
   const desired = useRef<string | null>(null)
   const applied = useRef<string | null>(null)
@@ -86,6 +94,7 @@ export function useJog({
         if (applied.current === null && !jogging.current) return
         applied.current = null
         jogging.current = false
+        setMoving(false)
         return adminCommand(issued, { action: 'jog', axis: '' }).catch(() => undefined)
       })
     }
@@ -101,6 +110,7 @@ export function useJog({
       owner.current = stick
     }
     desired.current = axis
+    setMoving(axis !== null)
     chain.current = chain.current
       .then(async () => {
         while (applied.current !== desired.current) {
@@ -112,6 +122,7 @@ export function useJog({
           })
           applied.current = next
           jogging.current = next !== null
+          if (desired.current === null) setMoving(false)
         }
       })
       .catch((error: unknown) => {
@@ -119,10 +130,11 @@ export function useJog({
         applied.current = null
         owner.current = null
         jogging.current = false
+        setMoving(false)
         setStickEpoch((value) => value + 1)
         onErrorRef.current(error instanceof Error ? error.message : 'el robot rechazó el movimiento')
       })
   }, [])
 
-  return { hold, stickEpoch }
+  return { hold, stickEpoch, moving }
 }

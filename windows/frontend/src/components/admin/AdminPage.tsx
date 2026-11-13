@@ -53,7 +53,10 @@ export function AdminPage({
   const [clearing, setClearing] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [navOpen, setNavOpen] = useState(false)
-  const { status, pollError } = useAdminStatus(token)
+  // En Control y Configuración el brazo se mueve a mano: la pose de hace un
+  // segundo se sentía como delay. En las demás pestañas basta con 1 s.
+  const pollMs = active === 'control' || active === 'configuracion' ? 400 : 1000
+  const { status, pollError } = useAdminStatus(token, pollMs)
   const [activity, setActivity] = useState<AdminActivity | null>(null)
 
   const loadActivity = useCallback(async () => {

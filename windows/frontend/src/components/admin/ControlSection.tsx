@@ -28,7 +28,7 @@ export function ControlSection({
   const collisionRef = useRef(2)
   const busy = Boolean(status?.busy)
 
-  const { hold, stickEpoch } = useJog({
+  const { hold, stickEpoch, moving } = useJog({
     token,
     getSpeed: () => speedRef.current,
     onError: onNotice,
@@ -126,6 +126,7 @@ export function ControlSection({
         <p className="admin-card-note">
           Mantén el joystick: el brazo sigue hasta que lo sueltas.
           {busy ? ' Está dibujando; el joystick espera a que termine.' : ''}
+          {!busy && moving ? ' Moviendo…' : ''}
         </p>
 
         <div className="admin-nudge">
