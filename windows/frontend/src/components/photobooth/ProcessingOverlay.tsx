@@ -58,7 +58,10 @@ export function ProcessingOverlay({ photo, sketch, progress }: ProcessingOverlay
       {waiting && <div className="booth-diagonal-glow is-waiting" aria-hidden="true" />}
 
       <div className="booth-progress-rail">
-        <div className="booth-progress-fill" style={{ width: `${Math.round(progress * 100)}%` }} />
+        <div
+          className="booth-progress-fill"
+          style={{ transform: `scaleX(${Math.min(1, Math.max(0, progress))})` }}
+        />
       </div>
     </div>
   )

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { LogOut, OctagonX, ScrollText, Trash2 } from 'lucide-react'
-import { adminActivity, adminClearJobs, adminCommand, cancelActiveJob } from '../../lib/api'
-import type { AdminActivity, AdminCommand, AdminStatus } from '../../lib/api'
+import { LogOut, Menu, OctagonX, ScrollText, Trash2, X } from 'lucide-react'
+import { adminActivity } from '../../lib/api'
+import type { AdminActivity, AdminStatus } from '../../lib/api'
+import { useAdminActions } from '../../hooks/useAdminActions'
 import { useAdminStatus } from '../../hooks/useAdminStatus'
 import { DEFAULT_PAD_TUNE, usePad } from '../../hooks/usePad'
 import type { PadTune } from '../../hooks/usePad'
@@ -52,10 +53,15 @@ export function AdminPage({
   onDemo: () => void
 }) {
   const [notice, setNotice] = useState('')
+  const [clearing, setClearing] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [speed, setSpeed] = useState(50)
   const [tune, setTune] = useState<PadTune>(DEFAULT_PAD_TUNE)
-  const { status, pollError } = useAdminStatus(token)
+  const [navOpen, setNavOpen] = useState(false)
+  // En Control y Configuración el brazo se mueve a mano: la pose de hace un
+  // segundo se sentía como delay. En las demás pestañas basta con 1 s.
+  const pollMs = active === 'control' || active === 'configuracion' ? 400 : 1000
+  const { status, pollError } = useAdminStatus(token, pollMs)
   const [activity, setActivity] = useState<AdminActivity | null>(null)
 
   const loadActivity = useCallback(async () => {
@@ -88,27 +94,23 @@ export function AdminPage({
     if (pollError.startsWith('Backend 401')) onExpired()
   }, [pollError, onExpired])
 
-  const send = useCallback(
-    async (command: AdminCommand) => {
-      try {
-        await adminCommand(token, command)
-        setNotice('')
-      } catch (error) {
-        setNotice(error instanceof Error ? error.message : 'el robot rechazó la orden')
-      }
-    },
-    [token],
-  )
+  const actions = useAdminActions(token, {
+    onNotice: setNotice,
+    onExpired,
+    reloadActivity: loadActivity,
+  })
 
   const clearLogs = useCallback(async () => {
+    if (clearing) return
+    setClearing(true)
     try {
-      await adminClearJobs(token)
-      await loadActivity()
-      setNotice('')
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'no se pudo borrar la bitácora')
+      await actions.clearLogs()
+    } catch {
+      // El aviso ya lo dejó el hook.
+    } finally {
+      setClearing(false)
     }
-  }, [token, loadActivity])
+  }, [actions, clearing])
 
   const pad = usePad({
     token,
@@ -122,16 +124,16 @@ export function AdminPage({
   })
 
   const cancelDraw = useCallback(async () => {
+    if (cancelling) return
     setCancelling(true)
     try {
-      await cancelActiveJob()
-      setNotice('')
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'no se pudo cancelar el dibujo')
+      await actions.cancelDraw()
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setCancelling(false)
     }
-  }, [])
+  }, [actions, cancelling])
 
   const mood = moodOf(status)
   const strip = notice || pollError
@@ -139,10 +141,36 @@ export function AdminPage({
     (job) => job.status === 'done' || job.status === 'error',
   )
 
+  // El menú plegado se cierra con Escape y al elegir sección: en tablet no
+  // hay sitio para dejarlo abierto sobre el contenido.
+  useEffect(() => {
+    if (!navOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNavOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navOpen])
+
+  const go = (id: SectionId) => {
+    onSection(id)
+    setNavOpen(false)
+  }
+
   return (
     <div className="admin-page">
       <header className={`admin-top is-${mood.key}`}>
         <span className="admin-top-light" aria-hidden="true" />
+        <button
+          type="button"
+          className="admin-menu"
+          aria-expanded={navOpen}
+          aria-controls="admin-nav"
+          onClick={() => setNavOpen((open) => !open)}
+        >
+          <Menu size={20} aria-hidden="true" />
+          <span>Menú</span>
+        </button>
         <button type="button" className="admin-brand" onClick={onDemo} aria-label="Ir al demo">
           <img src="/brand/syscomLargeLogo.webp" alt="" />
         </button>
@@ -154,31 +182,39 @@ export function AdminPage({
           <button
             type="button"
             className={active === 'actividad' ? 'admin-exit is-on' : 'admin-exit'}
-            onClick={() => onSection('actividad')}
+            aria-label="Logs"
+            onClick={() => go('actividad')}
           >
             <ScrollText size={18} aria-hidden="true" />
-            Logs
+            <span className="admin-action-label">Logs</span>
           </button>
           <button
             type="button"
             className="admin-exit"
+            aria-label="Borrar trabajos cerrados"
             onClick={() => void clearLogs()}
-            disabled={!hasLogs}
+            disabled={!hasLogs || clearing}
           >
             <Trash2 size={18} aria-hidden="true" />
-            Borrar
+            <span className="admin-action-label">Borrar</span>
           </button>
           <button
             type="button"
             className="admin-estop"
-            onClick={() => void send({ action: 'estop' })}
+            aria-label="Paro de emergencia"
+            onClick={() => void actions.send({ action: 'estop' })}
           >
-            <OctagonX size={22} aria-hidden="true" />
-            Paro
+            <OctagonX size={20} aria-hidden="true" />
+            <span>Paro</span>
           </button>
-          <button type="button" className="admin-exit" onClick={onClose}>
+          <button
+            type="button"
+            className="admin-exit"
+            aria-label="Salir del panel"
+            onClick={onClose}
+          >
             <LogOut size={18} aria-hidden="true" />
-            Salir
+            <span className="admin-action-label">Salir</span>
           </button>
         </div>
       </header>
@@ -190,20 +226,39 @@ export function AdminPage({
       )}
 
       <div className="admin-body">
-        <nav className="admin-nav" aria-label="Secciones del panel">
+        <nav id="admin-nav" className={navOpen ? 'admin-nav is-open' : 'admin-nav'} aria-label="Secciones del panel">
+          <div className="admin-nav-head">
+            <span>Secciones</span>
+            <button
+              type="button"
+              className="admin-nav-close"
+              aria-label="Cerrar el menú"
+              onClick={() => setNavOpen(false)}
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+          </div>
           {SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
               className={active === id ? 'is-on' : ''}
               aria-current={active === id ? 'page' : undefined}
-              onClick={() => onSection(id)}
+              onClick={() => go(id)}
             >
-              <Icon size={20} aria-hidden="true" />
+              <Icon size={18} aria-hidden="true" />
               <span>{label}</span>
             </button>
           ))}
         </nav>
+        {navOpen && (
+          <button
+            type="button"
+            className="admin-nav-scrim"
+            aria-label="Cerrar el menú"
+            onClick={() => setNavOpen(false)}
+          />
+        )}
 
         <main className="admin-content">
           {active === 'estado' && <StatusSection status={status} activity={activity} />}
@@ -211,7 +266,7 @@ export function AdminPage({
             <ControlSection
               status={status}
               token={token}
-              send={send}
+              actions={actions}
               onNotice={setNotice}
               speed={speed}
               onSpeed={setSpeed}
@@ -223,7 +278,7 @@ export function AdminPage({
           )}
           {active === 'dibujar' && <DrawSection status={status} />}
           {active === 'configuracion' && (
-            <ConfigSection status={status} token={token} onNotice={setNotice} />
+            <ConfigSection status={status} actions={actions} />
           )}
           {active === 'actividad' && (
             <ActivitySection
@@ -231,6 +286,9 @@ export function AdminPage({
               token={token}
               onCancel={() => void cancelDraw()}
               cancelling={cancelling}
+              onClear={() => void clearLogs()}
+              clearing={clearing}
+              canClear={hasLogs}
             />
           )}
           {active === 'depuracion' && <DebugSection token={token} />}

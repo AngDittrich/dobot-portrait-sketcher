@@ -1,15 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Loader2 } from 'lucide-react'
-import {
-  adminArea,
-  adminCalibration,
-  adminCommand,
-  adminGoto,
-  adminPose,
-  adminTestDraw,
-  saveAdminBooth,
-} from '../../lib/api'
 import type { AdminSheet, AdminStatus, Calibration, CornerId, CornerPose, Corners, SpotId } from '../../lib/api'
+import type { AdminActions } from '../../hooks/useAdminActions'
 import { ReachMap } from './ReachMap'
 
 /**
@@ -179,12 +171,10 @@ function sheetOf(corners: Partial<Corners>, brManual: boolean): Corners | null {
 
 export function ConfigSection({
   status,
-  token,
-  onNotice,
+  actions,
 }: {
   status: AdminStatus | null
-  token: string
-  onNotice: (message: string) => void
+  actions: AdminActions
 }) {
   const [booth, setBooth] = useState<BoothForm | null>(() => draft?.booth ?? null)
   const [corners, setCorners] = useState<Partial<Corners>>(() => draft?.corners ?? {})
@@ -246,7 +236,7 @@ export function ConfigSection({
     if (!previewKey || !sheet) return
     let stop = false
     const timer = window.setTimeout(() => {
-      adminCalibration(token, sheet, Number.isFinite(margin) ? margin : 8)
+      actions.calibrate(sheet, Number.isFinite(margin) ? margin : 8)
         .then((calibration) => {
           if (!stop) setPreview({ key: previewKey, calibration, error: '' })
         })
@@ -266,7 +256,7 @@ export function ConfigSection({
     }
     // sheet y margin ya van dentro de previewKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewKey, token])
+  }, [previewKey, actions])
 
   const previewReady = preview.key === previewKey
   const calibration = sheet ? preview.calibration : null
@@ -287,7 +277,7 @@ export function ConfigSection({
     if (value === undefined || !robot) return
     const known = sentJ4.current ?? status?.j4_fixed
     if (typeof known === 'number' && Math.abs(known - value) < 0.05) return
-    await adminCommand(token, { action: 'j4home', j4: value })
+    await actions.send({ action: 'j4home', j4: value })
     sentJ4.current = value
   }
 
@@ -320,25 +310,25 @@ export function ConfigSection({
   async function teach(id: CornerKey) {
     if (!robot || busy) return
     try {
-      const pose = await adminPose(token)
+      const label = CORNER_INFO.find((item) => item.id === id)?.label.toLowerCase() ?? id
+      const pose = await actions.teachCorner(label)
       writeCorner(id, xyzOf(pose), pose.r)
-      onNotice(`${CORNER_INFO.find((item) => item.id === id)?.label} tomada. Falta Guardar cabina.`)
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'no se pudo leer la pose')
+    } catch {
+      // El aviso ya lo dejó el hook.
     }
   }
 
   async function takeJ4() {
     if (!robot || busy) return
     try {
-      const pose = await adminPose(token)
+      const pose = await actions.readPose()
       const value = num(pose.j4)
       patch('j4', value)
-      await adminCommand(token, { action: 'j4home', j4: pose.j4 })
+      await actions.send({ action: 'j4home', j4: pose.j4 })
       sentJ4.current = pose.j4
-      onNotice(`J4 de la hoja en ${value}.`)
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'no se pudo leer J4')
+      actions.note(`J4 de la hoja en ${value}.`)
+    } catch {
+      // El aviso ya lo dejó el hook.
     }
   }
 
@@ -350,15 +340,14 @@ export function ConfigSection({
         const current = j4Number() ?? -50
         const next = Math.round((current + (axis.endsWith('+') ? step : -step)) * 1000) / 1000
         patch('j4', String(next))
-        await adminCommand(token, { action: 'j4home', j4: next })
+        await actions.send({ action: 'j4home', j4: next })
         sentJ4.current = next
       } else {
         await holdJ4()
-        await adminCommand(token, { action: 'step', axis, mm: step, speed: STEP_SPEED })
+        await actions.send({ action: 'step', axis, mm: step, speed: STEP_SPEED })
       }
-      onNotice('')
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'el brazo no pudo dar el paso')
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setStepping(false)
     }
@@ -384,17 +373,9 @@ export function ConfigSection({
     setMoving(target)
     try {
       await holdJ4()
-      const ready = sheetOf(corners, brManual)
-      if (ready) {
-        await adminGoto(token, { corner: target, corners: ready }, lift, j4Number())
-      } else {
-        const point = target === 'center' ? undefined : corners[target]
-        if (!point) throw new Error('escribe esa esquina primero')
-        await adminGoto(token, { point }, lift, j4Number())
-      }
-      onNotice('')
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'el brazo no pudo ir a ese punto')
+      await actions.go(target, sheet ?? corners, lift, j4Number())
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setMoving('')
     }
@@ -405,17 +386,9 @@ export function ConfigSection({
     setMarking(true)
     try {
       await holdJ4()
-      const area = await adminArea(token, {
-        sheet: booth.sheet,
-        corners: sheet ?? undefined,
-        lift_mm: Number(booth.lift_mm),
-        j4: j4Number(),
-      })
-      onNotice(
-        `Marco de ${area.label}: ${Math.round(area.width_mm)} × ${Math.round(area.height_mm)} mm, centrado en las esquinas, con el lápiz arriba.`,
-      )
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'no se pudo marcar el marco')
+      await actions.markSheet(booth.sheet, sheet ?? undefined, Number(booth.lift_mm), j4Number())
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setMarking(false)
     }
@@ -426,16 +399,9 @@ export function ConfigSection({
     setTracing(true)
     try {
       await holdJ4()
-      const area = await adminArea(token, {
-        corners: sheet ?? undefined,
-        lift_mm: Number(booth.lift_mm),
-        j4: j4Number(),
-      })
-      onNotice(
-        `Perímetro de las esquinas de esta pantalla: ${Math.round(area.width_mm)} × ${Math.round(area.height_mm)} mm, con el lápiz arriba.`,
-      )
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'no se pudo recorrer el perímetro')
+      await actions.tracePerimeter(sheet ?? undefined, Number(booth.lift_mm), j4Number())
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setTracing(false)
     }
@@ -446,15 +412,9 @@ export function ConfigSection({
     setTesting(true)
     try {
       await holdJ4()
-      await adminTestDraw(token, {
-        corners: sheet ?? undefined,
-        lift_mm: Number(booth.lift_mm),
-        margin_mm: Number(booth.margin_mm),
-        j4: j4Number(),
-      })
-      onNotice('Dibujando SYSCOM en el centro de la hoja.')
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'no se pudo dibujar la prueba')
+      await actions.drawTest(sheet ?? undefined, Number(booth.lift_mm), Number(booth.margin_mm), j4Number())
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setTesting(false)
     }
@@ -464,7 +424,7 @@ export function ConfigSection({
     if (!booth || saving) return
     setSaving(true)
     try {
-      await saveAdminBooth(token, {
+      await actions.saveBooth({
         backend: booth.backend,
         host: booth.host.trim(),
         dry_run: booth.dry_run,
@@ -479,9 +439,8 @@ export function ConfigSection({
         j4: j4Number(),
       })
       if (j4Number() !== undefined) sentJ4.current = j4Number() ?? null
-      onNotice('Cabina guardada. El siguiente dibujo usa esta hoja.')
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'no se pudo guardar la cabina')
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setSaving(false)
     }
@@ -528,7 +487,7 @@ export function ConfigSection({
                 value={booth.j4}
                 disabled={!robot}
                 onChange={(event) => patch('j4', event.target.value)}
-                onBlur={() => void holdJ4().catch((error: unknown) => onNotice(error instanceof Error ? error.message : 'no se pudo poner J4'))}
+                onBlur={() => void holdJ4().catch(() => undefined)}
               />
             </label>
             <button type="button" className="admin-press" disabled={!robot || armBusy} onClick={() => void takeJ4()}>

@@ -1,16 +1,22 @@
 import { GUIDE } from '../../hooks/useFraming'
 import type { FramingPose } from '../../hooks/useFraming'
 
+/* Cuadro de la cámara (4:3). El SVG se proyecta sobre el visor con el mismo
+   recorte que el video, así el óvalo conserva su forma en cualquier visor. */
+const FRAME_W = 1333
+const FRAME_H = 1000
+
 /**
- * Figura de encuadre (cabeza y hombros), dibujada con coordenadas en
- * píxeles del escenario para que no se estire con el visor 4:3. El color
+ * Figura de encuadre (cabeza y hombros), dibujada en coordenadas del cuadro
+ * 4:3 de la cámara: el SVG se adapta al visor con el mismo recorte que el
+ * video, así el óvalo no se estira cuando el visor es vertical. El color
  * es el estado: verde si la cara está dentro, rojo si no. Sin etiquetas.
  */
 export function FramingGuide({ pose }: { pose: FramingPose }) {
-  const cx = GUIDE.cx * 1000
-  const cy = GUIDE.cy * 1000
-  const rx = GUIDE.rx * 1000
-  const ry = GUIDE.ry * 1000
+  const cx = GUIDE.cx * FRAME_W
+  const cy = GUIDE.cy * FRAME_H
+  const rx = GUIDE.rx * FRAME_W
+  const ry = GUIDE.ry * FRAME_H
   const neckW = rx * 0.34
   const neckTop = cy + ry * 0.72
   const neckBottom = cy + ry * 1.12
@@ -38,18 +44,18 @@ export function FramingGuide({ pose }: { pose: FramingPose }) {
   return (
     <svg
       className={`booth-silhouette is-${pose}`}
-      viewBox="0 0 1000 1000"
-      preserveAspectRatio="none"
+      viewBox={`0 0 ${FRAME_W} ${FRAME_H}`}
+      preserveAspectRatio="xMidYMid slice"
       aria-hidden="true"
     >
       <defs>
         <mask id="booth-guide-hole" maskUnits="userSpaceOnUse">
-          <rect width="1000" height="1000" fill="white" />
+          <rect width={FRAME_W} height={FRAME_H} fill="white" />
           <path fill="black" d={head} />
           <path fill="black" d={torso} />
         </mask>
       </defs>
-      <rect className="booth-silhouette-dim" width="1000" height="1000" mask="url(#booth-guide-hole)" />
+      <rect className="booth-silhouette-dim" width={FRAME_W} height={FRAME_H} mask="url(#booth-guide-hole)" />
       <path className="booth-silhouette-line" d={head} vectorEffect="non-scaling-stroke" />
       <path className="booth-silhouette-line" d={shoulders} vectorEffect="non-scaling-stroke" />
     </svg>
