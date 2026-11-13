@@ -1,5 +1,4 @@
 import type { AdminActivity, AdminStatus } from '../../lib/api'
-import { ProviderCard } from './ProviderCard'
 
 function format(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—'
@@ -15,7 +14,7 @@ function fact(value: unknown): string {
   return String(value)
 }
 
-/** Tablero de un vistazo: pose, cabina, proveedor de IA y dibujos del arranque. */
+/** Tablero del robot: pose, cabina y, si lo hay, el dibujo que está en curso. */
 export function StatusSection({
   status,
   activity,
@@ -90,32 +89,20 @@ export function StatusSection({
         </dl>
       </section>
 
-      {activity && <ProviderCard provider={activity.provider} />}
-
-      <section className="admin-card">
-        <h3>Dibujos del arranque</h3>
-        <div className="admin-counters">
-          <div>
-            <strong>{activity?.totals.done ?? 0}</strong>
-            <span>terminados</span>
-          </div>
-          <div>
-            <strong>{activity?.totals.error ?? 0}</strong>
-            <span>con error</span>
-          </div>
-        </div>
-        {currentJob && (
+      {currentJob && (
+        <section className="admin-card">
+          <h3>Ahora mismo</h3>
           <div className="admin-current-job">
             <p>
-              Ahora mismo: {currentJob.status === 'queued' ? 'en cola' : 'dibujando'}{' '}
+              {currentJob.status === 'queued' ? 'En cola' : 'Dibujando'}{' '}
               {Math.round(currentJob.progress * 100)}%
             </p>
             <span className="admin-progress">
               <i style={{ width: `${Math.round(currentJob.progress * 100)}%` }} />
             </span>
           </div>
-        )}
-      </section>
+        </section>
+      )}
     </div>
   )
 }

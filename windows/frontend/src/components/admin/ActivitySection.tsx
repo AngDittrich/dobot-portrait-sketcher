@@ -1,6 +1,5 @@
 import { adminSketchPreviewUrl } from '../../lib/api'
 import type { AdminActivity, AdminActivityJob } from '../../lib/api'
-import { ProviderCard } from './ProviderCard'
 
 const STATUS_LABEL: Record<AdminActivityJob['status'], string> = {
   queued: 'En cola',
@@ -24,7 +23,7 @@ function duration(job: AdminActivityJob): string {
   return `${Math.floor(seconds / 60)} min ${Math.round(seconds % 60)} s`
 }
 
-/** Bitácora de dibujos del arranque, con miniatura y el estado del proveedor. */
+/** Bitácora de dibujos del arranque, con miniatura y los contadores. */
 export function ActivitySection({
   activity,
   token,
@@ -110,7 +109,6 @@ export function ActivitySection({
       </section>
 
       <div className="admin-activity-side">
-        <ProviderCard provider={activity.provider} />
         <section className="admin-card">
           <h3>Del arranque</h3>
           <div className="admin-counters">

@@ -7,6 +7,7 @@ import { useAdminStatus } from '../../hooks/useAdminStatus'
 import { DEFAULT_PAD_TUNE, usePad } from '../../hooks/usePad'
 import type { PadTune } from '../../hooks/usePad'
 import { ActivitySection } from './ActivitySection'
+import { AiSection } from './AiSection'
 import { ConfigSection } from './ConfigSection'
 import { ControlSection } from './ControlSection'
 import { DebugSection } from './DebugSection'
@@ -277,6 +278,7 @@ export function AdminPage({
             <PadSection pad={pad} speed={speed} onSpeed={setSpeed} tune={tune} onTune={setTune} />
           )}
           {active === 'dibujar' && <DrawSection status={status} />}
+          {active === 'ia' && <AiSection activity={activity} />}
           {active === 'configuracion' && (
             <ConfigSection status={status} actions={actions} />
           )}
