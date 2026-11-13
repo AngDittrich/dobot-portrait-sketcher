@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
-import { adminCommand } from '../../lib/api'
 import type { AdminCommand, AdminStatus } from '../../lib/api'
+import type { AdminActions } from '../../hooks/useAdminActions'
 import { useJog } from '../../hooks/useAdminStatus'
 import { JoyStick } from './JoyStick'
 import { JOINTS, PLANE } from './stickSpaces'
@@ -11,12 +11,12 @@ const STEPS = [0.1, 1, 5, 10]
 export function ControlSection({
   status,
   token,
-  send,
+  actions,
   onNotice,
 }: {
   status: AdminStatus | null
   token: string
-  send: (command: AdminCommand) => Promise<void>
+  actions: AdminActions
   onNotice: (message: string) => void
 }) {
   const [space, setSpace] = useState<'plano' | 'joints'>('plano')
@@ -38,16 +38,7 @@ export function ControlSection({
   const live = status?.pose ?? []
 
   async function readInputs() {
-    const bits: string[] = []
-    for (const index of [1, 2, 3, 4]) {
-      try {
-        const result = await adminCommand(token, { action: 'di', index })
-        bits.push(`DI${index} ${result.value || 'sin valor'}`)
-      } catch {
-        bits.push(`DI${index} sin respuesta`)
-      }
-    }
-    onNotice(bits.join(' · '))
+    await actions.readInputs().catch(() => undefined)
   }
 
   const poseNumbers = {
@@ -161,7 +152,7 @@ export function ControlSection({
                   type="button"
                   className="admin-press"
                   disabled={busy}
-                  onClick={() => void send({ action: 'step', axis, mm: step, speed })}
+                  onClick={() => void actions.send({ action: 'step', axis, mm: step, speed })}
                 >
                   {axis}
                 </button>
@@ -184,7 +175,7 @@ export function ControlSection({
                       key={label}
                       type="button"
                       className="admin-press"
-                      onClick={() => void send(command)}
+                      onClick={() => void actions.send(command)}
                     >
                       {label}
                     </button>
@@ -219,8 +210,8 @@ export function ControlSection({
                   speedRef.current = value
                   setSpeed(value)
                 }}
-                onPointerUp={() => void send({ action: 'speed', value: speedRef.current })}
-                onBlur={() => void send({ action: 'speed', value: speedRef.current })}
+                onPointerUp={() => void actions.send({ action: 'speed', value: speedRef.current })}
+                onBlur={() => void actions.send({ action: 'speed', value: speedRef.current })}
               />
             </label>
             <label>
@@ -237,8 +228,8 @@ export function ControlSection({
                   collisionRef.current = value
                   setCollision(value)
                 }}
-                onPointerUp={() => void send({ action: 'collision', value: collisionRef.current })}
-                onBlur={() => void send({ action: 'collision', value: collisionRef.current })}
+                onPointerUp={() => void actions.send({ action: 'collision', value: collisionRef.current })}
+                onBlur={() => void actions.send({ action: 'collision', value: collisionRef.current })}
               />
             </label>
           </div>
@@ -250,7 +241,7 @@ export function ControlSection({
             className="admin-pose"
             onSubmit={(event) => {
               event.preventDefault()
-              if (poseReady) void send({ action: 'movl', ...poseNumbers, speed })
+              if (poseReady) void actions.send({ action: 'movl', ...poseNumbers, speed })
             }}
           >
             {(['x', 'y', 'z', 'r'] as const).map((key) => (
@@ -268,7 +259,7 @@ export function ControlSection({
                 type="button"
                 className="admin-press"
                 disabled={!poseReady}
-                onClick={() => poseReady && void send({ action: 'inverse', ...poseNumbers })}
+                onClick={() => poseReady && void actions.send({ action: 'inverse', ...poseNumbers })}
               >
                 ¿Tiene solución?
               </button>

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { LogOut, Menu, OctagonX, ScrollText, Trash2, X } from 'lucide-react'
-import { adminActivity, adminClearJobs, adminCommand, cancelActiveJob } from '../../lib/api'
-import type { AdminActivity, AdminCommand, AdminStatus } from '../../lib/api'
+import { adminActivity } from '../../lib/api'
+import type { AdminActivity, AdminStatus } from '../../lib/api'
 import { useAdminStatus } from '../../hooks/useAdminStatus'
+import { useAdminActions } from '../../hooks/useAdminActions'
 import { ActivitySection } from './ActivitySection'
 import { ConfigSection } from './ConfigSection'
 import { ControlSection } from './ControlSection'
@@ -49,6 +50,7 @@ export function AdminPage({
   onDemo: () => void
 }) {
   const [notice, setNotice] = useState('')
+  const [clearing, setClearing] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [navOpen, setNavOpen] = useState(false)
   const { status, pollError } = useAdminStatus(token)
@@ -84,39 +86,35 @@ export function AdminPage({
     if (pollError.startsWith('Backend 401')) onExpired()
   }, [pollError, onExpired])
 
-  const send = useCallback(
-    async (command: AdminCommand) => {
-      try {
-        await adminCommand(token, command)
-        setNotice('')
-      } catch (error) {
-        setNotice(error instanceof Error ? error.message : 'el robot rechazó la orden')
-      }
-    },
-    [token],
-  )
+  const actions = useAdminActions(token, {
+    onNotice: setNotice,
+    onExpired,
+    reloadActivity: loadActivity,
+  })
 
   const clearLogs = useCallback(async () => {
+    if (clearing) return
+    setClearing(true)
     try {
-      await adminClearJobs(token)
-      await loadActivity()
-      setNotice('')
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'no se pudo borrar la bitácora')
+      await actions.clearLogs()
+    } catch {
+      // El aviso ya lo dejó el hook.
+    } finally {
+      setClearing(false)
     }
-  }, [token, loadActivity])
+  }, [actions, clearing])
 
   const cancelDraw = useCallback(async () => {
+    if (cancelling) return
     setCancelling(true)
     try {
-      await cancelActiveJob()
-      setNotice('')
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'no se pudo cancelar el dibujo')
+      await actions.cancelDraw()
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setCancelling(false)
     }
-  }, [])
+  }, [actions, cancelling])
 
   const mood = moodOf(status)
   const strip = notice || pollError
@@ -176,7 +174,7 @@ export function AdminPage({
             className="admin-exit"
             aria-label="Borrar trabajos cerrados"
             onClick={() => void clearLogs()}
-            disabled={!hasLogs}
+            disabled={!hasLogs || clearing}
           >
             <Trash2 size={18} aria-hidden="true" />
             <span className="admin-action-label">Borrar</span>
@@ -185,7 +183,7 @@ export function AdminPage({
             type="button"
             className="admin-estop"
             aria-label="Paro de emergencia"
-            onClick={() => void send({ action: 'estop' })}
+            onClick={() => void actions.send({ action: 'estop' })}
           >
             <OctagonX size={20} aria-hidden="true" />
             <span>Paro</span>
@@ -246,11 +244,11 @@ export function AdminPage({
         <main className="admin-content">
           {active === 'estado' && <StatusSection status={status} activity={activity} />}
           {active === 'control' && (
-            <ControlSection status={status} token={token} send={send} onNotice={setNotice} />
+            <ControlSection status={status} token={token} actions={actions} onNotice={setNotice} />
           )}
           {active === 'dibujar' && <DrawSection status={status} />}
           {active === 'configuracion' && (
-            <ConfigSection status={status} token={token} onNotice={setNotice} />
+            <ConfigSection status={status} actions={actions} />
           )}
           {active === 'actividad' && (
             <ActivitySection
@@ -258,6 +256,9 @@ export function AdminPage({
               token={token}
               onCancel={() => void cancelDraw()}
               cancelling={cancelling}
+              onClear={() => void clearLogs()}
+              clearing={clearing}
+              canClear={hasLogs}
             />
           )}
           {active === 'depuracion' && <DebugSection token={token} />}

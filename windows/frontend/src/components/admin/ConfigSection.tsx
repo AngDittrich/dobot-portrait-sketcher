@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { Loader2, Navigation, Save } from 'lucide-react'
-import { adminArea, adminCalibration, adminCommand, adminGoto, adminTestDraw, saveAdminBooth } from '../../lib/api'
-import type { AdminSheet, AdminStatus, Calibration, CornerId, CornerPose, Corners, SpotId } from '../../lib/api'
+import type { AdminSheet, AdminStatus, Calibration, CornerId, Corners, SpotId } from '../../lib/api'
+import type { AdminActions } from '../../hooks/useAdminActions'
 import { ReachMap } from './ReachMap'
 
 /**
@@ -158,12 +158,10 @@ function Coords({ values, prefix }: { values: number[]; prefix?: string }) {
 
 export function ConfigSection({
   status,
-  token,
-  onNotice,
+  actions,
 }: {
   status: AdminStatus | null
-  token: string
-  onNotice: (message: string) => void
+  actions: AdminActions
 }) {
   const [booth, setBooth] = useState<BoothForm | null>(() => draft?.booth ?? null)
   const [corners, setCorners] = useState<Partial<Corners>>(() => draft?.corners ?? {})
@@ -204,7 +202,8 @@ export function ConfigSection({
     if (!previewKey || !complete(corners)) return
     let stop = false
     const timer = window.setTimeout(() => {
-      adminCalibration(token, corners, Number.isFinite(margin) ? margin : 8)
+      actions
+        .calibrate(corners, Number.isFinite(margin) ? margin : 8)
         .then((calibration) => {
           if (!stop) setPreview({ key: previewKey, calibration, error: '' })
         })
@@ -224,7 +223,7 @@ export function ConfigSection({
     }
     // corners y margin ya van dentro de previewKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewKey, token])
+  }, [previewKey, actions])
 
   const current = preview.key === previewKey ? preview : { calibration: null, error: '' }
   const calibration = current.calibration
@@ -235,21 +234,24 @@ export function ConfigSection({
     setBooth((state) => state && { ...state, [key]: value })
   }
 
-  function teach(id: CornerId) {
+  async function teach(id: CornerId) {
     if (!hasPose) return
-    const pose: CornerPose = { x: live[0], y: live[1], z: live[2], r: live[3] }
-    setCorners((state) => ({ ...state, [id]: pose }))
-    onNotice(`Esquina ${CORNER_INFO.find((item) => item.id === id)?.label.toLowerCase()} guardada. Falta Guardar cabina.`)
+    try {
+      const label = CORNER_INFO.find((item) => item.id === id)?.label.toLowerCase() ?? id
+      const pose = await actions.teachCorner(live, label)
+      setCorners((state) => ({ ...state, [id]: pose }))
+    } catch {
+      // El aviso ya lo dejó el hook.
+    }
   }
 
   async function homeJ4() {
     if (homing || busy) return
     setHoming(true)
     try {
-      const result = await adminCommand(token, { action: 'j4home' })
-      onNotice(result.value || '')
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'no se pudo poner J4 en -50')
+      await actions.homeJ4()
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setHoming(false)
     }
@@ -260,16 +262,9 @@ export function ConfigSection({
     const lift = Number(booth?.lift_mm ?? 8)
     setMoving(target)
     try {
-      if (complete(corners)) {
-        await adminGoto(token, { corner: target, corners }, lift)
-      } else {
-        const point = target === 'tl' || target === 'tr' || target === 'bl' ? corners[target] : undefined
-        if (!point) throw new Error('enseña esa esquina primero')
-        await adminGoto(token, { point }, lift)
-      }
-      onNotice('')
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'el brazo no pudo ir a ese punto')
+      await actions.go(target, corners, lift)
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setMoving('')
     }
@@ -279,10 +274,9 @@ export function ConfigSection({
     if (saving || marking) return
     setSaving(true)
     try {
-      const area = await adminArea(token)
-      onNotice(`Área recorrida: ${Math.round(area.width_mm)} × ${Math.round(area.height_mm)} mm con el lápiz arriba.`)
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'no se pudo marcar el área')
+      await actions.markArea()
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setSaving(false)
     }
@@ -292,16 +286,9 @@ export function ConfigSection({
     if (!booth || marking || saving) return
     setMarking(true)
     try {
-      const area = await adminArea(token, {
-        sheet: booth.sheet,
-        corners: complete(corners) ? corners : undefined,
-        lift_mm: Number(booth.lift_mm),
-      })
-      onNotice(
-        `Marco de ${area.label}: ${Math.round(area.width_mm)} × ${Math.round(area.height_mm)} mm, con el lápiz arriba.`,
-      )
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'no se pudo marcar el marco')
+      await actions.markSheet(booth.sheet, corners, Number(booth.lift_mm))
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setMarking(false)
     }
@@ -311,15 +298,9 @@ export function ConfigSection({
     if (!booth || tracing || busy || saving) return
     setTracing(true)
     try {
-      const area = await adminArea(token, {
-        corners: complete(corners) ? corners : undefined,
-        lift_mm: Number(booth.lift_mm),
-      })
-      onNotice(
-        `Perímetro recorrido: ${Math.round(area.width_mm)} × ${Math.round(area.height_mm)} mm, con el lápiz arriba.`,
-      )
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'no se pudo recorrer el perímetro')
+      await actions.tracePerimeter(corners, Number(booth.lift_mm))
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setTracing(false)
     }
@@ -329,14 +310,9 @@ export function ConfigSection({
     if (!booth || testing || saving || busy) return
     setTesting(true)
     try {
-      await adminTestDraw(token, {
-        corners: complete(corners) ? corners : undefined,
-        lift_mm: Number(booth.lift_mm),
-        margin_mm: Number(booth.margin_mm),
-      })
-      onNotice('Dibujando SYSCOM en el centro de la hoja.')
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'no se pudo dibujar la prueba')
+      await actions.drawTest(corners, Number(booth.lift_mm), Number(booth.margin_mm))
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setTesting(false)
     }
@@ -346,7 +322,7 @@ export function ConfigSection({
     if (!booth || saving) return
     setSaving(true)
     try {
-      await saveAdminBooth(token, {
+      await actions.saveBooth({
         backend: booth.backend,
         host: booth.host.trim(),
         dry_run: booth.dry_run,
@@ -359,10 +335,9 @@ export function ConfigSection({
         margin_mm: Number(booth.margin_mm),
         sheet: booth.sheet,
       })
-      onNotice('Cabina guardada. El siguiente dibujo usa esta hoja.')
       draft = null
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'no se pudo guardar la cabina')
+    } catch {
+      // El aviso ya lo dejó el hook.
     } finally {
       setSaving(false)
     }
