@@ -105,6 +105,26 @@ def test_un_marco_mas_grande_que_el_alcance_se_rechaza():
     assert outline_block(_hoja(), 210.0, 148.0) == ""
 
 
+def test_el_perimetro_sigue_el_rectangulo_y_no_la_punta_estirada():
+    import math
+
+    # 2° abierta: el paralelogramo BR = TR + BL - TL no cae en la esquina del papel.
+    cruda_bl_x = 320.0 - 148.0 * math.sin(math.radians(92.0))
+    cruda_bl_y = 105.0 + 148.0 * math.sin(math.radians(2.0))
+    frame = Frame.from_corners(
+        Corner(320.0, 105.0, -65.0, 0.0),
+        Corner(320.0, -105.0, -65.0, 0.0),
+        Corner(cruda_bl_x, cruda_bl_y, -65.0, 0.0),
+    )
+    bruto = (cruda_bl_x, cruda_bl_y - 210.0)
+
+    enlace = EnlaceFalso()
+    asyncio.run(_cliente(enlace, frame).mark_area())
+    puntos = _movl(enlace)
+    assert puntos[3][:2] == pytest.approx(frame.named("br")[:2], abs=0.05)
+    assert puntos[3][0] != pytest.approx(bruto[0], abs=0.5)
+
+
 def test_sin_esquinas_no_se_marca_nada():
     enlace = EnlaceFalso()
     with pytest.raises(MG400Error, match="esquinas"):

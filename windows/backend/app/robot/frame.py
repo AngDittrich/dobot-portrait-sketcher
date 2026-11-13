@@ -1,12 +1,14 @@
-"""Marco de la hoja a partir de tres esquinas enseñadas con el brazo.
+"""Marco de la hoja a partir de las esquinas enseñadas con el brazo.
 
 Se enseñan la esquina superior izquierda, la superior derecha y la inferior
-izquierda, mirando la hoja como se va a ver el dibujo. Con eso salen la
-orientación, el sentido de los ejes y el ancho y alto reales: no hacen falta
-signos ni un centro adivinado.
+izquierda, mirando la hoja como se va a ver el dibujo. Con eso se ajusta el
+rectángulo más cercano en el plano del papel: un error de uno o dos grados
+ya no se estira entero en la esquina que no se midió.
+
+Si la inferior derecha se escribe a mano, el marco pasa por las cuatro puntas.
 
 Coordenadas de la hoja: `u` va de la esquina superior izquierda hacia la
-derecha y `v` hacia abajo, en mm. La Z de dibujo sale del plano de las tres
+derecha y `v` hacia abajo, en mm. La Z de dibujo sale del plano de las
 esquinas (la mesa no siempre está pareja) y la R se interpola igual.
 """
 
@@ -25,6 +27,8 @@ J1_LIMIT_DEG = 160.0
 REACH_MIN_MM = 170.0
 # Un rectángulo más torcido que esto es una esquina mal enseñada.
 SQUARE_TOLERANCE_DEG = 5.0
+# Por debajo de esto el ajuste se nota en el papel y conviene avisarlo.
+ADJUST_WARN_MM = 3.0
 MIN_SIDE_MM = 40.0
 DEFAULT_LIFT_MM = 8.0
 DEFAULT_MARGIN_MM = 8.0
@@ -32,6 +36,9 @@ DEFAULT_MARGIN_MM = 8.0
 PORTRAIT_ASPECT = 1.45
 
 CORNERS = ("tl", "tr", "bl")
+QUAD = ("tl", "tr", "br", "bl")
+
+Vec = tuple[float, float, float]
 
 
 class FrameError(ValueError):
@@ -48,69 +55,85 @@ class Corner:
     def as_dict(self) -> dict:
         return {"x": self.x, "y": self.y, "z": self.z, "r": self.r}
 
+    def xyz(self) -> Vec:
+        return (self.x, self.y, self.z)
+
 
 @dataclass(frozen=True)
 class Frame:
+    """Esquinas con las que se dibuja.
+
+    En automático son el rectángulo ajustado. Si `manual` es verdadero, son
+    las cuatro puntas tal como se escribieron y el trazado pasa por ellas.
+    """
+
     tl: Corner
     tr: Corner
     bl: Corner
+    br: Corner
+    manual: bool = False
+    straighten_deg: float = 0.0
+    residuals_mm: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    raw_angle_deg: float = 90.0
 
     @classmethod
-    def from_corners(cls, tl: Corner, tr: Corner, bl: Corner) -> Frame:
-        frame = cls(tl, tr, bl)
-        if frame.width < MIN_SIDE_MM or frame.height < MIN_SIDE_MM:
-            raise FrameError(
-                f"la hoja mide {frame.width:.0f} × {frame.height:.0f} mm: "
-                "alguna esquina quedó repetida o muy cerca de otra"
+    def from_corners(cls, tl: Corner, tr: Corner, bl: Corner, br: Corner | None = None) -> Frame:
+        angle = _corner_angle(tl, tr, bl)
+        _require_sides(tl, tr, bl, angle)
+        if br is None:
+            quad, straighten, residuals = _fit_rectangle(tl, tr, bl)
+            return cls(
+                *quad,
+                manual=False,
+                straighten_deg=straighten,
+                residuals_mm=residuals,
+                raw_angle_deg=angle,
             )
-        skew = abs(frame.corner_angle_deg - 90.0)
-        if skew > SQUARE_TOLERANCE_DEG:
-            raise FrameError(
-                f"las esquinas forman un ángulo de {frame.corner_angle_deg:.0f}°: "
-                "vuelve a enseñar la que quedó chueca"
-            )
-        return frame
+        _require_point(br)
+        _require_sides(tl, tr, bl, angle)
+        if _dist(bl.xyz(), br.xyz()) < MIN_SIDE_MM or _dist(tr.xyz(), br.xyz()) < MIN_SIDE_MM:
+            raise FrameError("la esquina inferior derecha quedó pegada a otra")
+        return cls(
+            tl,
+            tr,
+            bl,
+            br,
+            manual=True,
+            straighten_deg=abs(angle - 90.0),
+            residuals_mm=(0.0, 0.0, 0.0, 0.0),
+            raw_angle_deg=angle,
+        )
 
     @classmethod
     def from_dict(cls, raw: dict) -> Frame:
         corners = []
         for key in CORNERS:
-            point = raw.get(key) if isinstance(raw, dict) else None
-            if not isinstance(point, dict):
-                raise FrameError("faltan esquinas: enseña las tres")
-            try:
-                corners.append(
-                    Corner(
-                        x=float(point["x"]),
-                        y=float(point["y"]),
-                        z=float(point["z"]),
-                        r=float(point.get("r", 0.0)),
-                    )
-                )
-            except (KeyError, TypeError, ValueError) as exc:
-                raise FrameError("una esquina no trae X, Y y Z") from exc
-        return cls.from_corners(*corners)
+            corners.append(_corner_from(raw, key, required=True))
+        br_raw = raw.get("br") if isinstance(raw, dict) else None
+        br = _corner_from(raw, "br", required=False) if isinstance(br_raw, dict) else None
+        return cls.from_corners(*corners, br)
 
     def as_dict(self) -> dict:
-        return {key: getattr(self, key).as_dict() for key in CORNERS}
+        data = {key: getattr(self, key).as_dict() for key in CORNERS}
+        if self.manual:
+            data["br"] = self.br.as_dict()
+        return data
 
     @property
     def width(self) -> float:
-        return math.hypot(self.tr.x - self.tl.x, self.tr.y - self.tl.y)
+        return _dist(self.tl.xyz(), self.tr.xyz())
 
     @property
     def height(self) -> float:
-        return math.hypot(self.bl.x - self.tl.x, self.bl.y - self.tl.y)
+        return _dist(self.tl.xyz(), self.bl.xyz())
 
     @property
     def corner_angle_deg(self) -> float:
-        ux, uy = self.tr.x - self.tl.x, self.tr.y - self.tl.y
-        vx, vy = self.bl.x - self.tl.x, self.bl.y - self.tl.y
-        norm = math.hypot(ux, uy) * math.hypot(vx, vy)
-        if norm <= 1e-9:
-            return 0.0
-        cos = max(-1.0, min(1.0, (ux * vx + uy * vy) / norm))
-        return math.degrees(math.acos(cos))
+        return _corner_angle(self.tl, self.tr, self.bl)
+
+    @property
+    def shift_mm(self) -> float:
+        return max(self.residuals_mm)
 
     @property
     def orientation(self) -> str:
@@ -122,12 +145,11 @@ class Frame:
         b = v / self.height
 
         def mix(name: str) -> float:
-            origin = getattr(self.tl, name)
-            return (
-                origin
-                + a * (getattr(self.tr, name) - origin)
-                + b * (getattr(self.bl, name) - origin)
-            )
+            tl = getattr(self.tl, name)
+            tr = getattr(self.tr, name)
+            bl = getattr(self.bl, name)
+            br = getattr(self.br, name)
+            return (1 - a) * (1 - b) * tl + a * (1 - b) * tr + (1 - a) * b * bl + a * b * br
 
         return mix("x"), mix("y"), mix("z"), mix("r")
 
@@ -143,6 +165,146 @@ class Frame:
         if name not in spots:
             raise FrameError(f"no hay un punto llamado {name}")
         return self.to_robot(*spots[name])
+
+
+def _corner_from(raw: dict, key: str, *, required: bool) -> Corner:
+    point = raw.get(key) if isinstance(raw, dict) else None
+    if not isinstance(point, dict):
+        if required:
+            raise FrameError("faltan esquinas: enseña las tres")
+        raise FrameError("la esquina inferior derecha no trae X, Y y Z")
+    try:
+        corner = Corner(
+            x=float(point["x"]),
+            y=float(point["y"]),
+            z=float(point["z"]),
+            r=float(point.get("r", 0.0)),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise FrameError("una esquina no trae X, Y y Z") from exc
+    _require_point(corner)
+    return corner
+
+
+def _require_point(corner: Corner) -> None:
+    if any(abs(value) > 2000 for value in (corner.x, corner.y, corner.z, corner.r)):
+        raise FrameError("una esquina se sale del rango")
+
+
+def _require_sides(tl: Corner, tr: Corner, bl: Corner, angle: float) -> None:
+    width = _dist(tl.xyz(), tr.xyz())
+    height = _dist(tl.xyz(), bl.xyz())
+    if width < MIN_SIDE_MM or height < MIN_SIDE_MM:
+        raise FrameError(
+            f"la hoja mide {width:.0f} × {height:.0f} mm: "
+            "alguna esquina quedó repetida o muy cerca de otra"
+        )
+    if abs(angle - 90.0) > SQUARE_TOLERANCE_DEG:
+        raise FrameError(
+            f"las esquinas forman un ángulo de {angle:.0f}°: "
+            "vuelve a enseñar la que quedó chueca"
+        )
+
+
+def _corner_angle(tl: Corner, tr: Corner, bl: Corner) -> float:
+    return _angle_between(_sub(tr.xyz(), tl.xyz()), _sub(bl.xyz(), tl.xyz()))
+
+
+def _angle_between(u: Vec, v: Vec) -> float:
+    nu, nv = _norm(u), _norm(v)
+    if nu <= 1e-9 or nv <= 1e-9:
+        return 0.0
+    cos = max(-1.0, min(1.0, _dot(u, v) / (nu * nv)))
+    return math.degrees(math.acos(cos))
+
+
+def _fit_rectangle(
+    tl: Corner, tr: Corner, bl: Corner
+) -> tuple[tuple[Corner, Corner, Corner, Corner], float, tuple[float, float, float, float]]:
+    """Rectángulo más cercano: reparte el ángulo y centra el error en las tres puntas."""
+    u = _sub(tr.xyz(), tl.xyz())
+    v = _sub(bl.xyz(), tl.xyz())
+    normal = _cross(u, v)
+    length = _norm(normal)
+    if length <= 1e-9:
+        raise FrameError("las esquinas están en línea: vuelve a enseñar una")
+    axis = _scale(normal, 1.0 / length)
+    theta = math.atan2(length, _dot(u, v))
+    delta = theta - math.pi / 2
+    if abs(delta) < 1e-12:
+        u2, v2 = u, v
+    else:
+        # El eje es U × V, así que girar U hacia V y V hacia U cierra el ángulo.
+        u2 = _rot(u, axis, delta / 2)
+        v2 = _rot(v, axis, -delta / 2)
+    origin = tl.xyz()
+    fitted = (
+        origin,
+        _add(origin, u2),
+        _add(origin, v2),
+        _add(origin, _add(u2, v2)),
+    )
+    taught = (tl.xyz(), tr.xyz(), bl.xyz())
+    mean = tuple(sum(taught[i][axis_i] - fitted[i][axis_i] for i in range(3)) / 3.0 for axis_i in range(3))
+    fitted = tuple(_add(point, mean) for point in fitted)
+    raw_br = _add(tl.xyz(), _add(u, v))
+    br_r = tr.r + bl.r - tl.r
+    quad = (
+        Corner(*fitted[0], tl.r),
+        Corner(*fitted[1], tr.r),
+        Corner(*fitted[2], bl.r),
+        Corner(*fitted[3], br_r),
+    )
+    residuals = (
+        _dist(fitted[0], tl.xyz()),
+        _dist(fitted[1], tr.xyz()),
+        _dist(fitted[2], bl.xyz()),
+        _dist(fitted[3], raw_br),
+    )
+    return quad, abs(math.degrees(delta)), residuals
+
+
+def _sub(a: Vec, b: Vec) -> Vec:
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _add(a: Vec, b: Vec) -> Vec:
+    return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
+
+
+def _scale(a: Vec, factor: float) -> Vec:
+    return (a[0] * factor, a[1] * factor, a[2] * factor)
+
+
+def _dot(a: Vec, b: Vec) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _cross(a: Vec, b: Vec) -> Vec:
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+
+
+def _norm(a: Vec) -> float:
+    return math.sqrt(_dot(a, a))
+
+
+def _dist(a: Vec, b: Vec) -> float:
+    return _norm(_sub(a, b))
+
+
+def _rot(vector: Vec, axis: Vec, radians: float) -> Vec:
+    """Giro de Rodrigues. `axis` tiene que estar normalizado."""
+    cos = math.cos(radians)
+    sin = math.sin(radians)
+    crossed = _cross(axis, vector)
+    along = _dot(axis, vector)
+    return tuple(
+        vector[i] * cos + crossed[i] * sin + axis[i] * along * (1.0 - cos) for i in range(3)
+    )
 
 
 def fit(
@@ -237,6 +399,16 @@ def reach_report(frame: Frame) -> tuple[list[str], list[str]]:
             f"el borde de la hoja pasa a {nearest:.0f} mm del eje: junto a la columna "
             "el brazo puede no llegar. Prueba esa zona con Ir aquí"
         )
+    if frame.manual and frame.straighten_deg > 1.0:
+        warnings.append(
+            f"la esquina a mano deja la hoja a {frame.corner_angle_deg:.1f}° en vez de 90°. "
+            "El perímetro pasa por las cuatro puntas que escribiste"
+        )
+    elif not frame.manual and frame.shift_mm > ADJUST_WARN_MM:
+        warnings.append(
+            f"para dejar la hoja a escuadra hubo que mover una esquina {frame.shift_mm:.1f} mm. "
+            "Si el papel no coincide, vuelve a tomarla o escribe la inferior derecha"
+        )
     return errors, warnings
 
 
@@ -278,11 +450,16 @@ def summary(frame: Frame, margin_mm: float = DEFAULT_MARGIN_MM) -> dict:
         x, y, z, r = frame.named(name)
         return [round(x, 2), round(y, 2), round(z, 2), round(r, 2)]
 
+    labels = ("tl", "tr", "bl", "br")
     return {
         "width_mm": round(frame.width, 1),
         "height_mm": round(frame.height, 1),
         "orientation": frame.orientation,
         "angle_deg": round(frame.corner_angle_deg, 1),
+        "straighten_deg": round(frame.straighten_deg, 2),
+        "shift_mm": round(frame.shift_mm, 2),
+        "manual_br": frame.manual,
+        "residuals_mm": {name: round(frame.residuals_mm[index], 2) for index, name in enumerate(labels)},
         "paper": paper,
         "draw_width_mm": round(scale * draw_w, 1),
         "draw_height_mm": round(scale * draw_h, 1),
