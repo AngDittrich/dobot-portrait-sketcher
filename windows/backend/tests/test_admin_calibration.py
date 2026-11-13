@@ -42,13 +42,18 @@ def test_unas_esquinas_chuecas_se_explican():
 class _Robot:
     name = "mg400"
     lift_mm = 8.0
+    j4_fixed = -50.0
 
     def __init__(self) -> None:
         self.visitas: list[tuple[float, float, float, float]] = []
         self.lift = 0.0
 
+    def set_j4(self, value: float) -> float:
+        self.j4_fixed = float(value)
+        return self.j4_fixed
+
     def r_for(self, x: float, y: float) -> float:
-        return math.degrees(math.atan2(y, x)) - 50.0
+        return math.degrees(math.atan2(y, x)) + self.j4_fixed
 
     async def visit(
         self,
@@ -75,6 +80,20 @@ def test_ir_a_la_esquina_calculada_baja_al_plano_de_las_otras(monkeypatch: pytes
     r = math.degrees(math.atan2(-105.0, 172.0)) - 50.0
     assert robot.visitas == [pytest.approx((172.0, -105.0, -65.0, r))]
     assert robot.lift == pytest.approx(8.0)
+
+
+def test_ir_aqui_usa_la_j4_de_la_calibracion(monkeypatch: pytest.MonkeyPatch):
+    robot = _Robot()
+    monkeypatch.setattr(main, "robot", robot)
+    asyncio.run(
+        main.admin_goto(
+            {"corner": "tl", "corners": ESQUINAS, "lift_mm": 8, "j4": -47},
+            x_admin_token=_token(),
+        )
+    )
+    r = math.degrees(math.atan2(105.0, 320.0)) - 47.0
+    assert robot.visitas[-1][3] == pytest.approx(r)
+    assert robot.j4_fixed == pytest.approx(-47.0)
 
 
 def test_un_punto_fuera_del_alcance_no_se_visita(monkeypatch: pytest.MonkeyPatch):

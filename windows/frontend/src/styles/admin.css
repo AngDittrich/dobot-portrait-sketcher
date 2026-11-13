@@ -141,11 +141,7 @@
   display: flex;
   flex-direction: column;
   color: #fff;
-  background-color: #050c1b;
-  background-image:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 72px 72px;
+  background: #050c1b;
   user-select: none;
 }
 
@@ -659,22 +655,92 @@
 /* ---------- Sección Control ---------- */
 .admin-control {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(340px, 0.95fr);
+  gap: 1rem;
+}
+
+.admin-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
 }
 
-.admin-control-side {
+.admin-control-col {
   display: grid;
   gap: 1rem;
+  align-content: start;
+}
+
+.admin-tile-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.admin-tile-head h3 {
+  margin: 0;
+}
+
+.admin-tile-head p {
+  margin: 0.15rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-transform: none;
+  color: rgba(226, 232, 240, 0.62);
+}
+
+.admin-tile-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(125, 211, 252, 0.12);
+  color: #bae6fd;
+}
+
+.admin-tile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.admin-tile-actions > .admin-pose,
+.admin-tile-actions > .admin-pose--io {
+  flex: 1 1 100%;
+}
+
+.admin-field-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.admin-card-head .admin-card-note {
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+.admin-pose--io {
+  grid-template-columns: minmax(7rem, 9rem);
+}
+
+.admin-pad {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
 }
 
 .admin-sticks {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-evenly;
   gap: 1.25rem;
-  padding: 0.5rem 0 0.25rem;
+  padding: 0.75rem 0 0.35rem;
 }
 
 .admin-stick-wrap {
@@ -859,7 +925,7 @@
 
 .admin-sliders {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 0.9rem;
 }
 
@@ -930,7 +996,8 @@
 }
 
 .admin-pose-actions button {
-  flex: 1;
+  flex: 1 1 auto;
+  white-space: nowrap;
 }
 
 /* ---------- Sección Configuración ---------- */
@@ -939,6 +1006,10 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
   align-items: start;
+}
+
+.admin-config > form {
+  display: contents;
 }
 
 .admin-fields {
@@ -986,11 +1057,10 @@
 }
 
 .admin-fields .admin-check {
+  grid-column: 1 / -1;
   flex-direction: row;
   align-items: center;
-  align-self: end;
   gap: 0.5rem;
-  padding-bottom: 0.45rem;
   text-transform: none;
   letter-spacing: 0;
   font-size: 0.9rem;
@@ -1216,6 +1286,10 @@
 
 /* ---------- Botones y segmentos compartidos ---------- */
 .admin-press {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
   background: transparent;
@@ -1359,6 +1433,12 @@
   stroke: #fff;
   stroke-width: 3;
   transition: cx 0.3s ease, cy 0.3s ease;
+}
+
+.admin-map-ghost {
+  fill: none;
+  stroke: rgba(226, 232, 240, 0.85);
+  stroke-width: 2;
 }
 
 .admin-calib-side h3 {
@@ -1512,8 +1592,9 @@
 .admin-corner {
   position: relative;
   display: flex;
-  align-items: center;
-  gap: 0.8rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
   padding: 0.9rem 1rem 0.9rem 2.6rem;
   border-radius: 16px;
   background: rgba(4, 10, 22, 0.24);
@@ -1527,8 +1608,20 @@
 }
 
 .admin-corner strong {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
   font-size: 0.95rem;
   color: #fff;
+}
+
+.admin-corner-badge {
+  font-style: normal;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #bfdbfe;
 }
 
 .admin-corner p {
@@ -1583,9 +1676,110 @@
 }
 
 .admin-corner-actions {
-  flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap;
   gap: 0.45rem;
+}
+
+.admin-xyz {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.admin-xyz label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: rgba(226, 232, 240, 0.7);
+}
+
+.admin-xyz input,
+.admin-j4-field input {
+  min-width: 0;
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 0.95rem;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-xyz input:focus,
+.admin-j4-field input:focus {
+  border-color: rgba(255, 255, 255, 0.55);
+  outline: none;
+}
+
+.admin-live {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+
+.admin-live-label,
+.admin-j4-field label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.65);
+}
+
+.admin-j4-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.admin-j4-field label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 8.5rem;
+}
+
+.admin-text-btn {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #93c5fd;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.admin-text-btn:hover {
+  color: #fff;
+}
+
+.admin-more > summary {
+  cursor: pointer;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.admin-more-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin-top: 1rem;
+}
+
+.admin-more-body h3 {
+  margin: 0.4rem 0 0;
 }
 
 .admin-icon-btn {
@@ -1711,13 +1905,21 @@
 
 .admin-segment {
   display: flex;
+  flex-wrap: wrap;
   padding: 2px;
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--hairline-soft);
 }
 
+.admin-pose > .admin-segment {
+  grid-column: 1 / -1;
+}
+
 .admin-segment button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   border: 0;
   border-radius: 8px;
   padding: 0.4rem 0.75rem;
@@ -1743,13 +1945,317 @@
   transform: translateY(1px);
 }
 
+/* ---------- Sección Mando ---------- */
+.admin-mando {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.mando-stage {
+  position: relative;
+  padding: 1.15rem 1.25rem 1rem;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(125, 211, 252, 0.16), transparent 55%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 42%, rgba(9, 31, 62, 0.35));
+  box-shadow:
+    0 24px 60px rgba(2, 8, 20, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.mando-stage.is-armed {
+  box-shadow:
+    0 24px 60px rgba(2, 8, 20, 0.35),
+    inset 0 0 0 1px rgba(125, 211, 252, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.mando-stage.is-off {
+  filter: saturate(0.7);
+}
+
+.mando-triggers {
+  display: grid;
+  grid-template-columns: 72px 1fr 1fr 72px;
+  gap: 0.7rem;
+  align-items: end;
+  margin-bottom: 0.85rem;
+}
+
+.mando-trigger {
+  position: relative;
+  height: 74px;
+  border-radius: 16px 16px 8px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(4, 10, 22, 0.35);
+  overflow: hidden;
+}
+
+.mando-trigger i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, #e0f2fe, #38bdf8);
+  opacity: 0.9;
+}
+
+.mando-trigger b,
+.mando-bumper {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  color: rgba(226, 232, 240, 0.7);
+}
+
+.mando-trigger b {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.mando-bumper {
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(4, 10, 22, 0.28);
+}
+
+.mando-trigger.is-down b,
+.mando-bumper.is-down {
+  color: #fff;
+}
+
+.mando-bumper.is-down {
+  background: rgba(125, 211, 252, 0.28);
+}
+
+.mando-shell {
+  display: grid;
+  grid-template-columns: 1fr minmax(140px, 0.7fr) 1fr;
+  gap: 1rem;
+  align-items: center;
+  min-height: 280px;
+  padding: 1.2rem 1rem 1.4rem;
+  border-radius: 42% 42% 36% 36% / 14% 14% 28% 28%;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(4, 10, 22, 0.28));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.mando-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4rem;
+}
+
+.mando-side--right {
+  flex-direction: column-reverse;
+}
+
+.mando-well {
+  position: relative;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.08), rgba(4, 10, 22, 0.55) 70%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 8px 16px rgba(0, 0, 0, 0.35);
+}
+
+.mando-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px dashed rgba(226, 232, 240, 0.35);
+}
+
+.mando-knob {
+  position: absolute;
+  left: calc(50% - 18px);
+  top: calc(50% - 18px);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff, #94a3b8 45%, #1e293b 80%);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+}
+
+.mando-heart {
+  text-align: center;
+}
+
+.mando-heart p {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+}
+
+.mando-heart strong {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.62);
+}
+
+.mando-stage.is-armed .mando-heart strong {
+  color: #e0f2fe;
+}
+
+.mando-center-keys {
+  display: flex;
+  justify-content: center;
+  gap: 0.45rem;
+  margin-top: 0.9rem;
+}
+
+.mando-center-keys span {
+  min-width: 64px;
+  padding: 0.28rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.55);
+}
+
+.mando-center-keys span.is-down,
+.mando-face.is-down,
+.mando-dpad i.is-down {
+  color: #fff;
+  background: rgba(125, 211, 252, 0.38);
+  border-color: rgba(224, 242, 254, 0.7);
+}
+
+.mando-diamond {
+  display: grid;
+  grid-template-columns: repeat(3, 36px);
+  grid-template-rows: repeat(3, 36px);
+  gap: 4px;
+}
+
+.mando-face {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(4, 10, 22, 0.4);
+  font-size: 0.95rem;
+  color: rgba(226, 232, 240, 0.8);
+}
+
+.mando-face.is-n { grid-area: 1 / 2; }
+.mando-face.is-w { grid-area: 2 / 1; }
+.mando-face.is-e { grid-area: 2 / 3; }
+.mando-face.is-s { grid-area: 3 / 2; }
+
+.mando-dpad {
+  display: grid;
+  grid-template-columns: 22px 22px 22px;
+  grid-template-rows: 22px 22px 22px;
+}
+
+.mando-dpad i {
+  background: rgba(4, 10, 22, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.mando-dpad i:nth-child(1) { grid-area: 1 / 2; }
+.mando-dpad i:nth-child(2) { grid-area: 2 / 3; }
+.mando-dpad i:nth-child(3) { grid-area: 3 / 2; }
+.mando-dpad i:nth-child(4) { grid-area: 2 / 1; }
+
+.mando-sent {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 1rem 0 0;
+}
+
+.mando-sent div {
+  padding: 0.55rem 0.4rem 0.45rem;
+  border-radius: 12px;
+  background: rgba(4, 10, 22, 0.28);
+  text-align: center;
+}
+
+.mando-sent dt {
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  color: rgba(226, 232, 240, 0.5);
+}
+
+.mando-sent dd {
+  margin: 0.1rem 0 0;
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(226, 232, 240, 0.45);
+}
+
+.mando-sent .is-live dd {
+  color: #fff;
+}
+
+.mando-config h3 {
+  margin: 0;
+}
+
+.mando-lead {
+  margin-top: 0.45rem;
+}
+
+.mando-invert {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 1rem;
+}
+
+.mando-invert button {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  background: rgba(4, 10, 22, 0.22);
+  color: rgba(226, 232, 240, 0.75);
+  font: inherit;
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mando-invert button.is-on {
+  color: #fff;
+  background: rgba(125, 211, 252, 0.2);
+  border-color: rgba(224, 242, 254, 0.45);
+}
+
+.mando-arm {
+  width: 100%;
+  margin-top: 1rem;
+}
+
 /* ---------- Pantallas angostas ---------- */
 @media (max-width: 1100px) {
   .admin-grid > .admin-card {
     grid-column: 1 / -1;
   }
 
-  .admin-control {
+  .admin-mando {
     grid-template-columns: 1fr;
   }
 
@@ -1759,10 +2265,6 @@
 
   .admin-debug,
   .admin-draw {
-    grid-template-columns: 1fr;
-  }
-
-  .admin-config {
     grid-template-columns: 1fr;
   }
 
@@ -1819,6 +2321,80 @@
 
   .admin-content {
     padding: 1.1rem;
+  }
+
+  /* El botón de menú no cabe en la misma fila que el título y las acciones. */
+  .admin-top {
+    flex-wrap: wrap;
+    gap: 0.35rem 0.55rem;
+    padding: 0.5rem 0.9rem;
+    min-height: 0;
+  }
+
+  .admin-menu {
+    order: 0;
+  }
+
+  .admin-brand {
+    order: 1;
+    flex: 0 1 150px;
+    min-width: 0;
+    padding: 0.15rem 0.2rem;
+  }
+
+  .admin-brand img {
+    height: 22px;
+    max-width: 100%;
+    object-fit: contain;
+  }
+
+  .admin-top-actions {
+    order: 2;
+    margin-left: auto;
+    gap: 0.35rem;
+  }
+
+  .admin-exit,
+  .admin-estop {
+    min-width: 40px;
+    padding: 0 0.6rem;
+  }
+
+  .admin-action-label,
+  .admin-estop span {
+    display: none;
+  }
+
+  .admin-estop {
+    gap: 0;
+  }
+
+  .admin-top-title {
+    order: 3;
+    flex: 1 1 100%;
+    display: flex;
+    align-items: baseline;
+    gap: 0.55rem;
+    min-width: 0;
+  }
+
+  .admin-top-title h1 {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .admin-top-title p {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .admin-nav {
+    top: 0;
+  }
+
+  .admin-nav-scrim {
+    inset: 0;
   }
 }
 
@@ -1907,9 +2483,19 @@
     padding: 0.85rem;
   }
 
+  .admin-control-grid,
+  .admin-config,
+  .admin-sliders {
+    grid-template-columns: 1fr;
+  }
+
   .admin-pose-readout,
   .admin-joints-readout {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-corners {
+    grid-template-columns: 1fr;
   }
 }
 

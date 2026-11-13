@@ -86,6 +86,27 @@ def save_visit(
     return folder_name
 
 
+def record_job(sketch_id: str, job: dict) -> bool:
+    """Agrega cómo fue el dibujo al meta.json de la visita. False si no hay carpeta."""
+    if not ARCHIVE_DIR.is_dir() or not re.fullmatch(r"sk_[0-9a-f]{10}", sketch_id):
+        return False
+    folders = sorted(ARCHIVE_DIR.glob(f"*_{sketch_id}"), reverse=True)
+    for folder in folders:
+        meta_path = folder / "meta.json"
+        if not meta_path.is_file():
+            continue
+        try:
+            data = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        if not isinstance(data, dict):
+            return False
+        data["job"] = job
+        meta_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return True
+    return False
+
+
 def list_visits() -> list[dict]:
     """Visitas más recientes primero. Una carpeta ilegible se salta."""
     if not ARCHIVE_DIR.is_dir():

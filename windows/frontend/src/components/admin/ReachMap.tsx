@@ -1,4 +1,4 @@
-import type { Calibration, CornerId, CornerPose } from '../../lib/api'
+import type { Calibration, Corners } from '../../lib/api'
 
 /**
  * El área del MG400 vista desde arriba: X del robot hacia arriba de la
@@ -29,7 +29,8 @@ function sector(radius: number): string {
   return `M ${points.join(' L ')} Z`
 }
 
-const LABELS: Record<CornerId, string> = { tl: 'SI', tr: 'SD', bl: 'II' }
+const LABELS = { tl: 'SI', tr: 'SD', bl: 'II', br: 'ID' } as const
+const MARKS = ['tl', 'tr', 'bl', 'br'] as const
 
 export function ReachMap({
   calibration,
@@ -37,7 +38,7 @@ export function ReachMap({
   live,
 }: {
   calibration: Calibration | null
-  corners: Partial<Record<CornerId, CornerPose>>
+  corners: Partial<Corners>
   live: number[]
 }) {
   const sheet = calibration
@@ -60,12 +61,18 @@ export function ReachMap({
       </text>
       {sheet && <polygon points={polygon(sheet)} className="admin-map-sheet" />}
       {calibration && <polygon points={polygon(calibration.draw_box)} className="admin-map-draw" />}
-      {(Object.keys(LABELS) as CornerId[]).map((key) => {
-        const corner = corners[key]
-        if (!corner) return null
-        const [sx, sy] = screen(corner.x, corner.y)
+      {MARKS.map((key) => {
+        const fitted = calibration?.points[key]
+        const raw = corners[key]
+        const residual = calibration?.residuals_mm?.[key] ?? 0
+        const ghost = raw && calibration && !calibration.manual_br && key !== 'br' && residual > 0.5
+        const spot = fitted ?? (raw ? [raw.x, raw.y] : null)
+        if (!spot) return null
+        const [sx, sy] = screen(spot[0], spot[1])
+        const [gx, gy] = ghost ? screen(raw.x, raw.y) : [0, 0]
         return (
           <g key={key}>
+            {ghost ? <circle cx={gx} cy={gy} r={7} className="admin-map-ghost" /> : null}
             <circle cx={sx} cy={sy} r={9} className="admin-map-corner" />
             <text x={sx + 13} y={sy + 5} className="admin-map-label">
               {LABELS[key]}

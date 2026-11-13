@@ -2,9 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { LogOut, Menu, OctagonX, ScrollText, Trash2, X } from 'lucide-react'
 import { adminActivity } from '../../lib/api'
 import type { AdminActivity, AdminStatus } from '../../lib/api'
-import { useAdminStatus } from '../../hooks/useAdminStatus'
 import { useAdminActions } from '../../hooks/useAdminActions'
+import { useAdminStatus } from '../../hooks/useAdminStatus'
+import { DEFAULT_PAD_TUNE, usePad } from '../../hooks/usePad'
+import type { PadTune } from '../../hooks/usePad'
 import { ActivitySection } from './ActivitySection'
+import { AiSection } from './AiSection'
+import { CalibrationSection } from './CalibrationSection'
 import { ConfigSection } from './ConfigSection'
 import { ControlSection } from './ControlSection'
 import { DebugSection } from './DebugSection'
@@ -52,10 +56,12 @@ export function AdminPage({
   const [notice, setNotice] = useState('')
   const [clearing, setClearing] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+  const [speed, setSpeed] = useState(50)
+  const [tune, setTune] = useState<PadTune>(DEFAULT_PAD_TUNE)
   const [navOpen, setNavOpen] = useState(false)
   // En Control y Configuración el brazo se mueve a mano: la pose de hace un
   // segundo se sentía como delay. En las demás pestañas basta con 1 s.
-  const pollMs = active === 'control' || active === 'configuracion' ? 400 : 1000
+  const pollMs = active === 'control' || active === 'calibracion' || active === 'configuracion' ? 400 : 1000
   const { status, pollError } = useAdminStatus(token, pollMs)
   const [activity, setActivity] = useState<AdminActivity | null>(null)
 
@@ -106,6 +112,17 @@ export function AdminPage({
       setClearing(false)
     }
   }, [actions, clearing])
+
+  const pad = usePad({
+    token,
+    speed,
+    setSpeed,
+    busy: Boolean(status?.busy),
+    drag: status?.mode === 6,
+    tune,
+    onClearLogs: () => void clearLogs(),
+    onNotice: setNotice,
+  })
 
   const cancelDraw = useCallback(async () => {
     if (cancelling) return
@@ -247,11 +264,23 @@ export function AdminPage({
         <main className="admin-content">
           {active === 'estado' && <StatusSection status={status} activity={activity} />}
           {active === 'control' && (
-            <ControlSection status={status} token={token} actions={actions} onNotice={setNotice} />
+            <ControlSection
+              status={status}
+              token={token}
+              actions={actions}
+              onNotice={setNotice}
+              speed={speed}
+              onSpeed={setSpeed}
+              pad={pad}
+              tune={tune}
+              onTune={setTune}
+            />
           )}
+          {active === 'calibracion' && <CalibrationSection status={status} actions={actions} />}
           {active === 'dibujar' && <DrawSection status={status} />}
+          {active === 'ia' && <AiSection activity={activity} />}
           {active === 'configuracion' && (
-            <ConfigSection status={status} actions={actions} />
+            <ConfigSection status={status} actions={actions} speed={speed} onSpeed={setSpeed} />
           )}
           {active === 'actividad' && (
             <ActivitySection

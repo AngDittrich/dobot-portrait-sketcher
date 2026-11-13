@@ -50,23 +50,51 @@ DEFAULT_MIN_STEP_MM = 0.3
 DEFAULT_JOIN_GAP_MM = 0.0
 # Confirmación de llegada: se lee la pose hasta que el brazo está a 0.5 mm.
 ARRIVAL_TOLERANCE_MM = 0.5
-ARRIVAL_POLL_S = 0.1
+# Cada lectura ya cuesta una ida y vuelta por la red; dormir 0.1 s encima
+# dejaba la cola vacía y el brazo frenando en cada vértice.
+ARRIVAL_POLL_S = 0.03
 ARRIVAL_EXTRA_S = 6.0
+# Dos lecturas que no se mueven más que esto: el brazo está quieto.
+_STILL_MM = 0.1
+# Una espera más larga que esto cuenta como pausa en el registro del trabajo.
+LONG_WAIT_S = 0.5
+# Velocidad global del controlador. SpeedFactor y el SpeedL de cada MovL son
+# porcentajes y se multiplican: con los dos en 75 el brazo iba al 56 %.
+GLOBAL_SPEED_PERCENT = 100
+# Las velocidades y la aceleración de este archivo se midieron con
+# SpeedFactor(20): ahí SpeedL=20 daba ~17 mm/s y AccL=100, ~100 mm/s².
+MEASURED_GLOBAL_PERCENT = 20
+# J4 solo se revisa cada tantas subidas de lápiz. Leerla en cada viaje
+# vaciaba la cola y paraba el brazo 50 veces por retrato.
+J4_CHECK_EVERY = 10
 # A un par de milímetros la punta ya está en el punto. Exigir 0.5 mm y, si no,
 # reiniciar el controlador deja el brazo quieto el colchón entero (6 s) entre
 # cada serie de trazos. Más holgura bajaría el lápiz antes de llegar.
 _SETTLED_MM = 2.5
 _SETTLED_S = 0.4
-# Órdenes de dibujo en vuelo. Cada MovL cuesta ~0.51 s: esperar la llegada de
-# una antes de mandar la siguiente deja el brazo parado medio segundo por punto.
-# Con 3 en vuelo se solapa el envío con el movimiento. Nunca más: con flujo
-# continuo (decenas de órdenes por segundo) el controlador cierra el socket.
-DEFAULT_PIPELINE = 3
+# Órdenes en vuelo. Con 3, cada orden esperaba una lectura de pose y la cola
+# se vaciaba en cada vértice: el brazo frenaba a cero entre pasos de 2 mm.
+# 15 sigue muy por debajo de las ~44 que caben antes del -30000, y `_pace`
+# frena el envío: no es el flujo continuo que tumbaba el socket.
+DEFAULT_PIPELINE = 15
 # J4 es la muñeca del tool. Con el lápiz fuera del eje, girarla corre la punta,
 # así que se queda siempre en este ángulo. En el MG400, R = J1 + J4: el R de
 # cada punto se calcula con el J1 que ese punto exige.
 J4_FIXED = -50.0
 J4_TOLERANCE_DEG = 1.0
+# Un envío con la palanca a fondo y el slider en 100. 4 mm no dejaba llegar
+# a la velocidad pedida: el brazo solo aceleraba y frenaba.
+PAD_STEP_MM = 50.0
+PAD_J4_DEG = 8.0
+PAD_J4_LIMIT = 170.0
+# mm/s con slider 100 y la palanca a fondo. Sirve para no encolar de más.
+PAD_SPEED_MM_S = 400.0
+# Segundos de movimiento que pueden ir por delante. Más, y la cola se llena
+# y el brazo se traba; menos, y se queda esperando la siguiente orden.
+PAD_LEAD_S = 0.2
+# El MG400 no puede estar en el origen. Un GetPose de 0 tras una alarma, mandado
+# como MovL, cierra el puerto del controlador.
+PAD_POSE_MIN_MM = 50.0
 
 
 def effective_speed_mm_s(
@@ -97,6 +125,101 @@ def pace_gap_s(
         return 0.0
     speed = effective_speed_mm_s(distance_mm, speed_mm_s, acc_mm_s2) * PACE_EFFICIENCY
     return max(0.0, float(distance_mm)) / speed
+
+
+def _stick(value: float) -> float:
+    """Palanca o gatillo normalizado a ±1. Lo que no es un número cuenta como quieto."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if number != number:  # NaN
+        return 0.0
+    return max(-1.0, min(1.0, number))
+
+
+def pad_deltas(
+    x: float,
+    y: float,
+    z: float,
+    j4: float,
+    speed: int,
+    *,
+    mm: float | None = None,
+) -> tuple[float, float, float, float] | None:
+    """Paso en mm (x, y, z) y grados de J4. None si no hay nada que mover.
+
+    `mm` es el paso fijo de la cruceta: 1 mm en el eje que venga con signo,
+    sin escalar por el slider y sin girar la muñeca.
+    """
+    rate = min(100, max(1, int(speed)))
+    sx, sy, sz, sj = _stick(x), _stick(y), _stick(z), _stick(j4)
+    if mm is not None:
+        try:
+            size = float(mm)
+        except (TypeError, ValueError):
+            return None
+        size = min(PAD_STEP_MM, max(0.0, size))
+        if size == 0:
+            return None
+        dx = size if sx > 0 else -size if sx < 0 else 0.0
+        dy = size if sy > 0 else -size if sy < 0 else 0.0
+        dz = size if sz > 0 else -size if sz < 0 else 0.0
+        if dx == 0 and dy == 0 and dz == 0:
+            return None
+        return (dx, dy, dz, 0.0)
+    scale = PAD_STEP_MM * rate / 100.0
+    dx, dy, dz = sx * scale, sy * scale, sz * scale
+    dj4 = sj * PAD_J4_DEG * rate / 100.0
+    if abs(dx) < 1e-9 and abs(dy) < 1e-9 and abs(dz) < 1e-9 and abs(dj4) < 1e-9:
+        return None
+    return (dx, dy, dz, dj4)
+
+
+def _recorte_alcance(
+    x0: float, y0: float, x1: float, y1: float
+) -> tuple[float, float] | None:
+    """Recorta el paso al anillo donde el MG400 llega.
+
+    None si el destino se sale y el brazo ya está en ese borde: seguir
+    mandando puntos hacia la columna acaba en un MovL al origen y el
+    controlador cierra el puerto.
+    """
+    from app.robot.frame import REACH_MAX_MM, REACH_MIN_MM
+
+    destino = math.hypot(x1, y1)
+    if REACH_MIN_MM <= destino <= REACH_MAX_MM:
+        return (x1, y1)
+    origen = math.hypot(x0, y0)
+    if destino < REACH_MIN_MM:
+        if origen <= REACH_MIN_MM + 1.0:
+            return None
+        return _corte_circulo(x0, y0, x1, y1, REACH_MIN_MM)
+    if origen >= REACH_MAX_MM - 1.0:
+        return None
+    return _corte_circulo(x0, y0, x1, y1, REACH_MAX_MM)
+
+
+def _corte_circulo(
+    x0: float, y0: float, x1: float, y1: float, radio: float
+) -> tuple[float, float]:
+    """Intersección del segmento con el círculo, del lado de (x0, y0)."""
+    dx, dy = x1 - x0, y1 - y0
+    a = dx * dx + dy * dy
+    if a < 1e-9:
+        largo = math.hypot(x1, y1) or 1.0
+        return (x1 / largo * radio, y1 / largo * radio)
+    b = 2.0 * (x0 * dx + y0 * dy)
+    c = x0 * x0 + y0 * y0 - radio * radio
+    disco = b * b - 4.0 * a * c
+    if disco < 0:
+        largo = math.hypot(x1, y1) or 1.0
+        return (x1 / largo * radio, y1 / largo * radio)
+    raiz = math.sqrt(disco)
+    veces = ((-b - raiz) / (2.0 * a), (-b + raiz) / (2.0 * a))
+    dentro = [t for t in veces if 0.0 <= t <= 1.0]
+    t = min(dentro) if dentro else max(0.0, min(1.0, veces[0]))
+    return (x0 + t * dx, y0 + t * dy)
 
 
 @dataclass
@@ -293,8 +416,11 @@ class MG400Client(RobotClient):
         margin_mm: float = frame_ops.DEFAULT_MARGIN_MM,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        global_speed: int = GLOBAL_SPEED_PERCENT,
+        j4_fixed: float = J4_FIXED,
     ) -> None:
         self._link = link
+        self.global_speed = min(100, max(1, int(global_speed)))
         self._stage_link = link
         self.move_timeout_s = move_timeout_s
         self.queue_retry_s = queue_retry_s
@@ -305,7 +431,18 @@ class MG400Client(RobotClient):
         self.join_gap_mm = max(0.0, float(join_gap_mm))
         self.wait_arrival = wait_arrival
         self.pipeline = max(1, int(pipeline))
-        self._pending: list[tuple[float, float, float, int, float, Segment | None]] = []
+        # (x, y, distancia, velocidad, mm de tinta, segmento, recorta esquina)
+        self._pending: list[tuple[float, float, float, int, float, Segment | None, bool]] = []
+        # Último destino mandado: ahí se para el brazo cuando termina la cola.
+        self._queue_end: tuple[float, float] | None = None
+        self._queue_idle = False
+        self._travels = 0
+        self.last_pose: tuple[float, float, float, float] | None = None
+        # J4 que el control dejó girado. None: se usa j4_fixed (-50).
+        self.pad_j4: float | None = None
+        self._pad_factor_set = False
+        self._pad_target: tuple[float, float, float] | None = None
+        self._pad_due: float | None = None
         self.arrival_tolerance_mm = arrival_tolerance_mm
         self.arrival_poll_s = arrival_poll_s
         self.arrival_extra_s = arrival_extra_s
@@ -363,7 +500,10 @@ class MG400Client(RobotClient):
         self.commands: list[str] = []
         self._ready = False
         self._cancel = False
-        self.j4_fixed = J4_FIXED
+        # User() y Tool() ya se mandaron en este socket. El sondeo no puede
+        # leer la pose en otro sistema que el movimiento.
+        self._coords_set = False
+        self.j4_fixed = float(j4_fixed)
         # "j1+j4" (documentación Dobot) o "j4" si al conectar R resulta ser J4.
         self.r_model = "j1+j4"
         # Lector del puerto 30004: pose y modo cada 8 ms sin preguntar. Solo
@@ -388,7 +528,35 @@ class MG400Client(RobotClient):
 
     @staticmethod
     def _empty_motion() -> dict[str, float | int]:
-        return {"draw_s": 0.0, "air_s": 0.0, "queue_s": 0.0, "skipped_orders": 0}
+        return {
+            "draw_s": 0.0,
+            "air_s": 0.0,
+            "queue_s": 0.0,
+            "skipped_orders": 0,
+            "pose_reads": 0,
+            "pose_s": 0.0,
+            "pose_max_s": 0.0,
+            "long_waits": 0,
+            "long_wait_s": 0.0,
+            "timeouts": 0,
+        }
+
+    def _mm_s(self, speed: float) -> float:
+        """SpeedL en porcentaje → mm/s, con la velocidad global aplicada."""
+        return float(speed) * self.global_speed / MEASURED_GLOBAL_PERCENT
+
+    def _acc(self) -> float:
+        return self.acc_mm_s2 * self.global_speed / MEASURED_GLOBAL_PERCENT
+
+    async def _timed_pose(self, pose_fn: Callable[[], tuple]) -> tuple:
+        started = time.monotonic()
+        try:
+            return await asyncio.to_thread(pose_fn)
+        finally:
+            spent = time.monotonic() - started
+            self._motion["pose_reads"] = int(self._motion["pose_reads"]) + 1
+            self._motion["pose_s"] = float(self._motion["pose_s"]) + spent
+            self._motion["pose_max_s"] = max(float(self._motion["pose_max_s"]), spent)
 
     @property
     def motion_stats(self) -> dict[str, float | int]:
@@ -457,6 +625,7 @@ class MG400Client(RobotClient):
             far_x=far_x,
             far_y=far_y,
             move_timeout_s=optional_float("ROBOT_MOVE_TIMEOUT_S", 60.0),
+            global_speed=optional_int("ROBOT_GLOBAL_SPEED", GLOBAL_SPEED_PERCENT),
         )
 
     def set_frame(self, frame: Frame | None, lift_mm: float, margin_mm: float) -> None:
@@ -476,13 +645,34 @@ class MG400Client(RobotClient):
 
         El sondeo del panel pasa por aquí. `connect` limpia alarmas y fija la
         velocidad, y hacerlo en cada reconexión del sondeo es lo que tumba el
-        enlace cada pocos segundos.
+        enlace cada pocos segundos. User y Tool se intentan una vez; si el
+        controlador los rechaza, el socket sigue abierto. La pose de una
+        esquina pasa por `connect`, que sí los deja puestos.
         """
-        if self._link is not None:
-            return
-        async with self._io:
-            if self._link is None:
-                await self._open_socket()
+        if self._link is None:
+            async with self._io:
+                if self._link is None:
+                    await self._open_socket()
+                    self._coords_set = False
+        if not self._coords_set:
+            # Un fallo aquí no puede cerrar el socket: si no, el sondeo
+            # reconecta cada 800 ms. Tomar una esquina pasa por `connect`,
+            # que sí deja User y Tool puestos.
+            self._coords_set = True
+            if await self._dashboard(f"User({int(self.user)})", required=False):
+                await self._dashboard(f"Tool({int(self.tool)})", required=False)
+
+    async def aligned_pose(self) -> dict[str, float]:
+        """X, Y, Z, R y J4 en el usuario y la herramienta de la cabina."""
+        from app.robot.mg400 import MG400Error
+
+        await self.connect()
+        pose = await self._read_pose()
+        if pose is None:
+            raise MG400Error("no se pudo leer la pose")
+        angles = await self._read_angles()
+        j4 = float(angles[3]) if angles is not None and len(angles) >= 4 else float(self.j4_fixed)
+        return {"x": pose[0], "y": pose[1], "z": pose[2], "r": pose[3], "j4": j4}
 
     async def connect(self) -> None:
         if self._ready and self._link is not None:
@@ -542,19 +732,156 @@ class MG400Client(RobotClient):
 
     async def _abrir(self) -> None:
         await self._open_socket()
-        await asyncio.to_thread(self._link.prepare, self.speed_factor)  # type: ignore[attr-defined]
-        self._prepared_rate = int(self.speed_factor)
+        # El global se queda en 100: la velocidad del trazo va en SpeedL.
+        # El caché evita repetir este prepare en cada jog con la misma cifra.
+        await asyncio.to_thread(self._link.prepare, self.global_speed)  # type: ignore[attr-defined]
+        self._prepared_rate = int(self.global_speed)
         await self._dashboard(f"User({int(self.user)})")
         await self._dashboard(f"Tool({int(self.tool)})")
+        self._coords_set = True
         await self._dashboard(f"CP({_blend(self.cp_draw)})")
         await self._measure_r_model()
         self._ready = True
 
+    def set_j4(self, value: float) -> float:
+        """Ángulo de muñeca de toda la hoja. Los MovL siguientes lo conservan."""
+        self.j4_fixed = min(PAD_J4_LIMIT, max(-PAD_J4_LIMIT, float(value)))
+        return self.j4_fixed
+
     def r_for(self, x: float, y: float) -> float:
         """R cartesiana que deja J4 en `j4_fixed` con la base apuntando a (x, y)."""
+        return self.r_holding(x, y, self.j4_fixed)
+
+    def r_holding(self, x: float, y: float, j4: float) -> float:
+        """R que deja la muñeca en `j4` grados, no necesariamente en -50."""
         if self.r_model == "j4":
-            return _nonzero(self.j4_fixed)
-        return _nonzero(math.degrees(math.atan2(y, x)) + self.j4_fixed)
+            return _nonzero(j4)
+        return _nonzero(math.degrees(math.atan2(y, x)) + j4)
+
+    def clear_pad_j4(self) -> None:
+        """El dibujo, J4 a -50 y soltar el arrastre olvidan el ángulo del control."""
+        self.pad_j4 = None
+        self._pad_factor_set = False
+        self._pad_target = None
+        self._pad_due = None
+
+    async def pad_nudge(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        j4: float,
+        speed: int,
+        *,
+        mm: float | None = None,
+    ) -> str | None:
+        """Un paso cartesiano del control. None si la palanca está quieta.
+
+        X, Y y Z van en el mismo MovL. La R conserva `pad_j4` (o -50 si la
+        palanca derecha todavía no se movió). No usa `_movl`: ese ignora la R.
+        """
+        from app.robot.mg400 import MG400Error
+
+        deltas = pad_deltas(x, y, z, j4, speed, mm=mm)
+        if deltas is None:
+            return None
+        dx, dy, dz, dj4 = deltas
+        await self.ensure()
+        # La cruceta y el primer envío de un gesto leen la pose. Los siguientes
+        # salen del último punto mandado: volver a leer dejaba el paso en 4 mm
+        # reales, porque la pose iba detrás del brazo.
+        if self._pad_target is None or mm is not None:
+            pose = await self._read_pose()
+            if pose is None:
+                raise MG400Error("no se pudo leer la pose del control")
+            base = (pose[0], pose[1], pose[2])
+        else:
+            base = self._pad_target
+        if math.hypot(base[0], base[1]) < PAD_POSE_MIN_MM:
+            # Tras una alarma el controlador a veces contesta 0,0,0. Mandar eso
+            # no mueve el brazo y cierra el puerto.
+            self._pad_target = None
+            self._pad_due = None
+            logger.warning(
+                "pose %.1f,%.1f no es del brazo; no mando el movimiento",
+                base[0],
+                base[1],
+            )
+            await self._sleep(0.2)
+            return None
+        previous = self.pad_j4
+        if dj4 != 0 and self.pad_j4 is None:
+            angles = await self._read_angles()
+            self.pad_j4 = angles[3] if angles is not None else self.j4_fixed
+        if dj4 != 0 and self.pad_j4 is not None:
+            self.pad_j4 = min(PAD_J4_LIMIT, max(-PAD_J4_LIMIT, self.pad_j4 + dj4))
+        if dx == 0 and dy == 0 and dz == 0 and self.pad_j4 == previous:
+            return None
+        length = (dx * dx + dy * dy + dz * dz) ** 0.5
+        if length > 0 and self._pad_due is not None:
+            espera = self._pad_due - PAD_LEAD_S - time.monotonic()
+            if espera > 0:
+                await self._sleep(espera)
+        held = self.j4_fixed if self.pad_j4 is None else self.pad_j4
+        if dx != 0 or dy != 0:
+            recorte = _recorte_alcance(base[0], base[1], base[0] + dx, base[1] + dy)
+            if recorte is None:
+                if dz == 0 and self.pad_j4 == previous:
+                    await self._sleep(0.1)
+                    return None
+                recorte = (base[0], base[1])
+            target_x = _nonzero(recorte[0])
+            target_y = _nonzero(recorte[1])
+        else:
+            target_x = _nonzero(base[0])
+            target_y = _nonzero(base[1])
+        target_z = _nonzero(base[2] + dz)
+        recorrido = math.hypot(target_x - base[0], target_y - base[1], target_z - base[2])
+        if recorrido < 0.5 and self.pad_j4 == previous:
+            await self._sleep(0.1)
+            return None
+        rotation = self.r_holding(target_x, target_y, held)
+        if not self._pad_factor_set:
+            # El slider va solo en SpeedL. Si el global no es 100, se multiplican.
+            await self._dash(f"SpeedFactor({GLOBAL_SPEED_PERCENT})")
+            self._pad_factor_set = True
+        rate = min(100, max(1, int(speed)))
+        command = (
+            f"MovL({target_x:.3f},{target_y:.3f},{target_z:.3f},{rotation:.3f},"
+            f"SpeedL={rate},AccL=100,CP=100)"
+        )
+        try:
+            await self._move(command)
+        except Exception:
+            self._pad_target = None
+            self._pad_due = None
+            raise
+        if mm is not None:
+            self._pad_target = None
+            self._pad_due = None
+        else:
+            self._pad_target = (target_x, target_y, target_z)
+            if recorrido > 0:
+                ahora = time.monotonic()
+                ritmo = PAD_SPEED_MM_S * rate / 100.0
+                self._pad_due = max(ahora, self._pad_due or 0.0) + recorrido / ritmo
+        return command
+
+    async def pad_stop(self) -> tuple[int, str]:
+        """Frena el paso del control. No devuelve J4 a -50: el ángulo se queda."""
+        self._pad_factor_set = False
+        self._pad_target = None
+        self._pad_due = None
+        return await self.ask("Stop()", move=True)
+
+    async def _dash(self, command: str) -> None:
+        if getattr(self._link, "dashboard", None) is None:
+            return
+        try:
+            async with self._wire:
+                await asyncio.to_thread(self._link.dashboard, command)  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001 - si no responde, el movimiento sigue
+            logger.warning("%s no respondió", command, exc_info=True)
 
     async def _read_angles(self) -> list[float] | None:
         angles = getattr(self._link, "angles", None)
@@ -723,6 +1050,20 @@ class MG400Client(RobotClient):
         self._pending = []
         self._cancel = False
 
+    async def _set_global_speed(self) -> None:
+        """El joystick deja su propio SpeedFactor; el dibujo vuelve al global."""
+        if getattr(self._link, "dashboard", None) is None:
+            return
+        try:
+            async with self._wire:
+                await asyncio.to_thread(
+                    self._link.dashboard,  # type: ignore[union-attr]
+                    f"SpeedFactor({self.global_speed})",
+                )
+            self._prepared_rate = int(self.global_speed)
+        except Exception:  # noqa: BLE001 - si no responde, se dibuja a la velocidad que haya
+            logger.warning("SpeedFactor(%d) no respondió", self.global_speed, exc_info=True)
+
     async def draw(
         self,
         trajectory: Trajectory,
@@ -743,6 +1084,11 @@ class MG400Client(RobotClient):
         self._last_point = None
         self._radio_minimo = None
         self._pending = []
+        self._queue_end = None
+        self._queue_idle = False
+        self._travels = 0
+        self.clear_pad_j4()
+        await self._set_global_speed()
         self._paper_w = trajectory.width_mm
         self._paper_h = trajectory.height_mm
         if sheet_mm:
@@ -795,9 +1141,11 @@ class MG400Client(RobotClient):
                     self._motion["air_s"] = float(self._motion["air_s"]) + (
                         self._clock() - phase_started
                     )
-                    if not pen_down:
-                        # Lápiz arriba y sin órdenes en vuelo: momento seguro para
+                    self._travels += 1
+                    if not pen_down and self._travels % J4_CHECK_EVERY == 0:
+                        # Lápiz arriba y con la cola vacía: momento seguro para
                         # devolver J4 si un empujón la giró.
+                        await self._drain()
                         await self.ensure_j4()
                 else:
                     phase_started = self._clock()
@@ -840,11 +1188,13 @@ class MG400Client(RobotClient):
                 held = start
         else:
             if pen_down and held is not None and not _near(held, start):
-                if await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0):
+                if await self._goto(held[0], held[1], self.z_travel, self.speed_factor, 0, queued=True):
                     pen_down = False
             if held is None or not _near(held, start):
-                if await self._goto(start[0], start[1], self.z_travel,  self.speed_travel, 0):
+                if await self._goto(start[0], start[1], self.z_travel, self.speed_travel, 0, queued=True):
                     held = start
+            # Bajar sí espera: el lápiz no toca el papel hasta que el brazo
+            # terminó de subir y viajar.
             if not pen_down:
                 if await self._goto(start[0], start[1], self.z_draw,  self.speed_factor, 0):
                     pen_down = True
@@ -901,12 +1251,12 @@ class MG400Client(RobotClient):
                     if await self._goto(point[0], point[1], self.z_draw,  self.speed_factor, self.cp_draw):
                         held = point
                 return pen_down, held if held is not None else points[-1]
-            if await self._goto(held[0], held[1], self.z_travel,  self.speed_factor, 0):
+            if await self._goto(held[0], held[1], self.z_travel, self.speed_factor, 0, queued=True):
                 pen_down = False
         for point in points:
             if held is not None and _near(held, point):
                 continue
-            if await self._goto(point[0], point[1], self.z_travel,  self.speed_travel, 0):
+            if await self._goto(point[0], point[1], self.z_travel, self.speed_travel, 0, queued=True):
                 held = point
         return pen_down, held if held is not None else points[-1]
 
@@ -920,8 +1270,13 @@ class MG400Client(RobotClient):
         *,
         progress_mm: float = 0.0,
         progress_segment: Segment | None = None,
+        queued: bool = False,
     ) -> bool:
-        """Manda el punto. False si quedó fuera del brazo y se saltó para seguir dibujando."""
+        """Manda el punto. False si quedó fuera del brazo y se saltó para seguir dibujando.
+
+        `queued` encola una orden con CP=0 (subir o viajar) sin esperar su
+        llegada: el controlador la ejecuta en orden y frena en ese punto.
+        """
         if self._cancel:
             raise DrawCancelled()
         robot_x, robot_y, real_z, rotation = self._map(x, y, z)
@@ -943,10 +1298,13 @@ class MG400Client(RobotClient):
                 + (target[1] - self._last_point[1]) ** 2
                 + (target[2] - self._last_point[2]) ** 2
             ) ** 0.5
-        en_vuelo = self.pipeline > 1 and cp == self.cp_draw and z == self.z_draw
-        if not en_vuelo:
-            # Cambiar de altura o pasear con órdenes pendientes dejaría el
-            # lápiz abajo mientras el brazo todavía va en camino.
+        blend = cp == self.cp_draw and z == self.z_draw
+        en_vuelo = self.pipeline > 1 and (blend or (queued and cp == 0))
+        # Una orden de tinta en vuelo recorta su esquina hacia la siguiente.
+        # Si la siguiente sube el lápiz, el final del trazo se pierde: antes
+        # de cambiar de altura hay que dejar que el brazo llegue.
+        tinta_en_vuelo = any(entry[6] for entry in self._pending)
+        if not en_vuelo or (not blend and tinta_en_vuelo):
             queue_started = self._clock()
             await self._drain()
             self._motion["queue_s"] = float(self._motion["queue_s"]) + (
@@ -954,10 +1312,13 @@ class MG400Client(RobotClient):
             )
         await self._pace(target, speed)
         await self._move(command)
+        self._queue_end = (robot_x, robot_y)
+        self._queue_idle = False
         if en_vuelo:
             self._pending.append(
-                (robot_x, robot_y, distance, speed, progress_mm, progress_segment)
+                (robot_x, robot_y, distance, speed, progress_mm, progress_segment, blend)
             )
+            self._last_point = target
             while len(self._pending) >= self.pipeline:
                 await self._wait_pending()
         else:
@@ -1020,6 +1381,15 @@ class MG400Client(RobotClient):
         return points
 
     def _note_pose(self, actual: tuple) -> None:
+        try:
+            self.last_pose = (
+                float(actual[0]),
+                float(actual[1]),
+                float(actual[2]),
+                float(actual[3]),
+            )
+        except (IndexError, TypeError, ValueError):
+            pass
         points = getattr(self, "_arm_points", None)
         if not points:
             return
@@ -1089,15 +1459,73 @@ class MG400Client(RobotClient):
         while self._pending:
             await self._wait_pending()
 
+    async def _settle_pending(self) -> None:
+        """El brazo ya terminó la cola: todo lo pendiente quedó en el papel."""
+        while self._pending:
+            entry = self._pending.pop(0)
+            await self._record_progress(entry[4], entry[5])
+
+    async def _passed_pending(self) -> int:
+        """Cuántas órdenes en vuelo ya quedaron atrás, con una sola lectura.
+
+        Esperar la llegada de la más vieja costaba una lectura por orden; con
+        una pose basta ver cuál de las pendientes tiene la punta más cerca.
+        """
+        pose_fn = getattr(self._link, "pose", None)
+        if not self.wait_arrival or pose_fn is None or len(self._pending) < 2:
+            return 0
+        try:
+            actual = await self._timed_pose(pose_fn)
+        except Exception:  # noqa: BLE001 - sin lectura se espera la llegada
+            return 0
+        self._note_pose(actual)
+        px, py = float(actual[0]), float(actual[1])
+        gaps = [math.hypot(px - entry[0], py - entry[1]) for entry in self._pending]
+        nearest = min(range(len(gaps)), key=gaps.__getitem__)
+        if nearest == 0 or gaps[0] <= 2 * self.arrival_tolerance_mm:
+            return 0
+        return nearest
+
     async def _wait_pending(self) -> None:
-        robot_x, robot_y, distance, speed, progress_mm, progress_segment = self._pending.pop(0)
+        if not self._pending:
+            return
+        if self._queue_idle:
+            await self._settle_pending()
+            return
+        passed = await self._passed_pending()
+        if passed:
+            for _ in range(passed):
+                entry = self._pending.pop(0)
+                await self._record_progress(entry[4], entry[5])
+            return
+        robot_x, robot_y, distance, speed, progress_mm, progress_segment, _blend = self._pending.pop(0)
         if await self._wait_arrival(robot_x, robot_y, distance, speed) == "short":
             self._marcar_borde(robot_x, robot_y)
             self._progress_total = max(1e-6, self._progress_total - progress_mm)
             return
         await self._record_progress(progress_mm, progress_segment)
+        if self._queue_idle:
+            await self._settle_pending()
 
     async def _wait_arrival(
+        self,
+        robot_x: float,
+        robot_y: float,
+        distance_mm: float,
+        speed: int,
+    ) -> str:
+        if not self.wait_arrival or getattr(self._link, "pose", None) is None:
+            return "ok"
+        started = time.monotonic()
+        try:
+            return await self._await_arrival(robot_x, robot_y, distance_mm, speed)
+        finally:
+            spent = time.monotonic() - started
+            if spent >= LONG_WAIT_S:
+                self._motion["long_waits"] = int(self._motion["long_waits"]) + 1
+                self._motion["long_wait_s"] = float(self._motion["long_wait_s"]) + spent
+
+    async def _await_arrival(
         self,
         robot_x: float,
         robot_y: float,
@@ -1120,26 +1548,39 @@ class MG400Client(RobotClient):
         if pose is None:
             return "ok"
         presupuesto = distance_mm / effective_speed_mm_s(
-            distance_mm, speed, self.acc_mm_s2
+            distance_mm, self._mm_s(speed), self._acc()
         ) + self.arrival_extra_s
         limite = time.monotonic() + presupuesto
         mejor = float("inf")
         inicial: float | None = None
         quieto_desde: float | None = None
+        previo: tuple[float, float] | None = None
         while time.monotonic() < limite:
             if self._cancel:
                 raise DrawCancelled()
             try:
-                actual = await asyncio.to_thread(pose)
+                actual = await self._timed_pose(pose)
             except Exception:  # noqa: BLE001 - sin lectura seguimos dibujando
                 return "ok"
             self._note_pose(actual)
             await self._publish_pose()
-            distancia = (
-                (float(actual[0]) - robot_x) ** 2 + (float(actual[1]) - robot_y) ** 2
-            ) ** 0.5
+            px, py = float(actual[0]), float(actual[1])
+            distancia = ((px - robot_x) ** 2 + (py - robot_y) ** 2) ** 0.5
             if inicial is None:
                 inicial = distancia
+            # Quieto en el último punto mandado: la cola entera ya se ejecutó.
+            # Con CP=100 la esquina que se espera pudo quedar a 3 mm y nunca
+            # "llegar"; sin esto se esperaban los 6 s con el brazo parado.
+            fin = self._queue_end
+            if (
+                previo is not None
+                and fin is not None
+                and math.hypot(px - previo[0], py - previo[1]) <= _STILL_MM
+                and math.hypot(px - fin[0], py - fin[1]) <= _SETTLED_MM
+            ):
+                self._queue_idle = True
+                return "ok"
+            previo = (px, py)
             if distancia <= self.arrival_tolerance_mm:
                 return "ok"
             if ya_paso(mejor, distancia, self.arrival_tolerance_mm):
@@ -1159,6 +1600,7 @@ class MG400Client(RobotClient):
             await asyncio.sleep(self.arrival_poll_s)
         if mejor <= _SETTLED_MM:
             return "ok"
+        self._motion["timeouts"] = int(self._motion["timeouts"]) + 1
         lejos = mejor if mejor < float("inf") else -1.0
         logger.warning(
             "el brazo no llego a %.1f,%.1f en %.1f s; sigue a %.1f mm",
@@ -1272,7 +1714,7 @@ class MG400Client(RobotClient):
                 + (target[2] - previous[2]) ** 2
             ) ** 0.5
             self._pace_due = max(self._pace_due or now, now) + pace_gap_s(
-                distancia, speed, self.acc_mm_s2
+                distancia, self._mm_s(speed), self._acc()
             )
             espera = self._pace_due - now - self.pace_lead_s
             if espera > 0:
@@ -1350,6 +1792,7 @@ class MG400Client(RobotClient):
         link = self._link
         self._link = None
         self._ready = False
+        self._coords_set = False
         # Sin socket, lo preparado ya no vale: al reconectar se hace completo.
         self._prepared_rate = None
         # El feedback también muere con el socket; al reabrir se arranca otro.
@@ -1550,7 +1993,7 @@ class MG400Client(RobotClient):
         except Exception:
             return ""
 
-    async def _dashboard(self, command: str) -> None:
+    async def _dashboard(self, command: str, *, required: bool = True) -> bool:
         from app.robot.mg400 import MG400Error
 
         self.commands.append(command)
@@ -1559,12 +2002,17 @@ class MG400Client(RobotClient):
                 reply = await asyncio.to_thread(self._link.dashboard, command)  # type: ignore[attr-defined]
         except Exception as exc:  # noqa: BLE001
             logger.warning("%s no se pudo enviar (%s)", command, exc)
-            self._drop()
-            raise
+            if required:
+                self._drop()
+                raise
+            return False
         logger.info("%s -> %s", command, getattr(reply, "code", "?"))
         if not getattr(reply, "ok", False):
-            self._drop()
-            raise MG400Error(f"{command} devolvio {getattr(reply, 'code', '?')}")
+            if required:
+                self._drop()
+                raise MG400Error(f"{command} devolvio {getattr(reply, 'code', '?')}")
+            return False
+        return True
 
     async def _sync(self) -> None:
         self.commands.append("Sync()")

@@ -58,8 +58,9 @@ def test_la_z_sigue_la_mesa_si_no_esta_pareja():
         Corner(320.0, -105.0, -63.0, 0.0),
         Corner(172.0, 105.0, -66.0, 0.0),
     )
-    assert frame.to_robot(105, 0)[2] == pytest.approx(-64.0)
-    assert frame.named("br")[2] == pytest.approx(-64.0)
+    # A mitad del borde de arriba la mesa queda entre las dos alturas enseñadas.
+    assert frame.to_robot(frame.width / 2, 0)[2] == pytest.approx(-64.0, abs=0.05)
+    assert frame.named("br")[2] == pytest.approx(-64.0, abs=0.05)
 
 
 def test_la_r_se_interpola_entre_esquinas():
@@ -125,6 +126,48 @@ def test_una_hoja_pegada_a_la_columna_avisa():
     errores, avisos = reach_report(frame)
     assert not errores
     assert any("columna" in aviso for aviso in avisos)
+
+
+def _esquinas_a_dos_grados():
+    """210 × 148 con la esquina inferior 2° abierta. El paralelogramo estira la otra punta."""
+    import math
+
+    tl = Corner(320.0, 105.0, -65.0, 0.0)
+    tr = Corner(320.0, -105.0, -65.0, 0.0)
+    radians = math.radians(92.0)
+    bl = Corner(320.0 - 148.0 * math.sin(radians), 105.0 - 148.0 * math.cos(radians), -65.0, 0.0)
+    return tl, tr, bl
+
+
+def test_dos_grados_se_enderezan_en_un_rectangulo():
+    tl, tr, bl = _esquinas_a_dos_grados()
+    frame = Frame.from_corners(tl, tr, bl)
+    assert frame.straighten_deg == pytest.approx(2.0, abs=0.05)
+    assert frame.corner_angle_deg == pytest.approx(90.0, abs=0.05)
+    assert frame.manual is False
+    ux, uy, uz = frame.tr.x - frame.tl.x, frame.tr.y - frame.tl.y, frame.tr.z - frame.tl.z
+    vx, vy, vz = frame.bl.x - frame.tl.x, frame.bl.y - frame.tl.y, frame.bl.z - frame.tl.z
+    assert ux * vx + uy * vy + uz * vz == pytest.approx(0.0, abs=0.05)
+    # El error se reparte: ninguna punta se queda con los ~7 mm del paralelogramo.
+    assert frame.shift_mm < 5.0
+    assert frame.residuals_mm[3] > 1.0
+    datos = summary(frame)
+    assert datos["straighten_deg"] == pytest.approx(2.0, abs=0.05)
+    assert any("escuadra" in aviso for aviso in datos["warnings"])
+
+
+def test_la_esquina_escrita_a_mano_se_respeta():
+    tl, tr, bl = _esquinas_a_dos_grados()
+    br = Corner(170.0, -100.0, -65.0, 0.0)
+    frame = Frame.from_corners(tl, tr, bl, br)
+    assert frame.manual is True
+    assert frame.named("br")[:3] == pytest.approx((170.0, -100.0, -65.0))
+    assert frame.named("tl")[:2] == pytest.approx((tl.x, tl.y))
+    assert frame.named("tr")[:2] == pytest.approx((tr.x, tr.y))
+    assert frame.named("bl")[:2] == pytest.approx((bl.x, bl.y))
+    otra = Frame.from_dict({"tl": tl.as_dict(), "tr": tr.as_dict(), "bl": bl.as_dict(), "br": br.as_dict()})
+    assert otra.manual is True
+    assert otra.as_dict()["br"]["x"] == pytest.approx(170.0)
 
 
 def test_el_resumen_da_la_caja_del_retrato_dentro_de_la_hoja():

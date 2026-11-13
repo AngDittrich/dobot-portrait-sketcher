@@ -5,6 +5,7 @@ import {
   adminClearJobs,
   adminCommand,
   adminGoto,
+  adminPose,
   adminTestDraw,
   cancelActiveJob,
   saveAdminBooth,
@@ -15,6 +16,7 @@ import type {
   Calibration,
   CornerPose,
   Corners,
+  RobotPose,
   SpotId,
 } from '../lib/api'
 
@@ -124,28 +126,30 @@ export function useAdminActions(token: string, options: AdminActionsOptions) {
     [token, onNotice, fail],
   )
 
-  /** Pone J4 en -50 antes de enseñar una esquina (Configuración). */
-  const homeJ4 = useCallback(async (): Promise<void> => {
-    try {
-      const result = await adminCommand(token, { action: 'j4home' })
-      onNotice(result.value || '')
-    } catch (error) {
-      fail(error, 'no se pudo poner J4 en -50')
-      throw error
-    }
-  }, [token, onNotice, fail])
+  /** Lleva la muñeca de toda la hoja al ángulo pedido, o al guardado si no viene. */
+  const homeJ4 = useCallback(
+    async (j4?: number): Promise<void> => {
+      try {
+        const result = await adminCommand(token, j4 === undefined ? { action: 'j4home' } : { action: 'j4home', j4 })
+        onNotice(result.value || '')
+      } catch (error) {
+        fail(error, 'no se pudo poner J4')
+        throw error
+      }
+    },
+    [token, onNotice, fail],
+  )
 
   /** Lleva el brazo con el lápiz arriba a una esquina o al centro. */
   const go = useCallback(
-    async (target: SpotId, corners: Partial<Corners>, liftMm: number): Promise<void> => {
+    async (target: SpotId, corners: Partial<Corners>, liftMm: number, j4?: number): Promise<void> => {
       try {
         if (complete(corners)) {
-          await adminGoto(token, { corner: target, corners }, liftMm)
+          await adminGoto(token, { corner: target, corners }, liftMm, j4)
         } else {
-          const point: CornerPose | undefined =
-            target === 'tl' || target === 'tr' || target === 'bl' ? corners[target] : undefined
-          if (!point) throw new Error('enseña esa esquina primero')
-          await adminGoto(token, { point }, liftMm)
+          const point: CornerPose | undefined = target === 'center' ? undefined : corners[target]
+          if (!point) throw new Error('escribe esa esquina primero')
+          await adminGoto(token, { point }, liftMm, j4)
         }
         onNotice('')
       } catch (error) {
@@ -171,15 +175,16 @@ export function useAdminActions(token: string, options: AdminActionsOptions) {
 
   /** Recorre el marco de una hoja estándar, centrado en las esquinas enseñadas. */
   const markSheet = useCallback(
-    async (sheet: string, corners: Partial<Corners> | undefined, liftMm: number): Promise<void> => {
+    async (sheet: string, corners: Partial<Corners> | undefined, liftMm: number, j4?: number): Promise<void> => {
       try {
         const area = await adminArea(token, {
           sheet,
           corners: corners && complete(corners) ? corners : undefined,
           lift_mm: liftMm,
+          j4,
         })
         onNotice(
-          `Marco de ${area.label}: ${Math.round(area.width_mm)} × ${Math.round(area.height_mm)} mm, con el lápiz arriba.`,
+          `Marco de ${area.label}: ${Math.round(area.width_mm)} × ${Math.round(area.height_mm)} mm, centrado en las esquinas, con el lápiz arriba.`,
         )
       } catch (error) {
         fail(error, 'no se pudo marcar el marco')
@@ -191,14 +196,15 @@ export function useAdminActions(token: string, options: AdminActionsOptions) {
 
   /** Recorre las cuatro esquinas de la hoja enseñada, con el lápiz arriba. */
   const tracePerimeter = useCallback(
-    async (corners: Partial<Corners> | undefined, liftMm: number): Promise<void> => {
+    async (corners: Partial<Corners> | undefined, liftMm: number, j4?: number): Promise<void> => {
       try {
         const area = await adminArea(token, {
           corners: corners && complete(corners) ? corners : undefined,
           lift_mm: liftMm,
+          j4,
         })
         onNotice(
-          `Perímetro recorrido: ${Math.round(area.width_mm)} × ${Math.round(area.height_mm)} mm, con el lápiz arriba.`,
+          `Perímetro de las esquinas de esta pantalla: ${Math.round(area.width_mm)} × ${Math.round(area.height_mm)} mm, con el lápiz arriba.`,
         )
       } catch (error) {
         fail(error, 'no se pudo recorrer el perímetro')
@@ -214,12 +220,14 @@ export function useAdminActions(token: string, options: AdminActionsOptions) {
       corners: Partial<Corners> | undefined,
       liftMm: number,
       marginMm: number,
+      j4?: number,
     ): Promise<void> => {
       try {
         await adminTestDraw(token, {
           corners: corners && complete(corners) ? corners : undefined,
           lift_mm: liftMm,
           margin_mm: marginMm,
+          j4,
         })
         onNotice('Dibujando SYSCOM en el centro de la hoja.')
       } catch (error) {
@@ -257,22 +265,29 @@ export function useAdminActions(token: string, options: AdminActionsOptions) {
     [token, onExpired],
   )
 
-  /** Enseña una esquina con la pose en vivo. Devuelve la pose guardada. */
+  /** Pose fresca, ya en el usuario y la herramienta de la cabina. */
+  const readPose = useCallback(async (): Promise<RobotPose> => {
+    try {
+      return await adminPose(token)
+    } catch (error) {
+      fail(error, 'no se pudo leer la pose')
+      throw error
+    }
+  }, [token, fail])
+
+  /** Enseña una esquina con una pose recién leída, no con el sondeo. */
   const teachCorner = useCallback(
-    async (
-      live: number[],
-      label: string,
-    ): Promise<CornerPose> => {
-      if (live.length < 4) throw new Error('todavía no hay pose del robot')
-      const pose: CornerPose = { x: live[0], y: live[1], z: live[2], r: live[3] }
-      onNotice(`Esquina ${label} guardada. Falta Guardar cabina.`)
+    async (label: string): Promise<RobotPose> => {
+      const pose = await readPose()
+      onNotice(`Esquina ${label} tomada. Falta Guardar cabina.`)
       return pose
     },
-    [onNotice],
+    [readPose, onNotice],
   )
 
   return {
     send,
+    note: onNotice,
     clearLogs,
     cancelDraw,
     readInputs,
@@ -284,6 +299,7 @@ export function useAdminActions(token: string, options: AdminActionsOptions) {
     tracePerimeter,
     drawTest,
     saveBooth,
+    readPose,
     teachCorner,
     calibrate,
   }

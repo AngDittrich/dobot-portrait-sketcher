@@ -501,12 +501,15 @@ async def create_job(payload: JobRequest) -> dict:
             job.eta_seconds = 0.0
             activity_totals["done"] += 1
             elapsed = time.monotonic() - started
-            motion = getattr(robot, "motion_stats", {})
+            motion = dict(getattr(robot, "motion_stats", {}))
+            pose_reads = int(motion.get("pose_reads", 0))
+            pose_avg_ms = 1000 * float(motion.get("pose_s", 0.0)) / max(1, pose_reads)
             robot_log.info(
                 (
                     "%s: terminado en %.1f s; %s ordenes, %s subidas, %.0f mm dibujados, "
                     "estimado %.1f s; tinta %.1f s, pluma arriba %.1f s, cola %.1f s, "
-                    "%s ordenes saltadas"
+                    "%s ordenes saltadas; %d pausas de mas de 0.5 s (%.1f s), "
+                    "%d plazos agotados; %d lecturas de pose, media %.0f ms, maxima %.0f ms"
                 ),
                 job.id,
                 elapsed,
@@ -518,7 +521,28 @@ async def create_job(payload: JobRequest) -> dict:
                 float(motion.get("air_s", 0.0)),
                 float(motion.get("queue_s", 0.0)),
                 int(motion.get("skipped_orders", 0)),
+                int(motion.get("long_waits", 0)),
+                float(motion.get("long_wait_s", 0.0)),
+                int(motion.get("timeouts", 0)),
+                pose_reads,
+                pose_avg_ms,
+                1000 * float(motion.get("pose_max_s", 0.0)),
             )
+            try:
+                archive_ops.record_job(
+                    sketch.id,
+                    {
+                        "id": job.id,
+                        "seconds": round(elapsed, 1),
+                        "estimated_seconds": round(estimated_seconds, 1),
+                        "speed_factor": getattr(robot, "speed_factor", None),
+                        "global_speed": getattr(robot, "global_speed", None),
+                        "pipeline": getattr(robot, "pipeline", None),
+                        "motion": motion,
+                    },
+                )
+            except Exception:  # noqa: BLE001 - el archivo no detiene la cabina
+                robot_log.warning("%s: no se guardo el registro en el archivo", job.id, exc_info=True)
         except DrawCancelled:
             await _mark_cancelled(job)
         except Exception as exc:  # noqa: BLE001
@@ -582,6 +606,7 @@ class AdminCommand(BaseModel):
     z: float | None = None
     r: float | None = None
     speed: int | None = None
+    j4: float | None = None
 
 
 def _admin_pin() -> str:
@@ -615,6 +640,30 @@ def admin_unlock(body: PinRequest) -> dict:
     return {"token": issue_token()}
 
 
+_last_live: dict = {}
+
+
+def _feedback_fields(feedback: dict) -> dict:
+    """Modo, pose y bits que ya vienen en el paquete del puerto 30004."""
+    return {
+        "connected": True,
+        "source": "feedback",
+        "mode": int(feedback["mode"]),
+        "mode_label": mode_label(int(feedback["mode"])),
+        "pose": [float(value) for value in feedback["pose"]][:4],
+        "angles": [float(value) for value in feedback["angles"]][:4],
+        "di_bits": int(feedback["di_bits"]),
+        "do_bits": int(feedback["do_bits"]),
+    }
+
+
+def _remember_live(snapshot: dict) -> None:
+    """Lo último bueno, para no preguntar el dashboard mientras se dibuja."""
+    kept = ("pose", "angles", "alarms", "alarm_text", "di_bits", "do_bits")
+    _last_live.clear()
+    _last_live.update({key: snapshot[key] for key in kept if key in snapshot})
+
+
 @app.get("/api/admin/status")
 async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict:
     _require_admin(x_admin_token)
@@ -638,21 +687,30 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
             feedback = get_feedback()
         except Exception:  # noqa: BLE001 - sin feedback se sondea como antes
             feedback = None
+    if snapshot["busy"]:
+        # El dashboard no se toca mientras se dibuja: un GetErrorID en cada
+        # sondeo competía con la espera de llegada y frenaba el trazo.
+        if feedback is not None:
+            snapshot.update(_feedback_fields(feedback))
+        else:
+            snapshot.update(_last_live)
+            pose = getattr(robot, "last_pose", None)
+            snapshot.update(
+                {
+                    "connected": True,
+                    "mode": 7,
+                    "mode_label": mode_label(7),
+                    "pose": [round(value, 2) for value in pose] if pose else snapshot.get("pose", []),
+                }
+            )
+        if "alarms" in _last_live:
+            snapshot["alarms"] = _last_live["alarms"]
+            snapshot["alarm_text"] = _last_live.get("alarm_text", "")
+        return snapshot
     if feedback is not None:
         # Paquete del 30004 fresco (cada 8 ms): modo, pose y articulaciones
         # sin mandar nada. Solo faltan las alarmas, que no vienen en él.
-        snapshot.update(
-            {
-                "connected": True,
-                "source": "feedback",
-                "mode": int(feedback["mode"]),
-                "mode_label": mode_label(int(feedback["mode"])),
-                "pose": [float(value) for value in feedback["pose"]][:4],
-                "angles": [float(value) for value in feedback["angles"]][:4],
-                "di_bits": int(feedback["di_bits"]),
-                "do_bits": int(feedback["do_bits"]),
-            }
-        )
+        snapshot.update(_feedback_fields(feedback))
         try:
             _, error_value = await robot.ask("GetErrorID()")  # type: ignore[attr-defined]
         except Exception as exc:  # noqa: BLE001
@@ -664,6 +722,7 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
                 "alarm_text": describe_alarms(error_value),
             }
         )
+        _remember_live(snapshot)
         return snapshot
     try:
         _, mode_value = await robot.ask("RobotMode()")  # type: ignore[attr-defined]
@@ -687,6 +746,7 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
             "alarm_text": describe_alarms(error_value),
         }
     )
+    _remember_live(snapshot)
     return snapshot
 
 
@@ -729,12 +789,46 @@ async def admin_command(
         if busy.active():
             raise HTTPException(status_code=409, detail="el robot está dibujando")
         try:
+            if body.j4 is not None:
+                robot.set_j4(float(body.j4))  # type: ignore[attr-defined]
+            clear = getattr(robot, "clear_pad_j4", None)
+            if callable(clear):
+                clear()
             await robot.prepare_motion(None)  # type: ignore[attr-defined]
             corrected = await robot.ensure_j4(lift=False)  # type: ignore[attr-defined]
+        except HTTPException:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-        value = "J4 devuelta a -50" if corrected else "J4 ya estaba en -50"
+        angle = float(getattr(robot, "j4_fixed", -50.0))
+        value = f"J4 en {angle:.1f}" if corrected else f"J4 ya estaba en {angle:.1f}"
         return {"command": "j4home", "code": 0, "value": value}
+    if body.action == "pad":
+        if busy.active():
+            raise HTTPException(status_code=409, detail="el robot está dibujando")
+        try:
+            command = await robot.pad_nudge(  # type: ignore[attr-defined]
+                float(body.x or 0),
+                float(body.y or 0),
+                float(body.z or 0),
+                float(body.j4 or 0),
+                int(body.speed or 20),
+                mm=body.mm,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"command": command or "", "code": 0, "value": ""}
+    if body.action == "padstop":
+        # Parar el control no debe cortar un dibujo ni devolver la muñeca a -50.
+        if busy.active():
+            return {"command": "Stop()", "code": 0, "value": "ocupado"}
+        try:
+            code, value = await robot.pad_stop()  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        if code != 0:
+            raise HTTPException(status_code=502, detail=f"Stop() devolvio {code} {value}".strip())
+        return {"command": "Stop()", "code": code, "value": value}
     try:
         payload = body.model_dump() if hasattr(body, "model_dump") else body.dict()
         if body.action in {"movl", "movj", "jump"} and body.x is not None and body.y is not None:
@@ -799,6 +893,10 @@ async def admin_command(
         ):
             # El jog cartesiano y el arrastre a mano giran J4. Al soltar se
             # devuelve a su valor en el sitio, antes de guardar una esquina.
+            # El ángulo que hubiera dejado el control ya no vale.
+            clear = getattr(robot, "clear_pad_j4", None)
+            if callable(clear):
+                clear()
             await asyncio.sleep(0.3)
             try:
                 await robot.ensure_j4(lift=False)  # type: ignore[attr-defined]
@@ -817,6 +915,19 @@ def _calibration_of(frame: Frame | None, margin_mm: float | None) -> dict | None
     if frame is None:
         return None
     return frame_ops.summary(frame, frame_ops.DEFAULT_MARGIN_MM if margin_mm is None else float(margin_mm))
+
+
+def _apply_j4(body: dict) -> None:
+    """La muñeca de la calibración, si el formulario la manda. Si no, se queda la guardada."""
+    if body.get("j4") is None:
+        return
+    setter = getattr(robot, "set_j4", None)
+    if not callable(setter):
+        return
+    try:
+        setter(float(body["j4"]))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail="J4 tiene que ser un número") from exc
 
 
 def _frame_from_body(body: dict) -> Frame | None:
@@ -847,6 +958,18 @@ def admin_calibration(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@app.post("/api/admin/pose")
+async def admin_pose(x_admin_token: str | None = Header(default=None)) -> dict:
+    """Pose fresca en el usuario y la herramienta de la cabina, para tomar una esquina."""
+    _require_admin(x_admin_token)
+    if robot.name != "mg400":
+        raise HTTPException(status_code=409, detail="el backend está en simulador")
+    try:
+        return await robot.aligned_pose()  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @app.post("/api/admin/goto")
 async def admin_goto(
     body: dict = Body(...),
@@ -858,6 +981,7 @@ async def admin_goto(
         raise HTTPException(status_code=409, detail="el backend está en simulador")
     if busy.active():
         raise HTTPException(status_code=409, detail="el robot está dibujando")
+    _apply_j4(body)
     try:
         lift = float(body.get("lift_mm", getattr(robot, "lift_mm", frame_ops.DEFAULT_LIFT_MM)))
         speed = body.get("speed")
@@ -903,6 +1027,7 @@ async def admin_area(
         raise HTTPException(status_code=409, detail="el backend está en simulador")
     if busy.active():
         raise HTTPException(status_code=409, detail="el robot está dibujando")
+    _apply_j4(body)
     frame = _frame_from_body(body)
     if frame is None:
         raise HTTPException(status_code=409, detail="primero enseña y guarda las tres esquinas")
@@ -951,6 +1076,7 @@ async def admin_test_draw(
         raise HTTPException(status_code=409, detail="el backend está en simulador")
     if busy.active():
         raise HTTPException(status_code=409, detail="el robot está dibujando")
+    _apply_j4(body)
     frame = _frame_from_body(body)
     if frame is None:
         raise HTTPException(status_code=409, detail="primero enseña y guarda las tres esquinas")

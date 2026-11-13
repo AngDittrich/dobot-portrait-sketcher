@@ -145,7 +145,11 @@ export interface CornerPose {
 
 export type CornerId = 'tl' | 'tr' | 'bl'
 export type SpotId = CornerId | 'br' | 'center'
-export type Corners = Record<CornerId, CornerPose>
+export type Corners = Record<CornerId, CornerPose> & { br?: CornerPose }
+
+export interface RobotPose extends CornerPose {
+  j4: number
+}
 
 /** Lo que el servidor calcula de unas esquinas: medida, retrato y avisos. */
 export interface Calibration {
@@ -156,10 +160,17 @@ export interface Calibration {
   paper: { id: string; label: string; diff_mm: number; matches: boolean } | null
   draw_width_mm: number
   draw_height_mm: number
-  /** [x, y, z, r] de las esquinas y el centro. */
+  /** [x, y, z, r] de las esquinas y el centro. Son las que recorre el brazo. */
   points: Record<SpotId, number[]>
   /** Cuatro esquinas [x, y] de donde cae el retrato. */
   draw_box: number[][]
+  /** Grados que se cerraron para dejar la hoja a escuadra. */
+  straighten_deg: number
+  /** El mayor corrimiento, en mm, entre lo tomado y el rectángulo. */
+  shift_mm: number
+  /** La inferior derecha se escribió a mano y el perímetro pasa por las cuatro. */
+  manual_br: boolean
+  residuals_mm: Record<'tl' | 'tr' | 'bl' | 'br', number>
   errors: string[]
   warnings: string[]
 }
@@ -181,6 +192,8 @@ export interface AdminCommand {
   z?: number
   r?: number
   speed?: number
+  /** Palanca derecha del control, de -1 a 1. Gira J4. */
+  j4?: number
 }
 
 function adminHeaders(token: string): HeadersInit {
@@ -212,6 +225,8 @@ export interface BoothSettings {
   lift_mm: number
   margin_mm: number
   sheet: string
+  /** Muñeca de toda la hoja. El dibujo y el perímetro la conservan. */
+  j4?: number
 }
 
 export function saveAdminBooth(token: string, booth: BoothSettings): Promise<BoothSettings> {
@@ -225,7 +240,7 @@ export function saveAdminBooth(token: string, booth: BoothSettings): Promise<Boo
 /** Escribe SYSCOM en el centro de la hoja enseñada. */
 export function adminTestDraw(
   token: string,
-  body?: { corners?: Corners; lift_mm?: number; margin_mm?: number },
+  body?: { corners?: Corners; lift_mm?: number; margin_mm?: number; j4?: number },
 ): Promise<{ job_id: string; text: string }> {
   return request('/api/admin/test-draw', {
     method: 'POST',
@@ -237,7 +252,7 @@ export function adminTestDraw(
 /** Recorre un rectángulo con el lápiz arriba. Sin cuerpo, el de las esquinas; con `sheet`, el de esa hoja estándar. */
 export function adminArea(
   token: string,
-  body?: { sheet?: string; corners?: Corners; lift_mm?: number },
+  body?: { sheet?: string; corners?: Corners; lift_mm?: number; j4?: number },
 ): Promise<{ width_mm: number; height_mm: number; label: string }> {
   return request('/api/admin/area', {
     method: 'POST',
@@ -267,11 +282,20 @@ export function adminGoto(
   token: string,
   target: { corner: SpotId; corners: Corners } | { point: CornerPose },
   liftMm: number,
+  j4?: number,
 ): Promise<{ x: number; y: number; z: number; r: number }> {
   return request('/api/admin/goto', {
     method: 'POST',
     headers: adminHeaders(token),
-    body: JSON.stringify({ ...target, lift_mm: liftMm }),
+    body: JSON.stringify({ ...target, lift_mm: liftMm, j4 }),
+  })
+}
+
+/** Pose actual, ya en el usuario y la herramienta de la cabina. */
+export function adminPose(token: string): Promise<RobotPose> {
+  return request<RobotPose>('/api/admin/pose', {
+    method: 'POST',
+    headers: adminHeaders(token),
   })
 }
 

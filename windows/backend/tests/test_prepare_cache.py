@@ -69,4 +69,5 @@ def test_movimiento_usa_otro_candado_que_el_dashboard():
     code, _ = asyncio.run(cliente.ask("MoveJog(X+)", move=True))
     assert code == 0
     assert enlace.moves == ["MoveJog(X+)"]
-    assert enlace.dashboards == []
+    # El jog va por el puerto de movimiento. User y Tool salen una vez por el dashboard.
+    assert enlace.dashboards == ["User(0)", "Tool(0)"]
