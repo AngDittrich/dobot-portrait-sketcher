@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
-import { adminCommand } from '../../lib/api'
 import type { AdminCommand, AdminStatus } from '../../lib/api'
+import type { AdminActions } from '../../hooks/useAdminActions'
 import { useJog } from '../../hooks/useAdminStatus'
 import { JoyStick } from './JoyStick'
 import { JOINTS, PLANE } from './stickSpaces'
@@ -11,24 +11,34 @@ const STEPS = [0.1, 1, 5, 10]
 export function ControlSection({
   status,
   token,
-  send,
+  actions,
   onNotice,
 }: {
   status: AdminStatus | null
   token: string
-  send: (command: AdminCommand) => Promise<void>
+  actions: AdminActions
   onNotice: (message: string) => void
 }) {
   const [space, setSpace] = useState<'plano' | 'joints'>('plano')
   const [step, setStep] = useState(1)
   const [speed, setSpeed] = useState(50)
   const [collision, setCollision] = useState(2)
+  const [moveKind, setMoveKind] = useState<'movl' | 'movj' | 'jump'>('movl')
   const [pose, setPose] = useState({ x: '', y: '', z: '', r: '' })
+  const [doIndex, setDoIndex] = useState(1)
+  const [speedl, setSpeedl] = useState(50)
+  const [accl, setAccl] = useState(50)
+  const [weight, setWeight] = useState('0')
+  const [inertia, setInertia] = useState('0')
   const speedRef = useRef(50)
   const collisionRef = useRef(2)
+  const speedlRef = useRef(50)
+  const acclRef = useRef(50)
   const busy = Boolean(status?.busy)
+  // Bit i-1 de do_bits = DOi. Las ToolDO no tienen bit conocido: solo botones.
+  const doBits = status?.do_bits ?? null
 
-  const { hold, stickEpoch } = useJog({
+  const { hold, stickEpoch, moving } = useJog({
     token,
     getSpeed: () => speedRef.current,
     onError: onNotice,
@@ -38,16 +48,7 @@ export function ControlSection({
   const live = status?.pose ?? []
 
   async function readInputs() {
-    const bits: string[] = []
-    for (const index of [1, 2, 3, 4]) {
-      try {
-        const result = await adminCommand(token, { action: 'di', index })
-        bits.push(`DI${index} ${result.value || 'sin valor'}`)
-      } catch {
-        bits.push(`DI${index} sin respuesta`)
-      }
-    }
-    onNotice(bits.join(' · '))
+    await actions.readInputs().catch(() => undefined)
   }
 
   const poseNumbers = {
@@ -58,7 +59,7 @@ export function ControlSection({
   }
   const poseReady = Object.values(poseNumbers).every((value) => Number.isFinite(value))
 
-  const groups: { title: string; actions: { label: string; command: AdminCommand }[] }[] = [
+  const groups: { title: string; disabled?: boolean; actions: { label: string; command: AdminCommand }[] }[] = [
     {
       title: 'Energía',
       actions: [
@@ -89,6 +90,15 @@ export function ControlSection({
       actions: [
         { label: 'Limpiar alarma', command: { action: 'clear' } },
         { label: 'Reiniciar', command: { action: 'reset' } },
+      ],
+    },
+    {
+      title: 'Pruebas',
+      // El backend las bloquea dibujando: el botón avisa antes de intentarlo.
+      disabled: busy,
+      actions: [
+        { label: 'Cuadrado 30 mm', command: { action: 'square' } },
+        { label: 'Arco 40 mm', command: { action: 'arc' } },
       ],
     },
   ]
@@ -135,6 +145,10 @@ export function ControlSection({
         <p className="admin-card-note">
           Mantén el joystick: el brazo sigue hasta que lo sueltas.
           {busy ? ' Está dibujando; el joystick espera a que termine.' : ''}
+          {!busy && moving ? ' Moviendo…' : ''}
+          {status?.source === 'feedback'
+            ? ' Estado en vivo (feedback).'
+            : ' Estado por sondeo.'}
         </p>
 
         <div className="admin-nudge">
@@ -161,7 +175,7 @@ export function ControlSection({
                   type="button"
                   className="admin-press"
                   disabled={busy}
-                  onClick={() => void send({ action: 'step', axis, mm: step, speed })}
+                  onClick={() => void actions.send({ action: 'step', axis, mm: step, speed })}
                 >
                   {axis}
                 </button>
@@ -184,7 +198,8 @@ export function ControlSection({
                       key={label}
                       type="button"
                       className="admin-press"
-                      onClick={() => void send(command)}
+                      disabled={group.disabled}
+                      onClick={() => void actions.send(command)}
                     >
                       {label}
                     </button>
@@ -197,6 +212,12 @@ export function ControlSection({
               <div>
                 <button type="button" className="admin-press" onClick={() => void readInputs()}>
                   Leer DI1–DI4
+                </button>
+                <button type="button" className="admin-press" onClick={() => void actions.readToolInput(1)}>
+                  Leer ToolDI1
+                </button>
+                <button type="button" className="admin-press" onClick={() => void actions.readToolInput(2)}>
+                  Leer ToolDI2
                 </button>
               </div>
             </div>
@@ -219,8 +240,42 @@ export function ControlSection({
                   speedRef.current = value
                   setSpeed(value)
                 }}
-                onPointerUp={() => void send({ action: 'speed', value: speedRef.current })}
-                onBlur={() => void send({ action: 'speed', value: speedRef.current })}
+                onPointerUp={() => void actions.send({ action: 'speed', value: speedRef.current })}
+                onBlur={() => void actions.send({ action: 'speed', value: speedRef.current })}
+              />
+            </label>
+            <label>
+              Vel. lineal (SpeedL)
+              <strong>{speedl}%</strong>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={speedl}
+                onChange={(event) => {
+                  const value = Number(event.target.value)
+                  speedlRef.current = value
+                  setSpeedl(value)
+                }}
+                onPointerUp={() => void actions.send({ action: 'speedl', value: speedlRef.current })}
+                onBlur={() => void actions.send({ action: 'speedl', value: speedlRef.current })}
+              />
+            </label>
+            <label>
+              Acel. lineal (AccL)
+              <strong>{accl}%</strong>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={accl}
+                onChange={(event) => {
+                  const value = Number(event.target.value)
+                  acclRef.current = value
+                  setAccl(value)
+                }}
+                onPointerUp={() => void actions.send({ action: 'accl', value: acclRef.current })}
+                onBlur={() => void actions.send({ action: 'accl', value: acclRef.current })}
               />
             </label>
             <label>
@@ -237,8 +292,8 @@ export function ControlSection({
                   collisionRef.current = value
                   setCollision(value)
                 }}
-                onPointerUp={() => void send({ action: 'collision', value: collisionRef.current })}
-                onBlur={() => void send({ action: 'collision', value: collisionRef.current })}
+                onPointerUp={() => void actions.send({ action: 'collision', value: collisionRef.current })}
+                onBlur={() => void actions.send({ action: 'collision', value: collisionRef.current })}
               />
             </label>
           </div>
@@ -250,9 +305,27 @@ export function ControlSection({
             className="admin-pose"
             onSubmit={(event) => {
               event.preventDefault()
-              if (poseReady) void send({ action: 'movl', ...poseNumbers, speed })
+              if (poseReady) void actions.send({ action: moveKind, ...poseNumbers, speed })
             }}
           >
+            <div className="admin-segment" role="group" aria-label="Tipo de movimiento">
+              {(
+                [
+                  ['movl', 'MovL'],
+                  ['movj', 'Ir rápido (MovJ)'],
+                  ['jump', 'Saltar (Jump)'],
+                ] as const
+              ).map(([kind, label]) => (
+                <button
+                  key={kind}
+                  type="button"
+                  className={moveKind === kind ? 'is-on' : ''}
+                  onClick={() => setMoveKind(kind)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             {(['x', 'y', 'z', 'r'] as const).map((key) => (
               <label key={key}>
                 {key.toUpperCase()}
@@ -268,12 +341,12 @@ export function ControlSection({
                 type="button"
                 className="admin-press"
                 disabled={!poseReady}
-                onClick={() => poseReady && void send({ action: 'inverse', ...poseNumbers })}
+                onClick={() => poseReady && void actions.send({ action: 'inverse', ...poseNumbers })}
               >
                 ¿Tiene solución?
               </button>
               <button type="submit" className="admin-press" disabled={!poseReady || busy}>
-                Mover aquí
+                Ir aquí
               </button>
               <button
                 type="button"
@@ -289,6 +362,103 @@ export function ControlSection({
                 }
               >
                 Usar pose actual
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section className="admin-card">
+          <h3>Salidas</h3>
+          <div className="admin-pose">
+            <label>
+              DO (1–24)
+              <input
+                inputMode="numeric"
+                value={String(doIndex)}
+                onChange={(event) => {
+                  const value = Math.trunc(Number(event.target.value))
+                  if (Number.isFinite(value)) setDoIndex(Math.min(24, Math.max(1, value)))
+                }}
+              />
+            </label>
+            <div className="admin-pose-actions">
+              <button
+                type="button"
+                className="admin-press"
+                onClick={() => void actions.send({ action: 'do', index: doIndex, status: 1 })}
+              >
+                Encender DO{doIndex}
+              </button>
+              <button
+                type="button"
+                className="admin-press"
+                onClick={() => void actions.send({ action: 'do', index: doIndex, status: 0 })}
+              >
+                Apagar DO{doIndex}
+              </button>
+              <button
+                type="button"
+                className="admin-press"
+                onClick={() => void actions.send({ action: 'tooldo', index: 1, status: 1 })}
+              >
+                ToolDO1 on
+              </button>
+              <button
+                type="button"
+                className="admin-press"
+                onClick={() => void actions.send({ action: 'tooldo', index: 1, status: 0 })}
+              >
+                ToolDO1 off
+              </button>
+              <button
+                type="button"
+                className="admin-press"
+                onClick={() => void actions.send({ action: 'tooldo', index: 2, status: 1 })}
+              >
+                ToolDO2 on
+              </button>
+              <button
+                type="button"
+                className="admin-press"
+                onClick={() => void actions.send({ action: 'tooldo', index: 2, status: 0 })}
+              >
+                ToolDO2 off
+              </button>
+            </div>
+          </div>
+          <p className="admin-card-note">
+            {doBits === null
+              ? 'Sin estado vivo de salidas (acerca el robot o revisa la conexión).'
+              : `DO en vivo: ${[1, 2, 3, 4, 5, 6, 7, 8]
+                  .map((i) => `DO${i} ${((doBits >> (i - 1)) & 1) === 1 ? 'on' : 'off'}`)
+                  .join(' · ')}`}
+          </p>
+        </section>
+
+        <section className="admin-card">
+          <h3>Carga de la herramienta</h3>
+          <form
+            className="admin-pose"
+            onSubmit={(event) => {
+              event.preventDefault()
+              const w = Number(weight)
+              const inertiaValue = Number(inertia)
+              if (Number.isFinite(w) && Number.isFinite(inertiaValue)) {
+                void actions.send({ action: 'payload', weight: w, inertia: inertiaValue })
+              }
+            }}
+          >
+            <label>
+              Peso kg (0–5)
+              <input inputMode="decimal" value={weight} onChange={(event) => setWeight(event.target.value)} />
+            </label>
+            <label>
+              Inercia (0–1)
+              <input inputMode="decimal" value={inertia} onChange={(event) => setInertia(event.target.value)} />
+            </label>
+            <div className="admin-pose-actions">
+              <button type="submit" className="admin-press">
+                Fijar carga
               </button>
             </div>
           </form>

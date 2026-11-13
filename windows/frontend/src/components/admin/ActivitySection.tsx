@@ -30,11 +30,17 @@ export function ActivitySection({
   token,
   onCancel,
   cancelling,
+  onClear,
+  clearing,
+  canClear,
 }: {
   activity: AdminActivity | null
   token: string
   onCancel?: () => void
   cancelling?: boolean
+  onClear?: () => void
+  clearing?: boolean
+  canClear?: boolean
 }) {
   if (!activity) {
     return (
@@ -47,7 +53,20 @@ export function ActivitySection({
   return (
     <div className="admin-section admin-activity">
       <section className="admin-card admin-card--jobs">
-        <h3>Dibujos recientes</h3>
+        <div className="admin-card-head">
+          <h3>Dibujos recientes</h3>
+          {onClear && (
+            <button
+              type="button"
+              className="admin-press"
+              onClick={onClear}
+              disabled={!canClear || clearing}
+              title="Borra los dibujos ya cerrados. El que está en curso se queda."
+            >
+              {clearing ? 'Borrando…' : 'Borrar cerrados'}
+            </button>
+          )}
+        </div>
         {activity.jobs.length === 0 ? (
           <p className="admin-empty">Todavía no hay dibujos en este arranque.</p>
         ) : (

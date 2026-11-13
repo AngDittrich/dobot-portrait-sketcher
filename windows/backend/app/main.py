@@ -574,6 +574,9 @@ class AdminCommand(BaseModel):
     value: int | None = None
     on: bool | None = None
     index: int | None = None
+    status: int | None = None
+    weight: float | None = None
+    inertia: float | None = None
     x: float | None = None
     y: float | None = None
     z: float | None = None
@@ -628,6 +631,40 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
     if robot.name != "mg400":
         snapshot["detail"] = "el backend está en simulador"
         return snapshot
+    get_feedback = getattr(robot, "feedback_status", None)
+    feedback = None
+    if get_feedback is not None:
+        try:
+            feedback = get_feedback()
+        except Exception:  # noqa: BLE001 - sin feedback se sondea como antes
+            feedback = None
+    if feedback is not None:
+        # Paquete del 30004 fresco (cada 8 ms): modo, pose y articulaciones
+        # sin mandar nada. Solo faltan las alarmas, que no vienen en él.
+        snapshot.update(
+            {
+                "connected": True,
+                "source": "feedback",
+                "mode": int(feedback["mode"]),
+                "mode_label": mode_label(int(feedback["mode"])),
+                "pose": [float(value) for value in feedback["pose"]][:4],
+                "angles": [float(value) for value in feedback["angles"]][:4],
+                "di_bits": int(feedback["di_bits"]),
+                "do_bits": int(feedback["do_bits"]),
+            }
+        )
+        try:
+            _, error_value = await robot.ask("GetErrorID()")  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            snapshot["detail"] = str(exc)
+            return snapshot
+        snapshot.update(
+            {
+                "alarms": error_value,
+                "alarm_text": describe_alarms(error_value),
+            }
+        )
+        return snapshot
     try:
         _, mode_value = await robot.ask("RobotMode()")  # type: ignore[attr-defined]
         _, pose_value = await robot.ask("GetPose()")  # type: ignore[attr-defined]
@@ -641,6 +678,7 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
     snapshot.update(
         {
             "connected": True,
+            "source": "sondeo",
             "mode": int(mode) if mode is not None else None,
             "mode_label": mode_label(int(mode)) if mode is not None else "",
             "pose": pose if len(pose) == 4 else [],
@@ -699,7 +737,7 @@ async def admin_command(
         return {"command": "j4home", "code": 0, "value": value}
     try:
         payload = body.model_dump() if hasattr(body, "model_dump") else body.dict()
-        if body.action == "movl" and body.x is not None and body.y is not None:
+        if body.action in {"movl", "movj", "jump"} and body.x is not None and body.y is not None:
             payload["r"] = robot.r_for(float(body.x), float(body.y))  # type: ignore[attr-defined]
         command, is_move, prepare = plan(body.action, payload, busy=busy.active())
         rate = rate_for(body.action, payload) if prepare else None
@@ -720,6 +758,39 @@ async def admin_command(
             else:
                 y += size
             command = robot.movl_command(x, y, z, rate or 20)  # type: ignore[attr-defined]
+        if body.action == "arc":
+            # Arco de prueba de 40 mm en +X desde donde esté la punta: medio
+            # punto a 20 mm y final a 40 mm, a la misma altura.
+            pose = await _live_pose()
+            x, y, z = pose[0], pose[1], pose[2]
+            x1, y1 = x + 20.0, y
+            x2, y2 = x + 40.0, y
+            command = (
+                f"Arc({x1:.3f},{y1:.3f},{z:.3f},{robot.r_for(x1, y1):.3f},"  # type: ignore[attr-defined]
+                f"{x2:.3f},{y2:.3f},{z:.3f},{robot.r_for(x2, y2):.3f})"  # type: ignore[attr-defined]
+            )
+        if body.action == "square":
+            # Cuadrado de 30 mm con cuatro MovL alrededor de la punta.
+            pose = await _live_pose()
+            x, y, z = pose[0], pose[1], pose[2]
+            speed = rate or 20
+            legs = [(x + 30.0, y), (x + 30.0, y + 30.0), (x, y + 30.0), (x, y)]
+            if prepare:
+                await robot.prepare_motion(rate)  # type: ignore[attr-defined]
+            sent = 0
+            for leg_x, leg_y in legs:
+                leg = (
+                    f"MovL({leg_x:.3f},{leg_y:.3f},{z:.3f},"
+                    f"{robot.r_for(leg_x, leg_y):.3f},"  # type: ignore[attr-defined]
+                    f"SpeedL={speed},AccL={speed},CP=1)"
+                )
+                code, value = await robot.ask(leg, move=True)  # type: ignore[attr-defined]
+                if code != 0:
+                    raise HTTPException(
+                        status_code=502, detail=f"{leg} devolvio {code} {value}".strip()
+                    )
+                sent += 1
+            return {"command": "Cuadrado(30mm)", "code": 0, "value": f"{sent}/4 tramos"}
         if prepare:
             await robot.prepare_motion(rate)  # type: ignore[attr-defined]
         code, value = await robot.ask(command, move=is_move)  # type: ignore[attr-defined]
@@ -1020,6 +1091,15 @@ def _numbers(value: str) -> list[float]:
         except ValueError:
             continue
     return numbers
+
+
+async def _live_pose() -> list[float]:
+    """Pose cartesiana en vivo para las pruebas del panel. Falla si no se lee."""
+    _, pose_value = await robot.ask("GetPose()")  # type: ignore[attr-defined]
+    pose = _numbers(pose_value)[:4]
+    if len(pose) < 4:
+        raise HTTPException(status_code=502, detail="no se pudo leer la pose para la prueba")
+    return pose
 
 
 @app.get("/api/jobs/{job_id}")

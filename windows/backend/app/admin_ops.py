@@ -14,7 +14,7 @@ import secrets
 SPEED_MAX = 100
 STEP_MAX = 20.0
 
-MOTION = {"jog", "step", "movl", "drag"}
+MOTION = {"jog", "step", "movl", "movj", "jump", "drag", "arc", "square"}
 
 # Sin R ni J4: la muñeca se queda fija en J4_FIXED (ver app/robot/client.py).
 JOG_AXES = {
@@ -167,12 +167,47 @@ def plan(action: str, payload: dict, *, busy: bool) -> tuple[str, bool, bool]:
             True,
             True,
         )
+    if action == "movj":
+        # Punto a punto: viaja más rápido que el MovL porque no sigue la recta.
+        x, y, z, r = _pose(payload)
+        return (f"MovJ({x:.3f},{y:.3f},{z:.3f},{r:.3f})", True, True)
+    if action == "jump":
+        # Puerta: sube, viaja y baja con los arcos que tenga el controlador.
+        x, y, z, r = _pose(payload)
+        return (f"Jump({x:.3f},{y:.3f},{z:.3f},{r:.3f})", True, True)
+    if action == "do":
+        index = _int(payload.get("index"), 1, 24, "salida")
+        status = _int(payload.get("status"), 0, 1, "estado")
+        return (f"DO({index},{status})", False, False)
+    if action == "tooldo":
+        index = _int(payload.get("index"), 1, 2, "salida del tool")
+        status = _int(payload.get("status"), 0, 1, "estado")
+        return (f"ToolDO({index},{status})", False, False)
+    if action == "tooldi":
+        index = _int(payload.get("index"), 1, 2, "entrada del tool")
+        return (f"ToolDI({index})", False, False)
+    if action == "speedl":
+        return (f"SpeedL({_speed(payload.get('value'))})", False, False)
+    if action == "accl":
+        return (f"AccL({_speed(payload.get('value'))})", False, False)
+    if action == "payload":
+        weight = _float(payload.get("weight"), 0.0, 5.0, "peso")
+        inertia = _float(payload.get("inertia"), 0.0, 1.0, "inercia")
+        return (f"PayLoad({weight:.3f},{inertia:.4f})", False, False)
+    if action == "arc":
+        # Lo arma admin_command con la pose en vivo: medio punto y final.
+        return ("Arc()", True, True)
+    if action == "square":
+        # Lo arma admin_command: cuatro MovL alrededor de la pose en vivo.
+        return ("Cuadrado()", True, True)
     raise AdminOpError("acción desconocida")
 
 
 def rate_for(action: str, payload: dict) -> int | None:
-    """Porcentaje del slider para un jog, un paso o un MovL. None conserva la del dibujo."""
-    if action not in {"jog", "step", "movl"} or payload.get("speed") is None:
+    """Porcentaje del slider para un jog, un paso, un MovL… None conserva la del dibujo."""
+    if action not in {"jog", "step", "movl", "movj", "jump", "arc", "square"}:
+        return None
+    if payload.get("speed") is None:
         return None
     return _speed(payload.get("speed"))
 
@@ -223,4 +258,14 @@ def _int(value: object, low: int, high: int, name: str) -> int:
         raise AdminOpError(f"{name} tiene que ser un entero") from exc
     if number < low or number > high:
         raise AdminOpError(f"{name} va de {low} a {high}")
+    return number
+
+
+def _float(value: object, low: float, high: float, name: str) -> float:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise AdminOpError(f"{name} tiene que ser un número") from exc
+    if number < low or number > high:
+        raise AdminOpError(f"{name} va de {low:g} a {high:g}")
     return number

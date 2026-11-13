@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.pipeline.vectorize import MEASURED_SPEED_MM_S
+from app.robot import feedback as feedback_ops
 from app.robot import frame as frame_ops
 from app.robot import sheet as sheet_ops
 from app.robot.frame import Frame
@@ -365,6 +366,10 @@ class MG400Client(RobotClient):
         self.j4_fixed = J4_FIXED
         # "j1+j4" (documentación Dobot) o "j4" si al conectar R resulta ser J4.
         self.r_model = "j1+j4"
+        # Lector del puerto 30004: pose y modo cada 8 ms sin preguntar. Solo
+        # vive mientras hay socket real; en seco o con enlace de mentira no
+        # hay nada que escuchar.
+        self._feedback: feedback_ops.FeedbackReader | None = None
         # El MG400 acepta un solo cliente. Dos consultas a la vez no pueden abrir dos sockets.
         self._io = asyncio.Lock()
         # El dashboard del MG400 atiende una orden a la vez y contesta por el
@@ -372,6 +377,14 @@ class MG400Client(RobotClient):
         # cruzan y el controlador corta la conexión (WinError 10053 en sendall).
         # Todo lo que hable con el dashboard pasa por este candado.
         self._wire = asyncio.Lock()
+        # El puerto de movimiento (30003) es otro socket: sus órdenes no tienen
+        # por qué esperar al sondeo de estado. Antes pasaban por `_wire` y un
+        # jog podía quedar en cola detrás de los 4 comandos del poll.
+        self._move_wire = asyncio.Lock()
+        # Velocidad con la que ya quedó preparado el enlace (ClearError +
+        # Continue + SpeedFactor). Repetirla en cada jog/paso costaba 4 viajes
+        # TCP por acción; si no cambió nada, se salta.
+        self._prepared_rate: int | None = None
 
     @staticmethod
     def _empty_motion() -> dict[str, float | int]:
@@ -511,10 +524,26 @@ class MG400Client(RobotClient):
             self._link = await asyncio.to_thread(
                 MG400Link, self.host, move_timeout_s=self.move_timeout_s
             )
+            self._start_feedback()
+
+    def _start_feedback(self) -> None:
+        """Escucha el 30004 en segundo plano. Si no hay robot, calla y reintenta solo."""
+        if self._feedback is not None:
+            return
+        self._feedback = feedback_ops.FeedbackReader(self.host)
+        self._feedback.start()
+
+    def feedback_status(self) -> dict | None:
+        """Último paquete del 30004 si está fresco. None: usar el sondeo clásico."""
+        reader = self._feedback
+        if reader is None:
+            return None
+        return reader.snapshot()
 
     async def _abrir(self) -> None:
         await self._open_socket()
         await asyncio.to_thread(self._link.prepare, self.speed_factor)  # type: ignore[attr-defined]
+        self._prepared_rate = int(self.speed_factor)
         await self._dashboard(f"User({int(self.user)})")
         await self._dashboard(f"Tool({int(self.tool)})")
         await self._dashboard(f"CP({_blend(self.cp_draw)})")
@@ -644,6 +673,8 @@ class MG400Client(RobotClient):
     async def cancel(self) -> None:
         """Corta el dibujo: la pausa va por el dashboard, así no se cruza con el MovL."""
         self._cancel = True
+        # La cola cambia de estado: el próximo movimiento manual prepara de nuevo.
+        self._prepared_rate = None
         link = self._link
         dashboard = getattr(link, "dashboard", None)
         if dashboard is None:
@@ -656,6 +687,7 @@ class MG400Client(RobotClient):
 
     async def finish_cancel(self) -> None:
         """Vacía la cola, sale de la pausa y levanta el lápiz donde se quedó."""
+        self._prepared_rate = None
         link = self._link
         if link is not None:
             move = getattr(link, "move", None)
@@ -1318,6 +1350,12 @@ class MG400Client(RobotClient):
         link = self._link
         self._link = None
         self._ready = False
+        # Sin socket, lo preparado ya no vale: al reconectar se hace completo.
+        self._prepared_rate = None
+        # El feedback también muere con el socket; al reabrir se arranca otro.
+        reader, self._feedback = self._feedback, None
+        if reader is not None:
+            reader.stop()
         close = getattr(link, "close", None)
         if close is None:
             return
@@ -1330,18 +1368,31 @@ class MG400Client(RobotClient):
         """Suelta el socket. Si se reutiliza después de un fallo, el siguiente dibujo no obtiene respuesta."""
         self._close_link()
 
+    # Órdenes del dashboard que cambian el estado del robot: después de una,
+    # lo que se había preparado (cola reanudada, velocidad fijada) ya no vale.
+    _RESETS_PREPARE = (
+        "EnableRobot(",
+        "DisableRobot(",
+        "ResetRobot(",
+        "EmergencyStop(",
+        "Stop(",
+        "Pause(",
+    )
+
     async def ask(self, command: str, *, move: bool = False) -> tuple[int, str]:
         """Manda una orden y devuelve el código, sin cerrar el socket si el robot la rechaza.
 
-        Espera su turno en `_wire`: el panel pregunta el estado varias veces por
-        segundo y el dashboard no admite dos preguntas a la vez. `ensure` abre
-        el enlace sin reconfigurar el robot; eso queda para cuando hay que moverlo.
+        El dashboard (29999) sigue pasando por `_wire`: no admite dos preguntas
+        a la vez. El puerto de movimiento (30003) es otro socket y usa
+        `_move_wire`, así un jog ya no espera a que termine el sondeo de estado.
+        `ensure` abre el enlace sin reconfigurar el robot; eso queda para cuando
+        hay que moverlo.
         """
         await self.ensure()
         link = self._link
         method = link.move if move else link.dashboard  # type: ignore[attr-defined]
         try:
-            async with self._wire:
+            async with self._move_wire if move else self._wire:
                 reply = await asyncio.to_thread(method, command)
         except OSError as exc:
             logger.warning("consola: %s se cortó (%s)", command, exc)
@@ -1357,6 +1408,10 @@ class MG400Client(RobotClient):
             raise
         code = int(getattr(reply, "code", -99999))
         logger.info("consola %s -> %s", command, code)
+        if not move and code == 0 and command.startswith(self._RESETS_PREPARE):
+            # Habilitar, deshabilitar, parar, pausar… cambian el estado: el
+            # próximo jog o paso vuelve a preparar completo.
+            self._prepared_rate = None
         return code, str(getattr(reply, "value", ""))
 
     async def prepare_motion(self, percent: int | None = None) -> None:
@@ -1364,10 +1419,17 @@ class MG400Client(RobotClient):
 
         El porcentaje, si llega, es el del joystick. Si no, se queda el del dibujo.
         No se guarda en el cliente: el siguiente retrato vuelve a su propia velocidad.
+
+        Si el enlace ya quedó preparado con esta misma velocidad, no se repite:
+        eran 4 viajes TCP (RobotMode + ClearError + Continue + SpeedFactor) en
+        cada jog y en cada paso, y es lo que hacía sentir lento el panel.
         """
         await self.connect()
         rate = self.speed_factor if percent is None else int(percent)
+        if self._prepared_rate == rate:
+            return
         await asyncio.to_thread(self._link.prepare, rate)  # type: ignore[attr-defined]
+        self._prepared_rate = rate
 
     async def _move(self, command: str) -> None:
         from app.robot.mg400 import MG400Error, QUEUE_FULL_CODE
