@@ -91,7 +91,7 @@ export function ControlSection({
     },
     {
       title: 'Muñeca',
-      actions: [{ label: 'J4 a -50', command: { action: 'j4home' } }],
+      actions: [{ label: `J4 a ${typeof status?.j4_fixed === 'number' ? status.j4_fixed.toFixed(1) : '-50'}`, command: { action: 'j4home' } }],
     },
     {
       title: 'Diagnóstico',
