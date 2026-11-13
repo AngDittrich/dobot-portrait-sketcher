@@ -39,6 +39,7 @@ class Booth:
     lift_mm: float = frame_ops.DEFAULT_LIFT_MM
     margin_mm: float = frame_ops.DEFAULT_MARGIN_MM
     sheet: str = sheet_ops.DEFAULT
+    j4: float = -50.0
 
     @property
     def frame(self) -> Frame | None:
@@ -57,6 +58,7 @@ class Booth:
             "lift_mm": self.lift_mm,
             "margin_mm": self.margin_mm,
             "sheet": self.sheet,
+            "j4": self.j4,
         }
 
 
@@ -114,6 +116,9 @@ def parse_booth(payload: dict) -> Booth:
     hoja = str(payload.get("sheet") or sheet_ops.DEFAULT).strip().lower()
     if not sheet_ops.known(hoja):
         raise BoothError("esa hoja no existe: elige A6, A5, media carta, A4 o carta")
+    j4 = _float(payload.get("j4", -50.0), "J4")
+    if j4 < -170 or j4 > 170:
+        raise BoothError("J4 va de -170 a 170")
     return Booth(
         backend=backend,
         host=host,
@@ -126,6 +131,7 @@ def parse_booth(payload: dict) -> Booth:
         lift_mm=lift,
         margin_mm=margin,
         sheet=hoja,
+        j4=j4,
     )
 
 
@@ -153,6 +159,7 @@ def client_from_booth(payload: dict) -> RobotClient:
         frame=frame,
         lift_mm=booth.lift_mm,
         margin_mm=booth.margin_mm,
+        j4_fixed=booth.j4,
     )
     client.sheet = booth.sheet
     return client
@@ -181,6 +188,7 @@ def booth_from_client(robot: RobotClient) -> dict:
         "lift_mm": float(getattr(robot, "lift_mm", frame_ops.DEFAULT_LIFT_MM)),
         "margin_mm": float(getattr(robot, "margin_mm", frame_ops.DEFAULT_MARGIN_MM)),
         "sheet": getattr(robot, "sheet", sheet_ops.DEFAULT),
+        "j4": float(getattr(robot, "j4_fixed", -50.0)),
     }
 
 
@@ -200,6 +208,7 @@ def _copy_connection(robot: MG400Client, booth: Booth) -> None:
     robot.dry_run = booth.dry_run
     robot.cp_draw = booth.cp_draw
     robot.sheet = booth.sheet
+    robot.set_j4(booth.j4)
 
 
 def _float(value: object, label: str) -> float:

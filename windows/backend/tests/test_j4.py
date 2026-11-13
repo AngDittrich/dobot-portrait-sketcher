@@ -71,6 +71,48 @@ def _j4(command: str) -> float:
     return r - math.degrees(math.atan2(y, x))
 
 
+def test_la_j4_guardada_es_la_que_viaja():
+    cliente = _cliente(Enlace())
+    cliente.set_j4(-47.0)
+    assert cliente.j4_fixed == pytest.approx(-47.0)
+    for x, y in ((340.9, -79.0), (342.3, 51.9)):
+        assert cliente.r_for(x, y) - math.degrees(math.atan2(y, x)) == pytest.approx(-47.0)
+
+
+def test_leer_la_pose_fija_usuario_y_herramienta_antes():
+    enlace = EnlaceConAngulos(angles=[10.0, 20.0, 30.0, -47.0])
+    ordenes: list[str] = []
+
+    def dashboard(command: str) -> Reply:
+        ordenes.append(command)
+        return Reply(code=0, value="")
+
+    enlace.dashboard = dashboard  # type: ignore[method-assign]
+    cliente = _cliente(enlace)
+    cliente.user = 0
+    cliente.tool = 1
+    pose = asyncio.run(cliente.aligned_pose())
+    assert ordenes[:2] == ["User(0)", "Tool(1)"]
+    assert pose["x"] == pytest.approx(300.0)
+    assert pose["j4"] == pytest.approx(-47.0)
+
+
+def test_un_user_rechazado_no_cierra_el_sondeo():
+    ordenes: list[str] = []
+
+    class EnlaceUser(Enlace):
+        def dashboard(self, command: str) -> Reply:
+            ordenes.append(command)
+            return Reply(code=-1 if command.startswith("User") else 0, value="")
+
+    enlace = EnlaceUser()
+    cliente = _cliente(enlace)
+    asyncio.run(cliente.ensure())
+    asyncio.run(cliente.ensure())
+    assert cliente._link is enlace
+    assert ordenes == ["User(0)"]
+
+
 def test_r_deja_j4_en_menos_50_a_ambos_lados_de_la_hoja():
     cliente = _cliente(Enlace())
     for x, y in ((340.9, -79.0), (342.3, 51.9), (243.3, 58.0)):
@@ -94,7 +136,8 @@ def test_una_j4_girada_vuelve_a_menos_50():
     assert enlace.moves, "debió mandar la corrección"
     assert _j4(enlace.moves[0]) == pytest.approx(J4_FIXED, abs=0.01)
     # Con lápiz arriba por defecto: sube a la altura de viaje.
-    assert float(enlace.moves[0][5:].split(",")[2]) == pytest.approx(cliente.z_travel)
+    # MovL redondea a milésimas; la altura de viaje es la del rectángulo ajustado.
+    assert float(enlace.moves[0][5:].split(",")[2]) == pytest.approx(cliente.z_travel, abs=0.001)
 
 
 def test_sin_lift_corrige_en_el_sitio():

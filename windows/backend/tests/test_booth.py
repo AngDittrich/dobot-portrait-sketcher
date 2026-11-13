@@ -83,6 +83,14 @@ def test_guardar_cambia_la_hoja_y_suelta_el_socket(tmp_path, monkeypatch: pytest
     assert PATH != tmp_path / "robot.json"
 
 
+def test_la_j4_de_la_cabina_queda_en_el_cliente():
+    cliente = client_from_booth(_cabina(j4=-47))
+    assert isinstance(cliente, MG400Client)
+    assert cliente.j4_fixed == pytest.approx(-47.0)
+    with pytest.raises(BoothError, match="J4"):
+        parse_booth(_cabina(j4=200))
+
+
 def test_sin_esquinas_se_puede_guardar_la_conexion():
     booth = parse_booth(_cabina(corners=None))
     assert booth.corners is None

@@ -737,14 +737,19 @@ async def admin_command(
         if busy.active():
             raise HTTPException(status_code=409, detail="el robot está dibujando")
         try:
+            if body.j4 is not None:
+                robot.set_j4(float(body.j4))  # type: ignore[attr-defined]
             clear = getattr(robot, "clear_pad_j4", None)
             if callable(clear):
                 clear()
             await robot.prepare_motion(None)  # type: ignore[attr-defined]
             corrected = await robot.ensure_j4(lift=False)  # type: ignore[attr-defined]
+        except HTTPException:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-        value = "J4 devuelta a -50" if corrected else "J4 ya estaba en -50"
+        angle = float(getattr(robot, "j4_fixed", -50.0))
+        value = f"J4 en {angle:.1f}" if corrected else f"J4 ya estaba en {angle:.1f}"
         return {"command": "j4home", "code": 0, "value": value}
     if body.action == "pad":
         if busy.active():
@@ -827,6 +832,19 @@ def _calibration_of(frame: Frame | None, margin_mm: float | None) -> dict | None
     return frame_ops.summary(frame, frame_ops.DEFAULT_MARGIN_MM if margin_mm is None else float(margin_mm))
 
 
+def _apply_j4(body: dict) -> None:
+    """La muñeca de la calibración, si el formulario la manda. Si no, se queda la guardada."""
+    if body.get("j4") is None:
+        return
+    setter = getattr(robot, "set_j4", None)
+    if not callable(setter):
+        return
+    try:
+        setter(float(body["j4"]))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail="J4 tiene que ser un número") from exc
+
+
 def _frame_from_body(body: dict) -> Frame | None:
     """Las esquinas del formulario (todavía sin guardar) o, si no vienen, las guardadas."""
     corners = body.get("corners")
@@ -855,6 +873,18 @@ def admin_calibration(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@app.post("/api/admin/pose")
+async def admin_pose(x_admin_token: str | None = Header(default=None)) -> dict:
+    """Pose fresca en el usuario y la herramienta de la cabina, para tomar una esquina."""
+    _require_admin(x_admin_token)
+    if robot.name != "mg400":
+        raise HTTPException(status_code=409, detail="el backend está en simulador")
+    try:
+        return await robot.aligned_pose()  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @app.post("/api/admin/goto")
 async def admin_goto(
     body: dict = Body(...),
@@ -866,6 +896,7 @@ async def admin_goto(
         raise HTTPException(status_code=409, detail="el backend está en simulador")
     if busy.active():
         raise HTTPException(status_code=409, detail="el robot está dibujando")
+    _apply_j4(body)
     try:
         lift = float(body.get("lift_mm", getattr(robot, "lift_mm", frame_ops.DEFAULT_LIFT_MM)))
         speed = body.get("speed")
@@ -911,6 +942,7 @@ async def admin_area(
         raise HTTPException(status_code=409, detail="el backend está en simulador")
     if busy.active():
         raise HTTPException(status_code=409, detail="el robot está dibujando")
+    _apply_j4(body)
     frame = _frame_from_body(body)
     if frame is None:
         raise HTTPException(status_code=409, detail="primero enseña y guarda las tres esquinas")
@@ -959,6 +991,7 @@ async def admin_test_draw(
         raise HTTPException(status_code=409, detail="el backend está en simulador")
     if busy.active():
         raise HTTPException(status_code=409, detail="el robot está dibujando")
+    _apply_j4(body)
     frame = _frame_from_body(body)
     if frame is None:
         raise HTTPException(status_code=409, detail="primero enseña y guarda las tres esquinas")

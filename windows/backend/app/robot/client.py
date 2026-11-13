@@ -416,6 +416,7 @@ class MG400Client(RobotClient):
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         global_speed: int = GLOBAL_SPEED_PERCENT,
+        j4_fixed: float = J4_FIXED,
     ) -> None:
         self._link = link
         self.global_speed = min(100, max(1, int(global_speed)))
@@ -498,7 +499,10 @@ class MG400Client(RobotClient):
         self.commands: list[str] = []
         self._ready = False
         self._cancel = False
-        self.j4_fixed = J4_FIXED
+        # User() y Tool() ya se mandaron en este socket. El sondeo no puede
+        # leer la pose en otro sistema que el movimiento.
+        self._coords_set = False
+        self.j4_fixed = float(j4_fixed)
         # "j1+j4" (documentación Dobot) o "j4" si al conectar R resulta ser J4.
         self.r_model = "j1+j4"
         # El MG400 acepta un solo cliente. Dos consultas a la vez no pueden abrir dos sockets.
@@ -628,13 +632,34 @@ class MG400Client(RobotClient):
 
         El sondeo del panel pasa por aquí. `connect` limpia alarmas y fija la
         velocidad, y hacerlo en cada reconexión del sondeo es lo que tumba el
-        enlace cada pocos segundos.
+        enlace cada pocos segundos. User y Tool se intentan una vez; si el
+        controlador los rechaza, el socket sigue abierto. La pose de una
+        esquina pasa por `connect`, que sí los deja puestos.
         """
-        if self._link is not None:
-            return
-        async with self._io:
-            if self._link is None:
-                await self._open_socket()
+        if self._link is None:
+            async with self._io:
+                if self._link is None:
+                    await self._open_socket()
+                    self._coords_set = False
+        if not self._coords_set:
+            # Un fallo aquí no puede cerrar el socket: si no, el sondeo
+            # reconecta cada 800 ms. Tomar una esquina pasa por `connect`,
+            # que sí deja User y Tool puestos.
+            self._coords_set = True
+            if await self._dashboard(f"User({int(self.user)})", required=False):
+                await self._dashboard(f"Tool({int(self.tool)})", required=False)
+
+    async def aligned_pose(self) -> dict[str, float]:
+        """X, Y, Z, R y J4 en el usuario y la herramienta de la cabina."""
+        from app.robot.mg400 import MG400Error
+
+        await self.connect()
+        pose = await self._read_pose()
+        if pose is None:
+            raise MG400Error("no se pudo leer la pose")
+        angles = await self._read_angles()
+        j4 = float(angles[3]) if angles is not None and len(angles) >= 4 else float(self.j4_fixed)
+        return {"x": pose[0], "y": pose[1], "z": pose[2], "r": pose[3], "j4": j4}
 
     async def connect(self) -> None:
         if self._ready and self._link is not None:
@@ -682,9 +707,15 @@ class MG400Client(RobotClient):
         await asyncio.to_thread(self._link.prepare, self.global_speed)  # type: ignore[attr-defined]
         await self._dashboard(f"User({int(self.user)})")
         await self._dashboard(f"Tool({int(self.tool)})")
+        self._coords_set = True
         await self._dashboard(f"CP({_blend(self.cp_draw)})")
         await self._measure_r_model()
         self._ready = True
+
+    def set_j4(self, value: float) -> float:
+        """Ángulo de muñeca de toda la hoja. Los MovL siguientes lo conservan."""
+        self.j4_fixed = min(PAD_J4_LIMIT, max(-PAD_J4_LIMIT, float(value)))
+        return self.j4_fixed
 
     def r_for(self, x: float, y: float) -> float:
         """R cartesiana que deja J4 en `j4_fixed` con la base apuntando a (x, y)."""
@@ -1726,6 +1757,7 @@ class MG400Client(RobotClient):
         link = self._link
         self._link = None
         self._ready = False
+        self._coords_set = False
         close = getattr(link, "close", None)
         if close is None:
             return
@@ -1896,7 +1928,7 @@ class MG400Client(RobotClient):
         except Exception:
             return ""
 
-    async def _dashboard(self, command: str) -> None:
+    async def _dashboard(self, command: str, *, required: bool = True) -> bool:
         from app.robot.mg400 import MG400Error
 
         self.commands.append(command)
@@ -1905,12 +1937,17 @@ class MG400Client(RobotClient):
                 reply = await asyncio.to_thread(self._link.dashboard, command)  # type: ignore[attr-defined]
         except Exception as exc:  # noqa: BLE001
             logger.warning("%s no se pudo enviar (%s)", command, exc)
-            self._drop()
-            raise
+            if required:
+                self._drop()
+                raise
+            return False
         logger.info("%s -> %s", command, getattr(reply, "code", "?"))
         if not getattr(reply, "ok", False):
-            self._drop()
-            raise MG400Error(f"{command} devolvio {getattr(reply, 'code', '?')}")
+            if required:
+                self._drop()
+                raise MG400Error(f"{command} devolvio {getattr(reply, 'code', '?')}")
+            return False
+        return True
 
     async def _sync(self) -> None:
         self.commands.append("Sync()")
