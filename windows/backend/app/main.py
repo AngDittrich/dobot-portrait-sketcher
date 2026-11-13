@@ -641,6 +641,10 @@ def admin_unlock(body: PinRequest) -> dict:
 
 
 _last_live: dict = {}
+# Dos pestañas del panel no deben mandar cada una el sondeo completo.
+_robot_sample: dict = {"at": 0.0, "fields": {}}
+_robot_sample_lock = asyncio.Lock()
+_ROBOT_SAMPLE_S = 0.35
 
 
 def _feedback_fields(feedback: dict) -> dict:
@@ -680,6 +684,29 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
     if robot.name != "mg400":
         snapshot["detail"] = "el backend está en simulador"
         return snapshot
+    # Dos navegadores abiertos mandaban cada uno RobotMode, GetPose, GetAngle
+    # y GetErrorID. El controlador cierra el enlace cuando se le enciman.
+    now = time.monotonic()
+    cached = _robot_sample.get("fields")
+    if cached and now - float(_robot_sample["at"]) < _ROBOT_SAMPLE_S:
+        snapshot.update(cached)
+        return snapshot
+    async with _robot_sample_lock:
+        now = time.monotonic()
+        cached = _robot_sample.get("fields")
+        if cached and now - float(_robot_sample["at"]) < _ROBOT_SAMPLE_S:
+            snapshot.update(cached)
+            return snapshot
+        fields = await _robot_fields(bool(snapshot["busy"]))
+        _robot_sample["fields"] = fields
+        _robot_sample["at"] = time.monotonic()
+    snapshot.update(fields)
+    return snapshot
+
+
+async def _robot_fields(is_busy: bool) -> dict:
+    """Lee el brazo una vez. Si una orden falla, no manda las siguientes."""
+    fields: dict = {}
     get_feedback = getattr(robot, "feedback_status", None)
     feedback = None
     if get_feedback is not None:
@@ -687,54 +714,64 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
             feedback = get_feedback()
         except Exception:  # noqa: BLE001 - sin feedback se sondea como antes
             feedback = None
-    if snapshot["busy"]:
+    if is_busy:
         # El dashboard no se toca mientras se dibuja: un GetErrorID en cada
         # sondeo competía con la espera de llegada y frenaba el trazo.
         if feedback is not None:
-            snapshot.update(_feedback_fields(feedback))
+            fields.update(_feedback_fields(feedback))
         else:
-            snapshot.update(_last_live)
+            fields.update(_last_live)
             pose = getattr(robot, "last_pose", None)
-            snapshot.update(
+            fields.update(
                 {
                     "connected": True,
                     "mode": 7,
                     "mode_label": mode_label(7),
-                    "pose": [round(value, 2) for value in pose] if pose else snapshot.get("pose", []),
+                    "pose": [round(value, 2) for value in pose] if pose else fields.get("pose", []),
                 }
             )
         if "alarms" in _last_live:
-            snapshot["alarms"] = _last_live["alarms"]
-            snapshot["alarm_text"] = _last_live.get("alarm_text", "")
-        return snapshot
+            fields["alarms"] = _last_live["alarms"]
+            fields["alarm_text"] = _last_live.get("alarm_text", "")
+        return fields
     if feedback is not None:
         # Paquete del 30004 fresco (cada 8 ms): modo, pose y articulaciones
         # sin mandar nada. Solo faltan las alarmas, que no vienen en él.
-        snapshot.update(_feedback_fields(feedback))
+        fields.update(_feedback_fields(feedback))
         try:
-            _, error_value = await robot.ask("GetErrorID()")  # type: ignore[attr-defined]
+            code, error_value = await robot.ask("GetErrorID()")  # type: ignore[attr-defined]
         except Exception as exc:  # noqa: BLE001
-            snapshot["detail"] = str(exc)
-            return snapshot
-        snapshot.update(
+            fields["detail"] = str(exc)
+            return fields
+        if code != 0:
+            fields["detail"] = f"GetErrorID() devolvió {code}"
+            return fields
+        fields.update(
             {
                 "alarms": error_value,
                 "alarm_text": describe_alarms(error_value),
             }
         )
-        _remember_live(snapshot)
-        return snapshot
+        _remember_live({**fields})
+        return fields
     try:
-        _, mode_value = await robot.ask("RobotMode()")  # type: ignore[attr-defined]
-        _, pose_value = await robot.ask("GetPose()")  # type: ignore[attr-defined]
-        _, angle_value = await robot.ask("GetAngle()")  # type: ignore[attr-defined]
-        _, error_value = await robot.ask("GetErrorID()")  # type: ignore[attr-defined]
+        code, mode_value = await robot.ask("RobotMode()")  # type: ignore[attr-defined]
+        if code != 0:
+            return {"detail": f"RobotMode() devolvió {code}"}
+        code, pose_value = await robot.ask("GetPose()")  # type: ignore[attr-defined]
+        if code != 0:
+            return {"detail": f"GetPose() devolvió {code}"}
+        code, angle_value = await robot.ask("GetAngle()")  # type: ignore[attr-defined]
+        if code != 0:
+            return {"detail": f"GetAngle() devolvió {code}"}
+        code, error_value = await robot.ask("GetErrorID()")  # type: ignore[attr-defined]
+        if code != 0:
+            return {"detail": f"GetErrorID() devolvió {code}"}
     except Exception as exc:  # noqa: BLE001
-        snapshot["detail"] = str(exc)
-        return snapshot
+        return {"detail": str(exc)}
     mode = _first_number(mode_value)
     pose = _numbers(pose_value)[:4]
-    snapshot.update(
+    fields.update(
         {
             "connected": True,
             "source": "sondeo",
@@ -746,8 +783,8 @@ async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict
             "alarm_text": describe_alarms(error_value),
         }
     )
-    _remember_live(snapshot)
-    return snapshot
+    _remember_live(fields)
+    return fields
 
 
 @app.post("/api/admin/settings")

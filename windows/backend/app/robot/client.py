@@ -503,6 +503,9 @@ class MG400Client(RobotClient):
         # User() y Tool() ya se mandaron en este socket. El sondeo no puede
         # leer la pose en otro sistema que el movimiento.
         self._coords_set = False
+        # Tras un corte del controlador no se reabre el socket en el acto:
+        # el sondeo de 400 ms lo reabría y lo volvía a tumbar.
+        self._reopen_after = 0.0
         self.j4_fixed = float(j4_fixed)
         # "j1+j4" (documentación Dobot) o "j4" si al conectar R resulta ser J4.
         self.r_model = "j1+j4"
@@ -649,6 +652,8 @@ class MG400Client(RobotClient):
         controlador los rechaza, el socket sigue abierto. La pose de una
         esquina pasa por `connect`, que sí los deja puestos.
         """
+        if time.monotonic() < self._reopen_after:
+            raise ConnectionError("el controlador cerró el enlace")
         if self._link is None:
             async with self._io:
                 if self._link is None:
@@ -1841,12 +1846,14 @@ class MG400Client(RobotClient):
             logger.warning("consola: %s se cortó (%s)", command, exc)
             async with self._io:
                 if self._link is link:
+                    self._reopen_after = time.monotonic() + 2.0
                     self._close_link()
             raise
         except Exception:
             logger.exception("consola: %s no se pudo enviar", command)
             async with self._io:
                 if self._link is link:
+                    self._reopen_after = time.monotonic() + 2.0
                     self._close_link()
             raise
         code = int(getattr(reply, "code", -99999))

@@ -131,13 +131,15 @@ export function CalibrationSection({
   const sheet = sheetOf(corners, brManual)
   const margin = Number(booth?.margin_mm ?? 8)
   const previewKey = sheet ? JSON.stringify([sheet, margin]) : ''
+  const calibrateRef = useRef(actions.calibrate)
+  calibrateRef.current = actions.calibrate
 
   useEffect(() => {
     if (!previewKey || !sheet) return
     let stop = false
     const timer = window.setTimeout(() => {
-      actions
-        .calibrate(sheet, Number.isFinite(margin) ? margin : 8)
+      void calibrateRef
+        .current(sheet, Number.isFinite(margin) ? margin : 8)
         .then((calibration) => {
           if (!stop) setPreview({ key: previewKey, calibration, error: '' })
         })
@@ -155,9 +157,10 @@ export function CalibrationSection({
       stop = true
       window.clearTimeout(timer)
     }
-    // sheet y margin ya van dentro de previewKey.
+    // sheet y margin ya van dentro de previewKey. `actions` cambia en cada
+    // sondeo; si el efecto dependiera de él, la vista previa no pararía.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewKey, actions])
+  }, [previewKey])
 
   const previewReady = preview.key === previewKey
   const calibration = sheet ? preview.calibration : null
